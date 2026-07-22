@@ -1,0 +1,67 @@
+# Caddy reverse proxy configuration for Digital Code Vault
+# Routes all traffic through a single entry point with automatic HTTPS
+
+{
+    # Enable debug logging in development
+    # debug
+    # email admin@digitalcode.local
+}
+
+# ─── Production domain (replace with your domain) ───
+# vault.example.com {
+:8080 {
+    # API backend
+    handle /api/* {
+        reverse_proxy api:3000
+    }
+
+    # Delivery portal (public, token-based)
+    handle /d/* {
+        reverse_proxy api:3000
+    }
+
+    # Admin dashboard
+    handle /admin/* {
+        reverse_proxy admin:80
+    }
+
+    # Admin dashboard root
+    handle /admin {
+        reverse_proxy admin:80
+    }
+
+    # Merchant dashboard
+    handle /merchant/* {
+        reverse_proxy merchant:80
+    }
+
+    # Merchant dashboard root
+    handle /merchant {
+        reverse_proxy merchant:80
+    }
+
+    # Customer delivery portal (default route)
+    handle {
+        reverse_proxy portal:80
+    }
+
+    # Security headers
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        # HSTS (uncomment in production with HTTPS)
+        # Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    }
+
+    # Compression
+    encode gzip zstd
+
+    # Logging
+    log {
+        output stdout
+        format console
+    }
+}

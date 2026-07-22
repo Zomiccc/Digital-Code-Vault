@@ -1,0 +1,9 @@
+$env:DATABASE_URL = "file:./dev.db"
+$env:ENCRYPTION_KEY = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+$env:JWT_SECRET = "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e"
+$env:JWT_REFRESH_SECRET = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b"
+$env:JWT_EXPIRES_IN = "15m"
+$env:JWT_REFRESH_EXPIRES_IN = "7d"
+$env:NODE_ENV = "development"
+$env:PORT = "3000"
+npx nest start
