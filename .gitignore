@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+apps/admin/node_modules/
+apps/api/node_modules/
+apps/merchant/node_modules/
+apps/portal/node_modules/
+connectors/webhook-sdk/node_modules/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+apps/api/.env.dev
+
+# Build output
+apps/api/dist/
+apps/api/gen.log
+connectors/webhook-sdk/dist/
+
+# Database
+apps/api/prisma/dev.db
+apps/api/prisma/*.db-journal
+
+# Logs
+*.log
+apps/api/prisma-push.log
+
+# Archives
+redis.zip
+
+# OS files
+.DS_Store
+Thumbs.db

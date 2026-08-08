@@ -1,0 +1,44 @@
+{
+  "name": "@digitalcodevault/webhook-sdk",
+  "version": "1.0.0",
+  "description": "JavaScript/TypeScript SDK for registering webhook endpoints and verifying deliveries from the Digital Code Vault platform.",
+  "main": "dist/cjs/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "SIGNING.md"
+  ],
+  "scripts": {
+    "build": "npm run build:esm && npm run build:cjs && npm run build:types",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:types": "tsc -p tsconfig.types.json",
+    "clean": "rimraf dist",
+    "typecheck": "tsc --noEmit -p tsconfig.types.json"
+  },
+  "keywords": [
+    "webhook",
+    "digital-code-vault",
+    "hmac",
+    "sdk",
+    "connector"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.4.0",
+    "rimraf": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

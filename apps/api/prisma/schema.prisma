@@ -1,0 +1,382 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model AdminUser {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         String    @default("SUPPORT")
+  twoFactorSecret String?
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Merchant {
+  id            String         @id @default(uuid())
+  name          String
+  email         String         @unique
+  address       String?
+  status        String         @default("ACTIVE")
+  walletBalance Decimal         @default(0)
+  currency      String         @default("USD")
+  allowedProductIds String     @default("[]")
+  twoFactorRequired Boolean    @default(false)
+  totalKeysGenerated Int        @default(0)
+  lastKeyGeneratedAt DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  users           MerchantUser[]
+  apiKeys         ApiKey[]
+  fulfillmentReqs FulfillmentRequest[]
+  walletTxns      WalletTransaction[]
+  webhookEndpoints WebhookEndpoint[]
+  products        Product[]
+  connectedProducts ConnectedProduct[]
+}
+
+model MerchantUser {
+  id           String   @id @default(uuid())
+  merchantId   String
+  email        String   @unique
+  name         String
+  passwordHash String
+  twoFactorSecret String?
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId])
+}
+
+model ApiKey {
+  id           String       @id @default(uuid())
+  merchantId   String
+  keyPrefix    String
+  keyHash      String
+  scopes       String       @default("[]")
+  ipWhitelist  String       @default("[]")
+  status       String       @default("ACTIVE")
+  lastUsedAt   DateTime?
+  createdAt    DateTime     @default(now())
+  revokedAt    DateTime?
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId])
+  @@index([keyHash])
+}
+
+model Supplier {
+  id          String   @id @default(uuid())
+  name        String
+  contactInfo String?
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products  Product[]
+  codeItems CodeItem[]
+}
+
+model Product {
+  id         String   @id @default(uuid())
+  name       String
+  region     String
+  supplierId String?
+  merchantId String?
+  status     String   @default("ACTIVE")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  supplier      Supplier?      @relation(fields: [supplierId], references: [id])
+  merchant      Merchant?      @relation(fields: [merchantId], references: [id])
+  denominations Denomination[]
+  fulfillmentReqs FulfillmentRequest[]
+
+  @@index([merchantId])
+}
+
+model Denomination {
+  id         String   @id @default(uuid())
+  productId  String
+  faceValue  Decimal
+  currency   String   @default("USD")
+  createdAt  DateTime @default(now())
+
+  product   Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  codeItems CodeItem[]
+
+  @@unique([productId, faceValue, currency])
+  @@index([productId])
+}
+
+model CodeItem {
+  id              String      @id @default(uuid())
+  denominationId  String
+  encryptedCode   String
+  codeHash        String
+  status          String  @default("AVAILABLE")
+  batchId         String?
+  supplierId      String?
+  reservedUntil   DateTime?
+  reservedByReqId String?
+  revealedAt      DateTime?
+  revealedIp      String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  denomination Denomination @relation(fields: [denominationId], references: [id], onDelete: Cascade)
+  supplier     Supplier?    @relation(fields: [supplierId], references: [id])
+
+  @@index([denominationId, status])
+  @@index([status])
+  @@index([codeHash])
+  @@index([batchId])
+}
+
+model FulfillmentRequest {
+  id              String             @id @default(uuid())
+  merchantId      String
+  productId       String
+  amount          Decimal            @default(0)
+  currency        String             @default("USD")
+  idempotencyKey  String
+  referenceId     String?
+  status          String             @default("PENDING")
+  failureReason   String?
+  sandbox         Boolean            @default(false)
+  customerEmail   String?
+  customerName    String?
+  customerAddress String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  merchant        Merchant           @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  product         Product            @relation(fields: [productId], references: [id])
+  allocations     Allocation[]
+  deliveryToken   DeliveryToken?
+  walletTxn       WalletTransaction?
+
+  @@unique([merchantId, idempotencyKey])
+  @@index([merchantId])
+  @@index([status])
+  @@index([productId])
+  @@index([customerEmail])
+}
+
+model Allocation {
+  id              String   @id @default(uuid())
+  fulfillmentId   String
+  codeItemIds     String   @default("[]")
+  status          String   @default("ALLOCATED")
+  createdAt       DateTime @default(now())
+
+  fulfillment FulfillmentRequest @relation(fields: [fulfillmentId], references: [id], onDelete: Cascade)
+
+  @@index([fulfillmentId])
+}
+
+model DeliveryToken {
+  id            String    @id @default(uuid())
+  fulfillmentId String    @unique
+  tokenHash     String    @unique
+  revealedAt    DateTime?
+  revealedIp    String?
+  createdAt     DateTime  @default(now())
+
+  fulfillment FulfillmentRequest @relation(fields: [fulfillmentId], references: [id], onDelete: Cascade)
+
+  @@index([tokenHash])
+}
+
+model WalletTransaction {
+  id            String        @id @default(uuid())
+  merchantId    String
+  type          String
+  amount        Decimal
+  balanceAfter  Decimal
+  referenceId   String?
+  fulfillmentId String?       @unique
+  createdAt     DateTime      @default(now())
+
+  merchant    Merchant           @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  fulfillment FulfillmentRequest? @relation(fields: [fulfillmentId], references: [id])
+
+  @@index([merchantId])
+  @@index([referenceId])
+}
+
+model WebhookEndpoint {
+  id         String   @id @default(uuid())
+  merchantId String
+  url        String
+  secret     String
+  status     String   @default("ACTIVE")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId])
+}
+
+model AuditLog {
+  id        String     @id @default(uuid())
+  actorType String
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String?
+  metadata  String?
+  ip        String?
+  prevHash  String?
+  entryHash String?
+  createdAt DateTime   @default(now())
+
+  @@index([actorType, actorId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+model IdempotencyRecord {
+  id              String   @id @default(uuid())
+  key             String   @unique
+  merchantId      String
+  requestBodyHash String
+  responseStatus  Int
+  responseBody    String
+  createdAt       DateTime @default(now())
+  expiresAt       DateTime
+
+  @@index([merchantId, key])
+  @@index([expiresAt])
+}
+
+model Customer {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  isActive     Boolean  @default(true)
+  merchantId   String?
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  verificationCode VerificationCode?
+
+  @@index([merchantId])
+}
+
+model VerificationCode {
+  id        String   @id @default(uuid())
+  customerId String  @unique
+  code      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
+model EmailLog {
+  id              String   @id @default(uuid())
+  merchantId      String?
+  recipient       String
+  subject         String
+  template        String?
+  status          String   @default("PENDING")
+  providerResponse String?
+  errorMessage    String?
+  retryCount      Int      @default(0)
+  sentAt          DateTime?
+  createdAt       DateTime @default(now())
+
+  @@index([merchantId])
+  @@index([recipient])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model IncomingWebhook {
+  id              String   @id @default(uuid())
+  eventId         String   @unique
+  merchantId      String?
+  platform        String
+  provider        String?
+  orderId         String?
+  productId       String?
+  productName     String?
+  productSku      String?
+  productCategory String?
+  customerName    String?
+  customerEmail   String?
+  quantity        Int?
+  amount          Decimal?
+  currency        String?
+  paymentStatus   String?
+  orderStatus     String?
+  processingStatus String  @default("PENDING")
+  rawPayload      String
+  rawHeaders      String?
+  signature       String?
+  sourceIp        String?
+  responseCode    Int?
+  retryCount      Int      @default(0)
+  errorMessage    String?
+  processedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([eventId])
+  @@index([merchantId])
+  @@index([platform])
+  @@index([processingStatus])
+  @@index([orderId])
+  @@index([productId])
+  @@index([customerEmail])
+  @@index([createdAt])
+}
+
+model ConnectedProduct {
+  id              String   @id @default(uuid())
+  merchantId      String
+  platform        String
+  provider        String?
+  platformProductId String?
+  platformSku     String?
+  name            String
+  sku             String?
+  category        String?
+  imageUrl        String?
+  price           Decimal?
+  currency        String?
+  stock           Int      @default(0)
+  status          String   @default("ACTIVE")
+  lastSyncedAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, platform, platformProductId])
+  @@unique([merchantId, platform, platformSku])
+  @@index([merchantId])
+  @@index([platform])
+  @@index([status])
+}

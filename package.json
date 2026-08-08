@@ -1,0 +1,30 @@
+{
+  "name": "digital-code-vault",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "cd apps/api && npm run start:dev",
+    "dev:admin": "cd apps/admin && npm run dev",
+    "dev:merchant": "cd apps/merchant && npm run dev",
+    "dev:portal": "cd apps/portal && npm run dev",
+    "build:shared": "cd packages/shared && npm run build",
+    "build:api": "cd apps/api && npm run build",
+    "build:admin": "cd apps/admin && npm run build",
+    "build:merchant": "cd apps/merchant && npm run build",
+    "build:portal": "cd apps/portal && npm run build",
+    "build": "npm run build:shared && npm run build:api && npm run build:admin && npm run build:merchant && npm run build:portal",
+    "db:migrate": "cd apps/api && npx prisma migrate dev",
+    "db:generate": "cd apps/api && npx prisma generate",
+    "db:seed": "cd apps/api && npm run seed",
+    "db:studio": "cd apps/api && npx prisma studio"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "csstype": "^3.1.3",
+    "typescript": "^5.4.0"
+  }
+}
