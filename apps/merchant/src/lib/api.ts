@@ -86,4 +86,8 @@ export const api = {
     apiFetch('/merchant/webhooks', { method: 'POST', body: JSON.stringify({ url, skipVerification }) }),
   deleteWebhook: (id: string) =>
     apiFetch(`/merchant/webhooks/${id}`, { method: 'DELETE' }),
+
+  // Webhook secret (for authenticating incoming webhooks from merchant's site)
+  getWebhookSecret: () => apiFetch('/merchant/webhook-secret'),
+  regenerateWebhookSecret: () => apiFetch('/merchant/webhook-secret/regenerate', { method: 'POST' }),
 };

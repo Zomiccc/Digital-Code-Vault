@@ -29,6 +29,13 @@ class DCV_Webhook_API_Client {
     protected $api_key;
 
     /**
+     * The merchant's webhook secret (for authenticating incoming webhooks).
+     *
+     * @var string
+     */
+    protected $webhook_secret;
+
+    /**
      * Base API URL including /api/v1.
      *
      * @var string
@@ -41,9 +48,10 @@ class DCV_Webhook_API_Client {
      * @param string $api_key  Full API key string.
      * @param string $base_url API base URL including /api/v1.
      */
-    public function __construct( $api_key, $base_url ) {
-        $this->api_key  = $api_key;
-        $this->base_url = rtrim( $base_url, '/' );
+    public function __construct( $api_key, $base_url, $webhook_secret = '' ) {
+        $this->api_key        = $api_key;
+        $this->base_url       = rtrim( $base_url, '/' );
+        $this->webhook_secret = $webhook_secret;
     }
 
     /**
@@ -285,7 +293,10 @@ class DCV_Webhook_API_Client {
         $body = wp_json_encode( $payload );
 
         $headers = array_merge(
-            array( 'Content-Type' => 'application/json' ),
+            array(
+                'Content-Type'     => 'application/json',
+                'X-Webhook-Secret' => $this->webhook_secret,
+            ),
             $extra_headers
         );
 

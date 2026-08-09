@@ -204,3 +204,43 @@ export async function deleteWebhook(opts: DeleteWebhookOptions): Promise<{ succe
   });
   return { success: true };
 }
+
+/**
+ * Sends an incoming webhook to the Digital Code Vault API.
+ *
+ * The webhook must include the merchant's webhook secret in the X-Webhook-Secret header
+ * for authentication. The payload format is auto-detected by the server.
+ *
+ * @throws {WebhookApiError} on any non-2xx response.
+ */
+export async function sendIncomingWebhook(opts: {
+  baseUrl?: string;
+  webhookSecret: string;
+  payload: Record<string, unknown>;
+  extraHeaders?: Record<string, string>;
+  fetchImpl?: FetchLike;
+}): Promise<{ success: boolean; webhookId: string; eventId: string }> {
+  if (!opts.webhookSecret) throw new Error('sendIncomingWebhook: `webhookSecret` is required.');
+  if (!opts.payload) throw new Error('sendIncomingWebhook: `payload` is required.');
+
+  const baseUrl = (opts.baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, '');
+  const fetchImpl = getFetch(opts);
+  const url = `${baseUrl}/webhooks/incoming`;
+  const body = JSON.stringify(opts.payload);
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Webhook-Secret': opts.webhookSecret,
+    ...(opts.extraHeaders || {}),
+  };
+
+  const response = await fetchImpl(url, { method: 'POST', headers, body });
+  const rawBody = await response.text();
+
+  if (response.status < 200 || response.status >= 300) {
+    const parsed = parseErrorBody(rawBody);
+    throw new WebhookApiError(response.status, rawBody, parsed);
+  }
+
+  return JSON.parse(rawBody);
+}

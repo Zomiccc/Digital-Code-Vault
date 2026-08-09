@@ -32,6 +32,7 @@ model Merchant {
   twoFactorRequired Boolean    @default(false)
   totalKeysGenerated Int        @default(0)
   lastKeyGeneratedAt DateTime?
+  webhookSecret  String?        @unique
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 

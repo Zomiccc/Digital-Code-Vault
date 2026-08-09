@@ -230,11 +230,17 @@ export class WebhookService implements OnModuleDestroy {
       });
     }
 
-    // ─── Verify endpoint is reachable and responds to challenge (optional) ───
+    // ─── Verify endpoint is reachable and responds to challenge ───
+    // skipVerification is only allowed for localhost URLs (development/testing).
+    // For any real HTTPS URL, challenge verification is mandatory to prove ownership.
     const secret = this.encryptionService.generateToken(32);
 
-    if (!skipVerification) {
+    const canSkipVerification = skipVerification && isLocalhost;
+
+    if (!canSkipVerification) {
       await this.verifyWebhookChallenge(url, merchantId);
+    } else {
+      this.logger.warn(`[WEBHOOK] Skipping verification for localhost URL: ${url}`);
     }
 
     const endpoint = await this.prisma.webhookEndpoint.create({
@@ -430,6 +436,38 @@ export class WebhookService implements OnModuleDestroy {
     this.logger.log(`[WEBHOOK] Headers: ${JSON.stringify(headers)}`);
     this.logger.log(`[WEBHOOK] Payload: ${JSON.stringify(payload)}`);
 
+    // ─── Authenticate the webhook by verifying the merchant's webhook secret ───
+    const webhookSecret =
+      headers['x-webhook-secret'] ||
+      headers['X-Webhook-Secret'] ||
+      headers['x-dcv-secret'] ||
+      headers['X-Dcv-Secret'] ||
+      null;
+
+    if (!webhookSecret) {
+      this.logger.warn(`[WEBHOOK] Rejected: missing X-Webhook-Secret header`);
+      throw new BadRequestException({
+        error: 'UNAUTHORIZED',
+        code: 'MISSING_WEBHOOK_SECRET',
+        message: 'X-Webhook-Secret header is required. Get your webhook secret from the merchant dashboard.',
+      });
+    }
+
+    const merchant = await this.prisma.merchant.findFirst({
+      where: { webhookSecret: String(webhookSecret), status: 'ACTIVE' },
+    });
+
+    if (!merchant) {
+      this.logger.warn(`[WEBHOOK] Rejected: invalid webhook secret`);
+      throw new BadRequestException({
+        error: 'UNAUTHORIZED',
+        code: 'INVALID_WEBHOOK_SECRET',
+        message: 'Invalid or expired webhook secret.',
+      });
+    }
+
+    this.logger.log(`[WEBHOOK] Authenticated as merchant: ${merchant.id} (${merchant.email})`);
+
     // Detect provider and normalize payload
     const detected = ProviderDetector.detect(headers, payload);
     const normalized = ProviderDetector.normalize(headers, payload);
@@ -459,11 +497,11 @@ export class WebhookService implements OnModuleDestroy {
       headers['x-signature'] ||
       null;
 
-    // Store the webhook with full metadata
+    // Store the webhook with full metadata — authenticated to this merchant
     const webhook = await this.prisma.incomingWebhook.create({
       data: {
         eventId,
-        merchantId: null,
+        merchantId: merchant.id,
         platform: normalized.platform || 'unknown',
         provider: normalized.provider || null,
         orderId: normalized.orderId || null,
@@ -618,11 +656,11 @@ export class WebhookService implements OnModuleDestroy {
         return;
       }
 
-      // Find merchant: try merchantId on webhook, then find by product, then first active
+      // Find merchant: must be set from webhook authentication
       let merchantId = webhook.merchantId;
 
       if (!merchantId) {
-        // Try to find merchant from product mapping
+        // Try to find merchant from product mapping as fallback
         let product = null;
         if (webhook.productId) {
           product = await this.prisma.product.findFirst({
@@ -642,15 +680,17 @@ export class WebhookService implements OnModuleDestroy {
         if (product?.merchantId) {
           merchantId = product.merchantId;
         } else {
-          // Find first active merchant as default
-          const defaultMerchant = await this.prisma.merchant.findFirst({
-            where: { status: 'ACTIVE' },
+          // No merchant could be determined — reject instead of using a random merchant
+          this.logger.error(`[WEBHOOK] No merchant associated with webhook ${webhookId} and no product match found`);
+          await this.prisma.incomingWebhook.update({
+            where: { id: webhookId },
+            data: {
+              processingStatus: 'FAILED',
+              errorMessage: 'No merchant associated with this webhook',
+              processedAt: new Date(),
+            },
           });
-          if (!defaultMerchant) {
-            throw new Error('No active merchant found for fulfillment');
-          }
-          merchantId = defaultMerchant.id;
-          this.logger.log(`[WEBHOOK] Using default merchant: ${merchantId}`);
+          return;
         }
       }
 

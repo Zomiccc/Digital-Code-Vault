@@ -6,7 +6,7 @@
 //  - Scheme B (inbound):  verifyIncomingSignature / verifyWebhookMiddleware
 //    HMAC key = the endpoint `secret` from registration; signed input = raw JSON body
 
-export { registerWebhook, listWebhooks, deleteWebhook } from './client.js';
+export { registerWebhook, listWebhooks, deleteWebhook, sendIncomingWebhook } from './client.js';
 export { verifyIncomingSignature, verifyWebhookMiddleware } from './verify.js';
 export { signRequest, buildCanonicalString, resolveEndpoint } from './sign.js';
 export {

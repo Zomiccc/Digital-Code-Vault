@@ -101,4 +101,16 @@ export class MerchantDashboardController {
   async deleteWebhook(@Param('id') id: string, @Req() req: any) {
     return this.webhookService.deleteEndpoint(req.user.merchantId, id);
   }
+
+  @Get('webhook-secret')
+  @UseGuards(JwtAuthGuard)
+  async getWebhookSecret(@Req() req: any) {
+    return this.merchantsService.getWebhookSecret(req.user.merchantId);
+  }
+
+  @Post('webhook-secret/regenerate')
+  @UseGuards(JwtAuthGuard)
+  async regenerateWebhookSecret(@Req() req: any) {
+    return this.merchantsService.regenerateWebhookSecret(req.user.merchantId);
+  }
 }

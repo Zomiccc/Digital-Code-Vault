@@ -12,7 +12,7 @@ const API_BASE = '/api/v1';
 
 let passed = 0, failed = 0;
 let merchantToken = '', merchantId = '', productId = '', denominationId = '';
-let apiKey = '', apiKeySecret = '';
+let apiKey = '', apiKeySecret = '', webhookSecret = '';
 
 function logSection(title) {
   console.log(`\n${'='.repeat(70)}\n  ${title}\n${'='.repeat(70)}`);
@@ -140,6 +140,15 @@ async function step5_registerWebhookEndpoint() {
   else track(false, `Failed: ${res.status} ${JSON.stringify(res.body)}`);
 }
 
+async function step5_5_fetchWebhookSecret() {
+  logSection('STEP 5.5: Fetch Webhook Secret');
+  const res = await apiRequest('/merchant/webhook-secret', 'GET', null, { Authorization: `Bearer ${merchantToken}` });
+  if (res.status === 200 && res.body.webhook_secret) {
+    webhookSecret = res.body.webhook_secret;
+    track(true, `Webhook secret fetched: ${webhookSecret.substring(0, 12)}...`);
+  } else { track(false, `Failed: ${res.status} ${JSON.stringify(res.body)}`); throw new Error('Need webhook secret'); }
+}
+
 async function step6_listWebhookEndpoints() {
   logSection('STEP 6: List Webhook Endpoints');
   const path = '/webhooks/endpoints';
@@ -149,7 +158,8 @@ async function step6_listWebhookEndpoints() {
 }
 
 async function sendWebhook(payload, headers, label) {
-  const res = await apiRequest('/webhooks/incoming', 'POST', payload, headers);
+  const finalHeaders = { ...headers, 'X-Webhook-Secret': webhookSecret };
+  const res = await apiRequest('/webhooks/incoming', 'POST', payload, finalHeaders);
   if (res.status === 201 && res.body.success) {
     track(true, `${label} webhook accepted: ${res.body.webhookId}`);
     track(true, `Event ID: ${res.body.eventId}`);
@@ -218,10 +228,11 @@ async function step12_custom() {
 async function step13_duplicate() {
   logSection('STEP 13: Duplicate Webhook Detection');
   const payload = { platform: 'test', order_id: 'dup-test-1', product_name: 'PSN', amount: 10, currency: 'USD', payment_status: 'paid', event_id: 'DUP-EVENT-001' };
-  const r1 = await apiRequest('/webhooks/incoming', 'POST', payload);
-  const r2 = await apiRequest('/webhooks/incoming', 'POST', payload);
+  const authHdr = { 'X-Webhook-Secret': webhookSecret };
+  const r1 = await apiRequest('/webhooks/incoming', 'POST', payload, authHdr);
+  const r2 = await apiRequest('/webhooks/incoming', 'POST', payload, authHdr);
   if (r1.status === 201) track(true, 'First webhook accepted');
-  else track(false, `First failed: ${r1.status}`);
+  else track(false, `First failed: ${r1.status} ${JSON.stringify(r1.body)}`);
   if (r2.status === 201 && r2.body.message?.includes('Duplicate')) track(true, 'Duplicate rejected');
   else track(false, `Duplicate not detected: ${r2.status} ${JSON.stringify(r2.body)}`);
 }
@@ -299,6 +310,20 @@ async function step21_missingCredentials() {
   else track(false, `Expected 401, got ${res.status}`);
 }
 
+async function step22_missingWebhookSecret() {
+  logSection('STEP 22: Webhook Security — Missing Webhook Secret');
+  const res = await apiRequest('/webhooks/incoming', 'POST', { id: 'test-no-secret', order: { id: 'o1', status: 'completed', total: '10', currency: 'USD', billing: { email: 't@t.com' }, line_items: [{ sku: 'PSN-USD-10' }] } }, { 'X-WC-Webhook-Source': 'https://evil.test', 'X-WC-Webhook-Topic': 'order.status_changed' });
+  if (res.status === 400 && res.body.code === 'MISSING_WEBHOOK_SECRET') track(true, 'Missing webhook secret rejected (400)');
+  else track(false, `Expected 400 MISSING_WEBHOOK_SECRET, got ${res.status} ${JSON.stringify(res.body)}`);
+}
+
+async function step23_invalidWebhookSecret() {
+  logSection('STEP 23: Webhook Security — Invalid Webhook Secret');
+  const res = await apiRequest('/webhooks/incoming', 'POST', { id: 'test-bad-secret', order: { id: 'o2', status: 'completed', total: '10', currency: 'USD', billing: { email: 't@t.com' }, line_items: [{ sku: 'PSN-USD-10' }] } }, { 'X-WC-Webhook-Source': 'https://evil.test', 'X-WC-Webhook-Topic': 'order.status_changed', 'X-Webhook-Secret': 'invalid-secret-12345' });
+  if (res.status === 400 && res.body.code === 'INVALID_WEBHOOK_SECRET') track(true, 'Invalid webhook secret rejected (400)');
+  else track(false, `Expected 400 INVALID_WEBHOOK_SECRET, got ${res.status} ${JSON.stringify(res.body)}`);
+}
+
 // ─── Main ───
 
 async function main() {
@@ -309,11 +334,12 @@ async function main() {
 
   const steps = [
     step1_merchantLogin, step2_getProducts, step3_getDenominations, step3_5_uploadExtraCodes,
-    step4_generateApiKey, step5_registerWebhookEndpoint, step6_listWebhookEndpoints,
+    step4_generateApiKey, step5_registerWebhookEndpoint, step5_5_fetchWebhookSecret, step6_listWebhookEndpoints,
     step7_woocommerce, step8_shopify, step9_stripe, step10_paypal,
     step11_elementor, step12_custom, step13_duplicate, step14_directFulfillment,
     step15_paymentNotify, step16_verifyIncoming, step17_connectedProducts,
     step18_statistics, step19_deleteEndpoint, step20_invalidSignature, step21_missingCredentials,
+    step22_missingWebhookSecret, step23_invalidWebhookSecret,
   ];
 
   for (const step of steps) {

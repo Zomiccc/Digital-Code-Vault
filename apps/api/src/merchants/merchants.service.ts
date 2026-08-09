@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
+import { EncryptionService } from '../encryption/encryption.service';
 import * as argon2 from 'argon2';
 import { nanoid } from 'nanoid';
 
@@ -9,6 +10,7 @@ export class MerchantsService {
   constructor(
     private prisma: PrismaService,
     private authService: AuthService,
+    private encryptionService: EncryptionService,
   ) {}
 
   async createMerchant(data: {
@@ -27,6 +29,8 @@ export class MerchantsService {
 
     const passwordHash = await argon2.hash(data.password);
 
+    const webhookSecret = this.encryptionService.generateToken(32);
+
     const merchant = await this.prisma.merchant.create({
       data: {
         name: data.name,
@@ -35,6 +39,7 @@ export class MerchantsService {
         walletBalance: data.initialBalance || 0,
         currency: data.currency || 'USD',
         allowedProductIds: JSON.stringify(data.allowedProductIds || []),
+        webhookSecret,
         users: {
           create: {
             email: data.email,
@@ -84,6 +89,23 @@ export class MerchantsService {
   async updateMerchantStatus(id: string, status: 'ACTIVE' | 'SUSPENDED' | 'DISABLED') {
     await this.prisma.merchant.update({ where: { id }, data: { status } });
     return { success: true };
+  }
+
+  async getWebhookSecret(merchantId: string) {
+    const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
+    if (!merchant) throw new NotFoundException('Merchant not found');
+    if (!merchant.webhookSecret) {
+      const secret = this.encryptionService.generateToken(32);
+      await this.prisma.merchant.update({ where: { id: merchantId }, data: { webhookSecret: secret } });
+      return { webhook_secret: secret };
+    }
+    return { webhook_secret: merchant.webhookSecret };
+  }
+
+  async regenerateWebhookSecret(merchantId: string) {
+    const secret = this.encryptionService.generateToken(32);
+    await this.prisma.merchant.update({ where: { id: merchantId }, data: { webhookSecret: secret } });
+    return { webhook_secret: secret };
   }
 
   async addWalletCredit(merchantId: string, amount: number, adminId: string, ip?: string) {

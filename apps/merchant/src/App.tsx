@@ -549,10 +549,12 @@ function CreateOrderPage() {
 function WebhooksPage() {
   const queryClient = useQueryClient();
   const { data: webhooks, isLoading } = useQuery({ queryKey: ['webhooks'], queryFn: api.listWebhooks });
+  const { data: secretData } = useQuery({ queryKey: ['webhook-secret'], queryFn: api.getWebhookSecret });
   const [url, setUrl] = useState('');
   const [skipVerification, setSkipVerification] = useState(false);
   const [error, setError] = useState('');
   const [newSecret, setNewSecret] = useState<any>(null);
+  const [secretCopied, setSecretCopied] = useState(false);
 
   const createMutation = useMutation({
     mutationFn: () => api.createWebhook(url, skipVerification),
@@ -570,6 +572,22 @@ function WebhooksPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['webhooks'] }),
   });
 
+  const regenerateSecretMutation = useMutation({
+    mutationFn: () => api.regenerateWebhookSecret(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['webhook-secret'] });
+    },
+  });
+
+  const handleCopySecret = () => {
+    const secret = secretData?.webhook_secret;
+    if (secret) {
+      navigator.clipboard.writeText(secret);
+      setSecretCopied(true);
+      setTimeout(() => setSecretCopied(false), 2000);
+    }
+  };
+
   if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
 
   return (
@@ -578,6 +596,41 @@ function WebhooksPage() {
         <h1 className="text-2xl font-bold">Webhooks</h1>
         <p className="text-sm text-muted-foreground">Receive real-time notifications for fulfillment events</p>
       </div>
+
+      {/* Webhook Secret Section */}
+      <Card className="border-blue-300 bg-blue-50">
+        <div className="space-y-3">
+          <div>
+            <h3 className="font-bold text-blue-800">Webhook Secret — Required for Incoming Webhooks</h3>
+            <p className="text-sm text-blue-700 mt-1">
+              Your site must send this secret in the <code className="bg-white px-1 rounded">X-Webhook-Secret</code> header
+              when sending order webhooks. This proves the webhook came from your authorized site.
+            </p>
+          </div>
+          {secretData?.webhook_secret && (
+            <div className="flex items-center gap-2 rounded-lg bg-white p-3 font-mono text-sm break-all">
+              <span className="flex-1">{secretData.webhook_secret}</span>
+              <button onClick={handleCopySecret} className="shrink-0 rounded p-1 hover:bg-secondary">
+                {secretCopied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+              </button>
+            </div>
+          )}
+          <div className="flex items-center gap-3">
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (confirm('Regenerating your webhook secret will invalidate the old one. Your site will need to be updated with the new secret. Continue?')) {
+                  regenerateSecretMutation.mutate();
+                }
+              }}
+              disabled={regenerateSecretMutation.isPending}
+            >
+              {regenerateSecretMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Regenerate Secret'}
+            </Button>
+            <span className="text-xs text-blue-600">Only regenerate if your secret has been compromised</span>
+          </div>
+        </div>
+      </Card>
 
       {newSecret && (
         <Card className="border-amber-300 bg-amber-50">
