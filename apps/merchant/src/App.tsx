@@ -2,7 +2,7 @@ import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom'
 import { ReactNode, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Wallet, FileText, Package, Key, LogOut, Menu, X, Store, Plus, Trash2, Loader2, ShoppingCart, Webhook, Copy, Check, ExternalLink, Inbox, Send,
+  Wallet, FileText, Package, Key, LogOut, Menu, X, Store, Plus, Trash2, Loader2, ShoppingCart, Webhook, Copy, Check, ExternalLink, Inbox, Send, Plug,
 } from 'lucide-react';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
@@ -121,6 +121,7 @@ const navItems = [
   { to: '/products', label: 'Products', icon: Package },
   { to: '/create-order', label: 'Create Order', icon: ShoppingCart },
   { to: '/api-keys', label: 'API Keys', icon: Key },
+  { to: '/connect-site', label: 'Connect Your Site', icon: Plug },
   { to: '/incoming-webhooks', label: 'Incoming Webhooks', icon: Inbox },
   { to: '/outgoing-webhooks', label: 'Outgoing Webhooks', icon: Send },
 ];
@@ -546,6 +547,383 @@ function CreateOrderPage() {
   );
 }
 
+// ─── Connect Site Page ───
+function ConnectSitePage() {
+  const { data: secretData } = useQuery({ queryKey: ['webhook-secret'], queryFn: api.getWebhookSecret });
+  const [secretCopied, setSecretCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState('woocommerce');
+
+  const handleCopySecret = () => {
+    const secret = secretData?.webhook_secret;
+    if (secret) {
+      navigator.clipboard.writeText(secret);
+      setSecretCopied(true);
+      setTimeout(() => setSecretCopied(false), 2000);
+    }
+  };
+
+  const webhookSecret = secretData?.webhook_secret || '';
+  const incomingUrl = 'https://your-api.com/api/v1/webhooks/incoming';
+
+  const platforms = [
+    { id: 'woocommerce', label: 'WooCommerce / WordPress', desc: 'Install our WordPress plugin' },
+    { id: 'shopify', label: 'Shopify', desc: 'Add a webhook in Shopify admin' },
+    { id: 'stripe', label: 'Stripe', desc: 'Configure Stripe webhook endpoint' },
+    { id: 'paypal', label: 'PayPal', desc: 'Set up PayPal webhook listener' },
+    { id: 'elementor', label: 'Elementor Forms', desc: 'Use the WordPress plugin' },
+    { id: 'custom', label: 'Custom / Hard-coded Site', desc: 'Send a POST request from your code' },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold">Connect Your Site</h1>
+        <p className="text-sm text-muted-foreground">Connect your e-commerce platform to automatically fulfill orders</p>
+      </div>
+
+      {/* Webhook Secret — needed for all platforms */}
+      <Card className="border-blue-300 bg-blue-50">
+        <div className="space-y-3">
+          <div>
+            <h3 className="font-bold text-blue-800">Your Webhook Secret</h3>
+            <p className="text-sm text-blue-700 mt-1">
+              This secret authenticates webhooks from your site. Include it in the
+              <code className="bg-white px-1 rounded mx-1">X-Webhook-Secret</code> header of every webhook you send.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 rounded-lg bg-white p-3 font-mono text-sm break-all">
+            <span className="flex-1">{webhookSecret || 'Loading...'}</span>
+            <button onClick={handleCopySecret} className="shrink-0 rounded p-1 hover:bg-secondary">
+              {secretCopied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      {/* Platform Tabs */}
+      <Card>
+        <div className="flex flex-wrap gap-2 mb-6 border-b border-border pb-4">
+          {platforms.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setActiveTab(p.id)}
+              className={cn(
+                'rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+                activeTab === p.id
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+              )}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        {/* WooCommerce / WordPress */}
+        {activeTab === 'woocommerce' && (
+          <div className="space-y-4">
+            <h3 className="text-lg font-bold">Connect WooCommerce / WordPress</h3>
+            <ol className="list-decimal pl-5 space-y-3 text-sm">
+              <li>
+                <strong>Download the plugin:</strong>
+                <div className="mt-2 flex items-center gap-3">
+                  <a
+                    href="https://github.com/Zomiccc/digitalvaul/tree/main/connectors/wp-dcv-webhook"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                  >
+                    <ExternalLink className="h-4 w-4" /> Download WordPress Plugin
+                  </a>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Download the <code>wp-dcv-webhook</code> folder, zip it as <code>dcv-webhook.zip</code>
+                </p>
+              </li>
+              <li>
+                <strong>Install the plugin:</strong>
+                <p className="mt-1 text-muted-foreground">
+                  WordPress Admin → Plugins → Add New → Upload Plugin → choose <code>dcv-webhook.zip</code> → Activate
+                </p>
+              </li>
+              <li>
+                <strong>Configure the plugin:</strong>
+                <p className="mt-1 text-muted-foreground">
+                  Go to WooCommerce → DCV Webhook (or Settings → DCV Webhook) and enter:
+                </p>
+                <ul className="mt-2 list-disc pl-5 space-y-1 text-muted-foreground">
+                  <li><strong>API Key:</strong> Your API key from the API Keys page (starts with <code>pk_</code>)</li>
+                  <li><strong>API Base URL:</strong> <code>https://your-api.com/api/v1</code></li>
+                  <li><strong>Webhook Secret:</strong> The secret shown above</li>
+                </ul>
+              </li>
+              <li>
+                <strong>Click "Register this site"</strong> — your WooCommerce store is now connected!
+              </li>
+              <li>
+                <strong>Test it:</strong> Create a test order in WooCommerce with status "completed".
+                Check the <NavLink to="/incoming-webhooks" className="text-primary underline">Incoming Webhooks</NavLink> page to see it arrive.
+              </li>
+            </ol>
+          </div>
+        )}
+
+        {/* Shopify */}
+        {activeTab === 'shopify' && (
+          <div className="space-y-4">
+            <h3 className="text-lg font-bold">Connect Shopify</h3>
+            <ol className="list-decimal pl-5 space-y-3 text-sm">
+              <li>
+                <strong>Create a Shopify app or use a webhook automation:</strong>
+                <p className="mt-1 text-muted-foreground">
+                  Shopify Admin → Settings → Notifications → Webhooks → Create webhook
+                </p>
+              </li>
+              <li>
+                <strong>Set the webhook URL:</strong>
+                <div className="mt-2 rounded-lg bg-secondary p-3 font-mono text-xs break-all">
+                  {incomingUrl}
+                </div>
+              </li>
+              <li>
+                <strong>Select event:</strong> <code>Order payment</code> (triggers when payment is captured)
+              </li>
+              <li>
+                <strong>Add the authentication header:</strong>
+                <p className="mt-1 text-muted-foreground">
+                  Shopify doesn't allow custom headers natively. Use a Shopify Flow app or a middleware
+                  service (like Zapier/Make) to add the <code>X-Webhook-Secret</code> header:
+                </p>
+                <div className="mt-2 rounded-lg bg-secondary p-3 font-mono text-xs">
+                  X-Webhook-Secret: {webhookSecret ? webhookSecret.substring(0, 16) + '...' : 'your-secret-here'}
+                </div>
+              </li>
+              <li>
+                <strong>Alternatively, use our webhook SDK:</strong>
+                <p className="mt-1 text-muted-foreground">
+                  Install <code>@digitalcodevault/webhook-sdk</code> in a small Node.js middleware that
+                  receives Shopify webhooks and forwards them with the secret header.
+                </p>
+              </li>
+              <li>
+                <strong>Test it:</strong> Create a paid test order in Shopify.
+                Check the <NavLink to="/incoming-webhooks" className="text-primary underline">Incoming Webhooks</NavLink> page.
+              </li>
+            </ol>
+          </div>
+        )}
+
+        {/* Stripe */}
+        {activeTab === 'stripe' && (
+          <div className="space-y-4">
+            <h3 className="text-lg font-bold">Connect Stripe</h3>
+            <ol className="list-decimal pl-5 space-y-3 text-sm">
+              <li>
+                <strong>Stripe Dashboard → Developers → Webhooks → Add endpoint</strong>
+              </li>
+              <li>
+                <strong>Set the endpoint URL:</strong>
+                <div className="mt-2 rounded-lg bg-secondary p-3 font-mono text-xs break-all">
+                  {incomingUrl}
+                </div>
+              </li>
+              <li>
+                <strong>Select events to listen for:</strong>
+                <ul className="mt-1 list-disc pl-5 text-muted-foreground">
+                  <li><code>payment_intent.succeeded</code></li>
+                </ul>
+              </li>
+              <li>
+                <strong>Add authentication header:</strong>
+                <p className="mt-1 text-muted-foreground">
+                  Stripe doesn't support custom headers in the dashboard. Use a small middleware
+                  (Node.js with our SDK, or Zapier/Make) to add the <code>X-Webhook-Secret</code> header.
+                </p>
+                <div className="mt-2 rounded-lg bg-secondary p-3 font-mono text-xs">
+                  X-Webhook-Secret: {webhookSecret ? webhookSecret.substring(0, 16) + '...' : 'your-secret-here'}
+                </div>
+              </li>
+              <li>
+                <strong>Include product metadata:</strong>
+                <p className="mt-1 text-muted-foreground">
+                  When creating the Stripe PaymentIntent, add <code>metadata.product_sku</code> with your
+                  product SKU (e.g., <code>PSN-USD-10</code>) so the platform can match it.
+                </p>
+              </li>
+              <li>
+                <strong>Test it:</strong> Use Stripe's "Send test webhook" button.
+                Check the <NavLink to="/incoming-webhooks" className="text-primary underline">Incoming Webhooks</NavLink> page.
+              </li>
+            </ol>
+          </div>
+        )}
+
+        {/* PayPal */}
+        {activeTab === 'paypal' && (
+          <div className="space-y-4">
+            <h3 className="text-lg font-bold">Connect PayPal</h3>
+            <ol className="list-decimal pl-5 space-y-3 text-sm">
+              <li>
+                <strong>PayPal Developer Dashboard → My Apps → your app → Webhooks</strong>
+              </li>
+              <li>
+                <strong>Set the webhook URL:</strong>
+                <div className="mt-2 rounded-lg bg-secondary p-3 font-mono text-xs break-all">
+                  {incomingUrl}
+                </div>
+              </li>
+              <li>
+                <strong>Select event type:</strong> <code>PAYMENT.CAPTURE.COMPLETED</code>
+              </li>
+              <li>
+                <strong>Add authentication header:</strong>
+                <p className="mt-1 text-muted-foreground">
+                  PayPal doesn't support custom headers. Use a middleware service or our webhook SDK
+                  to add the <code>X-Webhook-Secret</code> header.
+                </p>
+                <div className="mt-2 rounded-lg bg-secondary p-3 font-mono text-xs">
+                  X-Webhook-Secret: {webhookSecret ? webhookSecret.substring(0, 16) + '...' : 'your-secret-here'}
+                </div>
+              </li>
+              <li>
+                <strong>Include <code>custom_id</code> in the PayPal order</strong> with your product SKU
+                (e.g., <code>PSN-USD-10</code>) so the platform can match it.
+              </li>
+              <li>
+                <strong>Test it:</strong> Use PayPal's sandbox to simulate a payment.
+                Check the <NavLink to="/incoming-webhooks" className="text-primary underline">Incoming Webhooks</NavLink> page.
+              </li>
+            </ol>
+          </div>
+        )}
+
+        {/* Elementor */}
+        {activeTab === 'elementor' && (
+          <div className="space-y-4">
+            <h3 className="text-lg font-bold">Connect Elementor Forms</h3>
+            <ol className="list-decimal pl-5 space-y-3 text-sm">
+              <li>
+                <strong>Download and install the same WordPress plugin</strong> as WooCommerce:
+                <div className="mt-2">
+                  <a
+                    href="https://github.com/Zomiccc/digitalvaul/tree/main/connectors/wp-dcv-webhook"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                  >
+                    <ExternalLink className="h-4 w-4" /> Download WordPress Plugin
+                  </a>
+                </div>
+              </li>
+              <li>
+                The plugin automatically forwards <strong>Elementor Pro form submissions</strong> to the platform.
+              </li>
+              <li>
+                <strong>Configure the plugin</strong> with your API Key, API Base URL, and Webhook Secret (same as WooCommerce setup).
+              </li>
+              <li>
+                <strong>In your Elementor form:</strong> Add fields for <code>email</code>, <code>name</code>,
+                <code>product</code> (product SKU), and <code>amount</code>.
+              </li>
+              <li>
+                <strong>Test it:</strong> Submit the Elementor form on your site.
+                Check the <NavLink to="/incoming-webhooks" className="text-primary underline">Incoming Webhooks</NavLink> page.
+              </li>
+            </ol>
+          </div>
+        )}
+
+        {/* Custom */}
+        {activeTab === 'custom' && (
+          <div className="space-y-4">
+            <h3 className="text-lg font-bold">Connect a Custom / Hard-coded Site</h3>
+            <p className="text-sm text-muted-foreground">
+              Any website that can send an HTTP POST can connect. Just send order data to our webhook endpoint.
+            </p>
+            <ol className="list-decimal pl-5 space-y-3 text-sm">
+              <li>
+                <strong>Send a POST request to:</strong>
+                <div className="mt-2 rounded-lg bg-secondary p-3 font-mono text-xs break-all">
+                  {incomingUrl}
+                </div>
+              </li>
+              <li>
+                <strong>Include these headers:</strong>
+                <div className="mt-2 rounded-lg bg-secondary p-3 font-mono text-xs space-y-1">
+                  <div>Content-Type: application/json</div>
+                  <div>X-Webhook-Secret: {webhookSecret ? webhookSecret.substring(0, 16) + '...' : 'your-secret-here'}</div>
+                  <div>X-Platform: custom_store</div>
+                </div>
+              </li>
+              <li>
+                <strong>Send order data as JSON body:</strong>
+                <div className="mt-2 rounded-lg bg-secondary p-3 font-mono text-xs overflow-x-auto">
+                  <pre>{`{
+  "order_id": "ORDER-123",
+  "status": "paid",
+  "total": "10",
+  "currency": "USD",
+  "customer": {
+    "email": "customer@example.com",
+    "name": "John Doe"
+  },
+  "items": [
+    {
+      "sku": "PSN-USD-10",
+      "quantity": 1,
+      "price": "10"
+    }
+  ]
+}`}</pre>
+                </div>
+              </li>
+              <li>
+                <strong>Or use our webhook SDK (Node.js):</strong>
+                <div className="mt-2 rounded-lg bg-secondary p-3 font-mono text-xs overflow-x-auto">
+                  <pre>{`import { sendIncomingWebhook } from '@digitalcodevault/webhook-sdk';
+
+await sendIncomingWebhook({
+  webhookSecret: '${webhookSecret ? webhookSecret.substring(0, 12) + '...' : 'YOUR_SECRET'}',
+  payload: { order_id: 'ORDER-123', /* ... */ },
+  extraHeaders: { 'X-Platform': 'custom_store' },
+});`}</pre>
+                </div>
+              </li>
+              <li>
+                <strong>Test it:</strong> Send a test request and check the
+                <NavLink to="/incoming-webhooks" className="text-primary underline mx-1">Incoming Webhooks</NavLink> page.
+              </li>
+            </ol>
+          </div>
+        )}
+      </Card>
+
+      {/* Quick Reference */}
+      <Card className="bg-secondary/50">
+        <h3 className="font-bold mb-3">Quick Reference</h3>
+        <div className="grid gap-3 sm:grid-cols-2 text-sm">
+          <div>
+            <p className="text-muted-foreground">Webhook Endpoint:</p>
+            <p className="font-mono text-xs break-all">{incomingUrl}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Required Header:</p>
+            <p className="font-mono text-xs">X-Webhook-Secret: your-secret</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Platform Auto-Detection:</p>
+            <p className="text-xs">WooCommerce, Shopify, Stripe, PayPal, Elementor, Custom</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Product Matching:</p>
+            <p className="text-xs">By SKU (e.g., PSN-USD-10) or product name</p>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 // ─── Incoming Webhooks Page ───
 function IncomingWebhooksPage() {
   const { data: incomingWebhooks, isLoading } = useQuery({ queryKey: ['incoming-webhooks'], queryFn: api.listIncomingWebhooks });
@@ -808,6 +1186,7 @@ function ProtectedRoutes() {
         <Route path="/products" element={<ProductsPage />} />
         <Route path="/create-order" element={<CreateOrderPage />} />
         <Route path="/api-keys" element={<ApiKeysPage />} />
+        <Route path="/connect-site" element={<ConnectSitePage />} />
         <Route path="/incoming-webhooks" element={<IncomingWebhooksPage />} />
         <Route path="/outgoing-webhooks" element={<WebhooksPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
