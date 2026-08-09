@@ -69,6 +69,28 @@ class DCV_Webhook_Hooks {
      * @return WP_REST_Response|WP_Error
      */
     public function handle_incoming_delivery( $request ) {
+        $raw_body = $request->get_body();
+        $payload  = json_decode( $raw_body, true );
+
+        // ─── Challenge-response verification ───
+        // During webhook registration, the DCV backend sends a verification request
+        // with event=webhook.verification and a challenge token. We must echo it back.
+        if ( is_array( $payload ) && isset( $payload['event'] ) && $payload['event'] === 'webhook.verification' ) {
+            $challenge = isset( $payload['challenge'] ) ? $payload['challenge'] : '';
+            dcv_webhook_log(
+                'verification',
+                'Received challenge-response verification request. Echoing challenge.',
+                array( 'challenge_length' => strlen( $challenge ) )
+            );
+            return new WP_REST_Response(
+                array(
+                    'challenge' => $challenge,
+                    'verified'  => true,
+                ),
+                200
+            );
+        }
+
         $endpoint = dcv_webhook_get_endpoint();
 
         if ( ! $endpoint || empty( $endpoint['secret'] ) ) {
@@ -84,7 +106,6 @@ class DCV_Webhook_Hooks {
             );
         }
 
-        $raw_body       = $request->get_body();
         $signature      = $request->get_header( 'x_webhook_signature' );
         $event          = $request->get_header( 'x_webhook_event' );
 
