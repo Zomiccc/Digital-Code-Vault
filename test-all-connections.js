@@ -114,6 +114,16 @@ async function step3_5_uploadExtraCodes() {
 
 async function step4_generateApiKey() {
   logSection('STEP 4: Generate API Key');
+  // List and revoke old API keys to avoid hitting the active key limit
+  const listRes = await apiRequest('/merchant/api-keys', 'GET', null, { Authorization: `Bearer ${merchantToken}` });
+  const existingKeys = listRes.body?.keys || (Array.isArray(listRes.body) ? listRes.body : []);
+  if (listRes.status === 200 && Array.isArray(existingKeys)) {
+    for (const key of existingKeys) {
+      if (key.id && key.status === 'ACTIVE') {
+        await apiRequest(`/merchant/api-keys/${key.id}`, 'DELETE', null, { Authorization: `Bearer ${merchantToken}` });
+      }
+    }
+  }
   const res = await apiRequest('/merchant/api-keys', 'POST', { scopes: ['fulfillment', 'read'] }, { Authorization: `Bearer ${merchantToken}` });
   if (res.status === 201 && res.body.key) {
     apiKey = res.body.key;
