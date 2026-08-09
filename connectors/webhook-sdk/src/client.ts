@@ -1,4 +1,4 @@
-import { signRequest, resolveEndpoint, SERVER_SIGNED_BODY } from './sign.js';
+import { signRequest, resolveEndpoint } from './sign.js';
 import {
   WebhookApiError,
   type RegisterWebhookOptions,
@@ -43,12 +43,13 @@ function buildSignedHeaders(
   path: string,
   timestampMs: number,
   hmacSecret: string,
+  body: string = '',
 ): Record<string, string> {
   const ts = String(timestampMs);
   const signature = signRequest(hmacSecret, {
     method,
     path,
-    body: SERVER_SIGNED_BODY,
+    body,
     timestamp: ts,
   });
   return {
@@ -89,7 +90,7 @@ export async function registerWebhook(opts: RegisterWebhookOptions): Promise<Reg
   const body = JSON.stringify({ url: opts.url, skipVerification: opts.skipVerification ?? false });
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...buildSignedHeaders(apiKey, 'POST', path, timestamp, hmacSecret),
+    ...buildSignedHeaders(apiKey, 'POST', path, timestamp, hmacSecret, body),
   };
 
   logger({

@@ -20,6 +20,7 @@ export class WebhookService implements OnModuleDestroy {
   private worker: any = null;
   private readonly maxRetries: number;
   private readonly redisUrl: string;
+  private processingQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private prisma: PrismaService,
@@ -487,11 +488,13 @@ export class WebhookService implements OnModuleDestroy {
 
     this.logger.log(`[WEBHOOK] Webhook stored with ID: ${webhook.id}`);
 
-    // Process the webhook asynchronously
-    this.processWebhookAsync(webhook.id).catch((err) => {
-      this.logger.error(`[WEBHOOK] Failed to process webhook ${webhook.id}: ${err.message}`);
-      this.logger.error(`[WEBHOOK] Error stack: ${err.stack}`);
-    });
+    // Process the webhook asynchronously (serialized to prevent concurrent stock conflicts)
+    this.processingQueue = this.processingQueue
+      .then(() => this.processWebhookAsync(webhook.id))
+      .catch((err) => {
+        this.logger.error(`[WEBHOOK] Failed to process webhook ${webhook.id}: ${err.message}`);
+        this.logger.error(`[WEBHOOK] Error stack: ${err.stack}`);
+      });
 
     return { success: true, message: 'Webhook received and queued for processing', webhookId: webhook.id, eventId };
   }
@@ -736,18 +739,35 @@ export class WebhookService implements OnModuleDestroy {
       const webhookAmount = webhook.amount ? Number(webhook.amount) : 0;
       this.logger.log(`[WEBHOOK] Creating fulfillment via FulfillmentService for merchant ${merchantId}`);
 
-      const fulfillmentResult = await this.fulfillmentService.createFulfillment({
-        merchantId,
-        productId: product.id,
-        amount: webhookAmount,
-        currency: webhook.currency || 'USD',
-        referenceId: webhook.orderId || undefined,
-        idempotencyKey: `webhook-${webhook.eventId}`,
-        customerEmail: webhook.customerEmail || undefined,
-        customerName: webhook.customerName || undefined,
-        actorType: 'SYSTEM',
-        actorId: 'webhook-processor',
-      });
+      let fulfillmentResult: any;
+      const MAX_WEBHOOK_RETRIES = 3;
+      for (let attempt = 1; attempt <= MAX_WEBHOOK_RETRIES; attempt++) {
+        try {
+          fulfillmentResult = await this.fulfillmentService.createFulfillment({
+            merchantId,
+            productId: product.id,
+            amount: webhookAmount,
+            currency: webhook.currency || 'USD',
+            referenceId: webhook.orderId || undefined,
+            idempotencyKey: `webhook-${webhook.eventId}`,
+            customerEmail: webhook.customerEmail || undefined,
+            customerName: webhook.customerName || undefined,
+            actorType: 'SYSTEM',
+            actorId: 'webhook-processor',
+          });
+          break;
+        } catch (err: any) {
+          const isRetryable = err?.response?.code === 'STOCK_CONFLICT' ||
+            err?.response?.code === 'INSUFFICIENT_STOCK' ||
+            err?.message?.includes('Transaction already closed');
+          if (isRetryable && attempt < MAX_WEBHOOK_RETRIES) {
+            this.logger.warn(`[WEBHOOK] Fulfillment conflict on attempt ${attempt}, retrying in ${500 * attempt}ms...`);
+            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+            continue;
+          }
+          throw err;
+        }
+      }
 
       this.logger.log(`[WEBHOOK] Fulfillment created: ${fulfillmentResult.fulfillment_id}`);
 

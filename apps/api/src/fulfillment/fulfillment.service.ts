@@ -226,139 +226,188 @@ export class FulfillmentService {
     }
 
     // Calculate total cost
-    const totalCost = combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
+    let totalCost = combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
 
     // Sandbox mode: skip wallet balance check and debit
     if (!sandbox) {
       // Check wallet balance
       if (Number(merchant.walletBalance) < totalCost) {
-      const failedReq = await this.prisma.fulfillmentRequest.create({
-        data: {
-          merchantId,
-          productId,
-          amount,
-          currency,
-          idempotencyKey,
-          referenceId,
-          status: 'FAILED',
-          failureReason: 'Insufficient wallet balance',
-          sandbox: sandbox || false,
-        },
-      });
+        const failedReq = await this.prisma.fulfillmentRequest.create({
+          data: {
+            merchantId,
+            productId,
+            amount,
+            currency,
+            idempotencyKey,
+            referenceId,
+            status: 'FAILED',
+            failureReason: 'Insufficient wallet balance',
+            sandbox: sandbox || false,
+          },
+        });
 
-      await this.auditService.log({
-        actorType: actorType || 'SYSTEM',
-        actorId: actorId || merchantId,
-        action: 'fulfillment.failed',
-        entity: 'FulfillmentRequest',
-        entityId: failedReq.id,
-        metadata: { reason: 'INSUFFICIENT_WALLET', balance: merchant.walletBalance, required: totalCost },
-        ip,
-      });
+        await this.auditService.log({
+          actorType: actorType || 'SYSTEM',
+          actorId: actorId || merchantId,
+          action: 'fulfillment.failed',
+          entity: 'FulfillmentRequest',
+          entityId: failedReq.id,
+          metadata: { reason: 'INSUFFICIENT_WALLET', balance: merchant.walletBalance, required: totalCost },
+          ip,
+        });
 
-      this.webhookService.queueWebhookEvent(merchantId, 'fulfillment.failed', {
-        fulfillment_id: failedReq.id,
-        reference_id: referenceId,
-        reason: 'INSUFFICIENT_WALLET',
-      }).catch(() => {});
+        this.webhookService.queueWebhookEvent(merchantId, 'fulfillment.failed', {
+          fulfillment_id: failedReq.id,
+          reference_id: referenceId,
+          reason: 'INSUFFICIENT_WALLET',
+        }).catch(() => {});
 
-      throw new BadRequestException({
-        error: 'INSUFFICIENT_WALLET',
-        code: 'INSUFFICIENT_WALLET',
-        message: `Insufficient wallet balance. Required: ${totalCost}, Available: ${merchant.walletBalance}`,
-      });
+        throw new BadRequestException({
+          error: 'INSUFFICIENT_WALLET',
+          code: 'INSUFFICIENT_WALLET',
+          message: `Insufficient wallet balance. Required: ${totalCost}, Available: ${merchant.walletBalance}`,
+        });
       }
     }
 
     const reservationTtl = this.configService.get<number>('RESERVATION_TTL_MINUTES', 15);
 
-    // Execute everything in a transaction
-    const result = await this.prisma.$transaction(async (tx) => {
-      // Transaction body below
-      // 1. Create fulfillment request
-      const fulfillmentReq = await tx.fulfillmentRequest.create({
-        data: {
-          merchantId,
-          productId,
-          amount,
-          currency,
-          idempotencyKey,
-          referenceId,
-          status: 'PENDING',
-          sandbox: sandbox || false,
-          customerEmail: customerEmail || null,
-          customerName: customerName || null,
-          customerAddress: customerAddress || null,
-        },
-      });
+    // Execute everything in a transaction with retry for stock conflicts
+    const MAX_RETRIES = 3;
+    let result: any;
+    let lastError: any;
 
-      // 2. Reserve codes with row-level locking
-      let allocationResults: AllocationResult[];
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        allocationResults = await this.allocationEngine.reserveCodes(
-          tx,
-          fulfillmentReq.id,
-          combination,
-          reservationTtl,
-        );
-      } catch (err) {
-        await this.allocationEngine.releaseReservation(tx, fulfillmentReq.id);
+        // Re-fetch stock on retries (combination may have changed)
+        if (attempt > 1) {
+          this.logger.log(`[Fulfillment] Retry attempt ${attempt}/${MAX_RETRIES} for ${idempotencyKey}`);
+          const retryStock = await this.allocationEngine.getAvailableStock(this.prisma, productId);
+          const retryDenoms = retryStock.filter((s) => s.availableCount > 0);
+          if (retryDenoms.length === 0) {
+            throw new BadRequestException({
+              error: 'INSUFFICIENT_STOCK',
+              code: 'INSUFFICIENT_STOCK',
+              message: 'No available stock for this product after retry',
+            });
+          }
+          const retryCombo = this.allocationEngine.findBestCombination(retryDenoms, amount);
+          if (!retryCombo) {
+            throw new BadRequestException({
+              error: 'INSUFFICIENT_STOCK',
+              code: 'INSUFFICIENT_STOCK',
+              message: `No denomination combination sums to ${amount} after retry`,
+            });
+          }
+          combination.length = 0;
+          combination.push(...retryCombo);
+          totalCost = combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
+        }
+
+        result = await this.prisma.$transaction(async (tx) => {
+          // 1. Create fulfillment request
+          const fulfillmentReq = await tx.fulfillmentRequest.create({
+            data: {
+              merchantId,
+              productId,
+              amount,
+              currency,
+              idempotencyKey,
+              referenceId,
+              status: 'PENDING',
+              sandbox: sandbox || false,
+              customerEmail: customerEmail || null,
+              customerName: customerName || null,
+              customerAddress: customerAddress || null,
+            },
+          });
+
+          // 2. Reserve codes with row-level locking
+          let allocationResults: AllocationResult[];
+          try {
+            allocationResults = await this.allocationEngine.reserveCodes(
+              tx,
+              fulfillmentReq.id,
+              combination,
+              reservationTtl,
+            );
+          } catch (err) {
+            await this.allocationEngine.releaseReservation(tx, fulfillmentReq.id);
+            throw err;
+          }
+
+          // 3. Debit wallet (skip in sandbox mode)
+          let updatedMerchant: any;
+          if (sandbox) {
+            updatedMerchant = await tx.merchant.findUnique({ where: { id: merchantId } });
+          } else {
+            updatedMerchant = await tx.merchant.update({
+              where: { id: merchantId },
+              data: {
+                walletBalance: { decrement: totalCost },
+              },
+            });
+
+            // 4. Create wallet transaction record
+            await tx.walletTransaction.create({
+              data: {
+                merchantId,
+                type: 'DEBIT',
+                amount: totalCost,
+                balanceAfter: updatedMerchant.walletBalance,
+                referenceId: fulfillmentReq.id,
+                fulfillmentId: fulfillmentReq.id,
+              },
+            });
+          }
+
+          // 5. Confirm allocation (codes → ALLOCATED)
+          await this.allocationEngine.confirmAllocation(tx, fulfillmentReq.id, allocationResults);
+
+          // 6. Update fulfillment status
+          const updatedReq = await tx.fulfillmentRequest.update({
+            where: { id: fulfillmentReq.id },
+            data: { status: 'ALLOCATED' },
+            include: { allocations: true },
+          });
+
+          // 7. Generate permanent delivery token (no expiry — link is permanently accessible)
+          const rawToken = this.encryptionService.generateToken(32);
+          const tokenHash = this.encryptionService.hashToken(rawToken);
+
+          await tx.deliveryToken.create({
+            data: {
+              fulfillmentId: fulfillmentReq.id,
+              tokenHash,
+            },
+          });
+
+          return {
+            fulfillmentReq: updatedReq,
+            allocationResults,
+            walletBalanceAfter: updatedMerchant.walletBalance,
+            deliveryToken: rawToken,
+          };
+        }, { timeout: 30000 });
+
+        break; // Success — exit retry loop
+      } catch (err: any) {
+        lastError = err;
+        const isStockConflict = err?.response?.code === 'STOCK_CONFLICT' ||
+          err?.response?.code === 'INSUFFICIENT_STOCK' ||
+          err?.message?.includes('Transaction already closed');
+        if (isStockConflict && attempt < MAX_RETRIES) {
+          this.logger.warn(`[Fulfillment] Stock conflict on attempt ${attempt}, retrying...`);
+          await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+          continue;
+        }
         throw err;
       }
+    }
 
-      // 3. Debit wallet (skip in sandbox mode)
-      let updatedMerchant: any;
-      if (sandbox) {
-        updatedMerchant = await tx.merchant.findUnique({ where: { id: merchantId } });
-      } else {
-        updatedMerchant = await tx.merchant.update({
-          where: { id: merchantId },
-          data: {
-            walletBalance: { decrement: totalCost },
-          },
-        });
-
-        // 4. Create wallet transaction record
-        await tx.walletTransaction.create({
-          data: {
-            merchantId,
-            type: 'DEBIT',
-            amount: totalCost,
-            balanceAfter: updatedMerchant.walletBalance,
-            referenceId: fulfillmentReq.id,
-            fulfillmentId: fulfillmentReq.id,
-          },
-        });
-      }
-
-      // 5. Confirm allocation (codes → ALLOCATED)
-      await this.allocationEngine.confirmAllocation(tx, fulfillmentReq.id, allocationResults);
-
-      // 6. Update fulfillment status
-      const updatedReq = await tx.fulfillmentRequest.update({
-        where: { id: fulfillmentReq.id },
-        data: { status: 'ALLOCATED' },
-        include: { allocations: true },
-      });
-
-      // 7. Generate permanent delivery token (no expiry — link is permanently accessible)
-      const rawToken = this.encryptionService.generateToken(32);
-      const tokenHash = this.encryptionService.hashToken(rawToken);
-
-      await tx.deliveryToken.create({
-        data: {
-          fulfillmentId: fulfillmentReq.id,
-          tokenHash,
-        },
-      });
-
-      return {
-        fulfillmentReq: updatedReq,
-        allocationResults,
-        walletBalanceAfter: updatedMerchant.walletBalance,
-        deliveryToken: rawToken,
-      };
-    }, { timeout: 30000 });
+    if (!result) {
+      throw lastError || new Error('Fulfillment failed after retries');
+    }
 
     // Audit log
     await this.auditService.log({

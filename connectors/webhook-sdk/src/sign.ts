@@ -8,20 +8,17 @@ import { createHmac } from 'node:crypto';
  *   signature = HMAC_SHA256(secret, data)  // hex
  *
  * where `secret` is the API key itself, `path` is `req.originalUrl` (includes the
- * `/api/v1` global prefix), and `body` is `req.rawBody?.toString() ?? ''`.
- *
- * The API never enables raw-body capture, so `body` is ALWAYS the empty string on the
- * server side — we must sign over `''` regardless of the JSON payload we transmit.
+ * `/api/v1` global prefix), and `body` is the exact raw JSON string sent as the request
+ * body (captured server-side via Nest's `rawBody: true` option). The body MUST be the
+ * exact byte-for-byte string you transmit — do not re-stringify a parsed object, since
+ * key ordering or whitespace differences will break signature verification.
  */
-
-/** The body value the server actually signs over (always empty — see SIGNING.md). */
-export const SERVER_SIGNED_BODY = '';
 
 export interface CanonicalParams {
   method: string;
   /** Path as the server sees it in `req.originalUrl`, e.g. `/api/v1/webhooks/endpoints`. */
   path: string;
-  /** Body the server signs over. Defaults to `''` to match stock server behavior. */
+  /** Exact raw request body string (empty string for GET/DELETE with no body). */
   body?: string;
   /** Epoch-millisecond timestamp string (same value sent in `X-Timestamp`). */
   timestamp: string;
@@ -29,7 +26,7 @@ export interface CanonicalParams {
 
 export function buildCanonicalString(params: CanonicalParams): string {
   const { method, path, timestamp } = params;
-  const body = params.body ?? SERVER_SIGNED_BODY;
+  const body = params.body ?? '';
   return `${method.toUpperCase()}\n${path}\n${body}\n${timestamp}`;
 }
 

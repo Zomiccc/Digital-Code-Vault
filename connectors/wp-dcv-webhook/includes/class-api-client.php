@@ -9,7 +9,8 @@
  *   signature = HMAC_SHA256(apiKey, data)  // hex
  *
  * where `apiKey` is the full API key string (pk_xxx.yyy), `path` includes
- * the /api/v1 prefix, and `body` is always '' (server doesn't capture raw body).
+ * the /api/v1 prefix, and `body` is the exact raw JSON string sent as the
+ * request body (empty string for GET/DELETE requests with no body).
  *
  * @package DCV_Webhook
  */
@@ -50,7 +51,7 @@ class DCV_Webhook_API_Client {
      *
      * @param string $method    Uppercase HTTP method.
      * @param string $path      Request path (e.g. /api/v1/webhooks/endpoints).
-     * @param string $body      Body the server signs over (always '' for this backend).
+     * @param string $body      Exact raw request body string (empty for GET/DELETE).
      * @param string $timestamp Epoch-millisecond timestamp string.
      * @return string Canonical string: METHOD\nPATH\nBODY\nTIMESTAMP
      */
@@ -65,11 +66,12 @@ class DCV_Webhook_API_Client {
      *
      * @param string $method    HTTP method.
      * @param string $path      Request path including /api/v1 prefix.
+     * @param string $body      Exact raw request body string (empty for GET/DELETE).
      * @param string $timestamp Epoch-millisecond timestamp string.
      * @return string Hex-encoded HMAC-SHA256 signature.
      */
-    protected function sign_request( $method, $path, $timestamp ) {
-        $data = $this->build_canonical_string( $method, $path, '', $timestamp );
+    protected function sign_request( $method, $path, $body, $timestamp ) {
+        $data = $this->build_canonical_string( $method, $path, $body, $timestamp );
         return hash_hmac( 'sha256', $data, $this->api_key );
     }
 
@@ -106,14 +108,13 @@ class DCV_Webhook_API_Client {
         $suffix    = '/webhooks/endpoints';
         $resolved  = $this->resolve_endpoint( $suffix );
         $timestamp = strval( round( microtime( true ) * 1000 ) );
-        $signature = $this->sign_request( 'POST', $resolved['path'], $timestamp );
-
-        $body = wp_json_encode(
+        $body      = wp_json_encode(
             array(
                 'url'               => $url,
                 'skipVerification'  => (bool) $skip_verification,
             )
         );
+        $signature = $this->sign_request( 'POST', $resolved['path'], $body, $timestamp );
 
         $headers = array(
             'Content-Type'  => 'application/json',
@@ -196,7 +197,7 @@ class DCV_Webhook_API_Client {
         $suffix    = '/webhooks/endpoints';
         $resolved  = $this->resolve_endpoint( $suffix );
         $timestamp = strval( round( microtime( true ) * 1000 ) );
-        $signature = $this->sign_request( 'GET', $resolved['path'], $timestamp );
+        $signature = $this->sign_request( 'GET', $resolved['path'], '', $timestamp );
 
         $headers = array(
             'X-Api-Key'   => $this->api_key,
@@ -236,7 +237,7 @@ class DCV_Webhook_API_Client {
         $suffix    = '/webhooks/endpoints/' . rawurlencode( $endpoint_id );
         $resolved  = $this->resolve_endpoint( $suffix );
         $timestamp = strval( round( microtime( true ) * 1000 ) );
-        $signature = $this->sign_request( 'DELETE', $resolved['path'], $timestamp );
+        $signature = $this->sign_request( 'DELETE', $resolved['path'], '', $timestamp );
 
         $headers = array(
             'X-Api-Key'   => $this->api_key,
