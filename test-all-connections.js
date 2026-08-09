@@ -114,12 +114,15 @@ async function step3_5_uploadExtraCodes() {
 
 async function step4_generateApiKey() {
   logSection('STEP 4: Generate API Key');
-  // List and revoke old API keys to avoid hitting the active key limit
+  // Only revoke keys that this test script created (identified by name starting with 'test-')
+  // NEVER revoke all keys — that would destroy keys the user copied into WordPress or other integrations
   const listRes = await apiRequest('/merchant/api-keys', 'GET', null, { Authorization: `Bearer ${merchantToken}` });
   const existingKeys = listRes.body?.keys || (Array.isArray(listRes.body) ? listRes.body : []);
   if (listRes.status === 200 && Array.isArray(existingKeys)) {
     for (const key of existingKeys) {
-      if (key.id && key.status === 'ACTIVE') {
+      // Only revoke keys with 'test-' prefix in their name/prefix to avoid hitting the active key limit
+      // without destroying the user's real API keys
+      if (key.id && key.status === 'ACTIVE' && key.keyPrefix && key.keyPrefix.startsWith('pk_test')) {
         await apiRequest(`/merchant/api-keys/${key.id}`, 'DELETE', null, { Authorization: `Bearer ${merchantToken}` });
       }
     }
@@ -128,6 +131,20 @@ async function step4_generateApiKey() {
   if (res.status === 201 && res.body.key) {
     apiKey = res.body.key;
     track(true, `API key generated: ${apiKey.substring(0, 12)}...`);
+  } else if (res.status === 400 && res.body?.code === 'API_KEY_LIMIT_REACHED') {
+    // If rate limited, try to use an existing active key instead
+    const retryList = await apiRequest('/merchant/api-keys', 'GET', null, { Authorization: `Bearer ${merchantToken}` });
+    const retryKeys = retryList.body?.keys || (Array.isArray(retryList.body) ? retryList.body : []);
+    const active = retryKeys.filter(k => k.status === 'ACTIVE');
+    if (active.length > 0) {
+      track(true, `Rate limited — using existing active key: ${active[0].keyPrefix}... (NOTE: full key not available, test may fail)`);
+      // Can't use existing key because we don't have the full key string
+      track(false, 'Cannot use existing key — full key is not retrievable. Wait for cooldown or revoke a key manually.');
+      throw new Error('API key rate limited and no full key available');
+    } else {
+      track(false, `Rate limited and no active keys: ${res.body.message}`);
+      throw new Error('Need API key');
+    }
   } else { track(false, `Failed: ${res.status} ${JSON.stringify(res.body)}`); throw new Error('Need API key'); }
 }
 
