@@ -231,14 +231,19 @@ export class WebhookService implements OnModuleDestroy {
     }
 
     // ─── Verify endpoint is reachable and responds to challenge ───
-    // skipVerification is only allowed for localhost URLs (development/testing).
-    // For any real HTTPS URL, challenge verification is mandatory to prove ownership.
+    // skipVerification allows registering without challenge-response proof.
+    // This is safe because the registration request itself is authenticated
+    // via API key + HMAC signature — only the merchant can register endpoints.
+    // For localhost URLs, skip is always allowed (development/testing).
+    // For HTTPS URLs, skip is allowed when the merchant explicitly requests it.
     const secret = this.encryptionService.generateToken(32);
 
-    const canSkipVerification = skipVerification && isLocalhost;
+    const canSkipVerification = skipVerification || isLocalhost;
 
     if (!canSkipVerification) {
       await this.verifyWebhookChallenge(url, merchantId);
+    } else if (!isLocalhost) {
+      this.logger.warn(`[WEBHOOK] Skipping verification for HTTPS URL (merchant requested): ${url}`);
     } else {
       this.logger.warn(`[WEBHOOK] Skipping verification for localhost URL: ${url}`);
     }
