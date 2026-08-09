@@ -90,4 +90,7 @@ export const api = {
   // Webhook secret (for authenticating incoming webhooks from merchant's site)
   getWebhookSecret: () => apiFetch('/merchant/webhook-secret'),
   regenerateWebhookSecret: () => apiFetch('/merchant/webhook-secret/regenerate', { method: 'POST' }),
+
+  // Incoming webhooks (received from merchant's connected sites)
+  listIncomingWebhooks: () => apiFetch('/webhooks/incoming'),
 };

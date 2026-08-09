@@ -2,7 +2,7 @@ import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom'
 import { ReactNode, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Wallet, FileText, Package, Key, LogOut, Menu, X, Store, Plus, Trash2, Loader2, ShoppingCart, Webhook, Copy, Check, ExternalLink,
+  Wallet, FileText, Package, Key, LogOut, Menu, X, Store, Plus, Trash2, Loader2, ShoppingCart, Webhook, Copy, Check, ExternalLink, Inbox, Send,
 } from 'lucide-react';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
@@ -121,7 +121,8 @@ const navItems = [
   { to: '/products', label: 'Products', icon: Package },
   { to: '/create-order', label: 'Create Order', icon: ShoppingCart },
   { to: '/api-keys', label: 'API Keys', icon: Key },
-  { to: '/webhooks', label: 'Webhooks', icon: Webhook },
+  { to: '/incoming-webhooks', label: 'Incoming Webhooks', icon: Inbox },
+  { to: '/outgoing-webhooks', label: 'Outgoing Webhooks', icon: Send },
 ];
 
 function Layout({ children }: { children: ReactNode }) {
@@ -545,7 +546,112 @@ function CreateOrderPage() {
   );
 }
 
-// ─── Webhooks Page ───
+// ─── Incoming Webhooks Page ───
+function IncomingWebhooksPage() {
+  const { data: incomingWebhooks, isLoading } = useQuery({ queryKey: ['incoming-webhooks'], queryFn: api.listIncomingWebhooks });
+  const { data: secretData } = useQuery({ queryKey: ['webhook-secret'], queryFn: api.getWebhookSecret });
+  const [secretCopied, setSecretCopied] = useState(false);
+
+  const handleCopySecret = () => {
+    const secret = secretData?.webhook_secret;
+    if (secret) {
+      navigator.clipboard.writeText(secret);
+      setSecretCopied(true);
+      setTimeout(() => setSecretCopied(false), 2000);
+    }
+  };
+
+  if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
+
+  const webhooks = Array.isArray(incomingWebhooks) ? incomingWebhooks : [];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold">Incoming Webhooks</h1>
+        <p className="text-sm text-muted-foreground">Webhooks received from your connected sites (WooCommerce, Shopify, Stripe, PayPal, etc.)</p>
+      </div>
+
+      {/* Webhook Secret Section */}
+      <Card className="border-blue-300 bg-blue-50">
+        <div className="space-y-3">
+          <div>
+            <h3 className="font-bold text-blue-800">Webhook Secret — Required for Incoming Webhooks</h3>
+            <p className="text-sm text-blue-700 mt-1">
+              Your site must send this secret in the <code className="bg-white px-1 rounded">X-Webhook-Secret</code> header
+              when sending order webhooks. This proves the webhook came from your authorized site.
+            </p>
+          </div>
+          {secretData?.webhook_secret && (
+            <div className="flex items-center gap-2 rounded-lg bg-white p-3 font-mono text-sm break-all">
+              <span className="flex-1">{secretData.webhook_secret}</span>
+              <button onClick={handleCopySecret} className="shrink-0 rounded p-1 hover:bg-secondary">
+                {secretCopied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+              </button>
+            </div>
+          )}
+          <div className="rounded-lg bg-white p-3 text-sm text-blue-700">
+            <p className="font-medium">How to connect your site:</p>
+            <ol className="mt-1 list-decimal pl-5 space-y-1">
+              <li>Copy your webhook secret above</li>
+              <li>Send a POST to <code className="bg-blue-50 px-1 rounded">https://your-api.com/api/v1/webhooks/incoming</code></li>
+              <li>Include <code className="bg-blue-50 px-1 rounded">X-Webhook-Secret: &lt;your secret&gt;</code> header</li>
+              <li>Include platform-specific headers (e.g. <code className="bg-blue-50 px-1 rounded">X-WC-Webhook-Source</code> for WooCommerce)</li>
+              <li>Send order data as JSON body — platform is auto-detected</li>
+            </ol>
+          </div>
+        </div>
+      </Card>
+
+      {/* Incoming Webhook Log */}
+      <Card>
+        <h3 className="font-bold mb-4">Received Webhooks ({webhooks.length})</h3>
+        {webhooks.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No incoming webhooks yet. Connect your site to start receiving order events.</p>
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <Th>Platform</Th>
+                <Th>Order ID</Th>
+                <Th>Product</Th>
+                <Th>Amount</Th>
+                <Th>Customer</Th>
+                <Th>Status</Th>
+                <Th>Received</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {webhooks.slice(0, 50).map((wh: any) => (
+                <tr key={wh.id}>
+                  <Td><Badge className="bg-secondary text-secondary-foreground">{wh.platform}</Badge></Td>
+                  <Td className="font-mono text-xs">{wh.orderId || '—'}</Td>
+                  <Td>{wh.productName || wh.productSku || '—'}</Td>
+                  <Td>{wh.amount ? `$${wh.amount}` : '—'}</Td>
+                  <Td className="text-xs">{wh.customerEmail || '—'}</Td>
+                  <Td>
+                    <Badge className={cn(
+                      'text-xs',
+                      wh.processingStatus === 'COMPLETED' && 'bg-emerald-100 text-emerald-700',
+                      wh.processingStatus === 'PENDING' && 'bg-amber-100 text-amber-700',
+                      wh.processingStatus === 'FAILED' && 'bg-red-100 text-red-700',
+                      wh.processingStatus === 'SKIPPED' && 'bg-gray-100 text-gray-700',
+                    )}>
+                      {wh.processingStatus}
+                    </Badge>
+                  </Td>
+                  <Td className="text-xs text-muted-foreground">{wh.createdAt ? formatDate(wh.createdAt) : '—'}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ─── Outgoing Webhooks Page ───
 function WebhooksPage() {
   const queryClient = useQueryClient();
   const { data: webhooks, isLoading } = useQuery({ queryKey: ['webhooks'], queryFn: api.listWebhooks });
@@ -593,8 +699,8 @@ function WebhooksPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Webhooks</h1>
-        <p className="text-sm text-muted-foreground">Receive real-time notifications for fulfillment events</p>
+        <h1 className="text-2xl font-bold">Outgoing Webhooks</h1>
+        <p className="text-sm text-muted-foreground">Register URLs to receive fulfillment event notifications from the platform</p>
       </div>
 
       {/* Webhook Secret Section */}
@@ -702,7 +808,8 @@ function ProtectedRoutes() {
         <Route path="/products" element={<ProductsPage />} />
         <Route path="/create-order" element={<CreateOrderPage />} />
         <Route path="/api-keys" element={<ApiKeysPage />} />
-        <Route path="/webhooks" element={<WebhooksPage />} />
+        <Route path="/incoming-webhooks" element={<IncomingWebhooksPage />} />
+        <Route path="/outgoing-webhooks" element={<WebhooksPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

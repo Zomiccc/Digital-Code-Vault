@@ -84,6 +84,14 @@ class DCV_Webhook_Settings_Page {
         );
 
         add_settings_field(
+            'dcv_webhook_secret',
+            __( 'Webhook Secret', 'dcv-webhook' ),
+            array( $this, 'render_webhook_secret_field' ),
+            self::PAGE_SLUG,
+            self::SECTION_ID
+        );
+
+        add_settings_field(
             'dcv_skip_verification',
             __( 'Skip Verification', 'dcv-webhook' ),
             array( $this, 'render_skip_verification_field' ),
@@ -117,6 +125,13 @@ class DCV_Webhook_Settings_Page {
             : 'http://localhost:3000/api/v1';
 
         $sanitized['skip_verification'] = isset( $input['skip_verification'] ) ? '1' : '';
+
+        $new_secret = isset( $input['webhook_secret'] ) ? trim( $input['webhook_secret'] ) : '';
+        if ( empty( $new_secret ) ) {
+            $sanitized['webhook_secret'] = $existing['webhook_secret'];
+        } else {
+            $sanitized['webhook_secret'] = sanitize_text_field( $new_secret );
+        }
 
         return $sanitized;
     }
@@ -164,6 +179,22 @@ class DCV_Webhook_Settings_Page {
     }
 
     /**
+     * Renders the webhook secret field.
+     */
+    public function render_webhook_secret_field() {
+        $settings = dcv_webhook_get_settings();
+        $has_secret = ! empty( $settings['webhook_secret'] );
+
+        echo '<input type="password" id="dcv_webhook_secret" name="' . esc_attr( DCV_WEBHOOK_OPTION_KEY ) . '[webhook_secret]"';
+        echo ' value="" placeholder="' . esc_attr( $has_secret ? '•••••••••••• (saved — enter new secret to replace)' : 'Get this from your merchant portal Webhooks page' ) . '"';
+        echo ' class="regular-text" autocomplete="off" />';
+        echo '<p class="description">' . esc_html__(
+            'Your webhook secret from the Digital Code Vault merchant portal (Webhooks page). This is required for sending order events to the platform.',
+            'dcv-webhook'
+        ) . '</p>';
+    }
+
+    /**
      * Renders the skip verification checkbox.
      */
     public function render_skip_verification_field() {
@@ -199,7 +230,7 @@ class DCV_Webhook_Settings_Page {
         $webhook_url = rest_url( 'dcv/v1/webhook' );
         $skip        = $settings['skip_verification'] === '1';
 
-        $client = new DCV_Webhook_API_Client( $settings['api_key'], $settings['api_url'] );
+        $client = new DCV_Webhook_API_Client( $settings['api_key'], $settings['api_url'], $settings['webhook_secret'] );
         $result = $client->register_endpoint( $webhook_url, $skip );
 
         if ( is_wp_error( $result ) ) {

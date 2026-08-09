@@ -39,6 +39,7 @@ function dcv_webhook_get_settings() {
     $defaults = array(
         'api_key'           => '',
         'api_url'           => 'http://localhost:3000/api/v1',
+        'webhook_secret'    => '',
         'skip_verification' => '',
     );
     $stored = get_option( DCV_WEBHOOK_OPTION_KEY, array() );

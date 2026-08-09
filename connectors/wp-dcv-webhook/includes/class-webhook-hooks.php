@@ -247,7 +247,7 @@ class DCV_Webhook_Hooks {
             'X-WC-Webhook-Topic'  => "order.{$status}",
         );
 
-        $client = new DCV_Webhook_API_Client( $settings['api_key'], $settings['api_url'] );
+        $client = new DCV_Webhook_API_Client( $settings['api_key'], $settings['api_url'], $settings['webhook_secret'] );
         $result = $client->forward_incoming( $incoming_url, $payload, $headers );
 
         if ( is_wp_error( $result ) ) {
@@ -338,7 +338,7 @@ class DCV_Webhook_Hooks {
             'X-WC-Webhook-Topic'  => 'elementor.form.submitted',
         );
 
-        $client = new DCV_Webhook_API_Client( $settings['api_key'], $settings['api_url'] );
+        $client = new DCV_Webhook_API_Client( $settings['api_key'], $settings['api_url'], $settings['webhook_secret'] );
         $result = $client->forward_incoming( $incoming_url, $payload, $headers );
 
         if ( is_wp_error( $result ) ) {
