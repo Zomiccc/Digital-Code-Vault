@@ -628,22 +628,21 @@ function ConnectSitePage() {
                 <strong>Download the plugin:</strong>
                 <div className="mt-2 flex items-center gap-3">
                   <a
-                    href="https://github.com/Zomiccc/digitalvaul/tree/main/connectors/wp-dcv-webhook"
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    href="/dcv-webhook-plugin.zip"
+                    download="dcv-webhook-plugin.zip"
                     className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
                   >
                     <ExternalLink className="h-4 w-4" /> Download WordPress Plugin
                   </a>
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Download the <code>wp-dcv-webhook</code> folder, zip it as <code>dcv-webhook.zip</code>
+                  Download the zip, then upload it to WordPress. No need to unzip — WordPress installs it directly.
                 </p>
               </li>
               <li>
                 <strong>Install the plugin:</strong>
                 <p className="mt-1 text-muted-foreground">
-                  WordPress Admin → Plugins → Add New → Upload Plugin → choose <code>dcv-webhook.zip</code> → Activate
+                  WordPress Admin → Plugins → Add New → Upload Plugin → choose <code>dcv-webhook-plugin.zip</code> → Activate
                 </p>
               </li>
               <li>
@@ -806,9 +805,8 @@ function ConnectSitePage() {
                 <strong>Download and install the same WordPress plugin</strong> as WooCommerce:
                 <div className="mt-2">
                   <a
-                    href="https://github.com/Zomiccc/digitalvaul/tree/main/connectors/wp-dcv-webhook"
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    href="/dcv-webhook-plugin.zip"
+                    download="dcv-webhook-plugin.zip"
                     className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
                   >
                     <ExternalLink className="h-4 w-4" /> Download WordPress Plugin
