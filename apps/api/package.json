@@ -2,7 +2,7 @@
   "name": "@digitalcode/api",
   "version": "1.0.0",
   "scripts": {
-    "build": "nest build",
+    "build": "tsc -p tsconfig.build.json",
     "postinstall": "node prisma/set-provider.js && npx prisma generate",
     "start": "node dist/main",
     "start:dev": "nest start --watch",
