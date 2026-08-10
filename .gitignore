@@ -17,6 +17,9 @@ apps/api/dist/
 apps/api/gen.log
 connectors/webhook-sdk/dist/
 
+# TypeScript incremental build cache
+*.tsbuildinfo
+
 # Database
 apps/api/prisma/dev.db
 apps/api/prisma/*.db-journal
