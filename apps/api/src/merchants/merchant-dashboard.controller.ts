@@ -1,6 +1,8 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, Req, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, Req, Res, UseGuards, BadRequestException } from '@nestjs/common';
+import { Response } from 'express';
 import { MerchantsService } from './merchants.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PluginDownloadService } from './plugin-download.service';
 import { WebhookService } from '../webhooks/webhook.service';
 import { FulfillmentService } from '../fulfillment/fulfillment.service';
 import { WalletService } from '../wallet/wallet.service';
@@ -18,6 +20,7 @@ export class MerchantDashboardController {
     private codesService: CodesService,
     private productsService: ProductsService,
     private walletService: WalletService,
+    private pluginDownloadService: PluginDownloadService,
   ) {}
 
   @Get('dashboard/wallet')
@@ -190,5 +193,12 @@ export class MerchantDashboardController {
   @UseGuards(JwtAuthGuard)
   async listProducts(@Req() req: any) {
     return this.productsService.listProductsForMerchant(req.user.merchantId);
+  }
+
+  // ─── WordPress Plugin Download ───
+
+  @Get('integrations/wordpress/plugin/download')
+  async downloadWordPressPlugin(@Res() res: Response) {
+    return this.pluginDownloadService.downloadPlugin(res);
   }
 }

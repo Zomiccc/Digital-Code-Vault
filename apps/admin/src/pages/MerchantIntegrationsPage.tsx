@@ -310,16 +310,15 @@ export function MerchantIntegrationsPage() {
                     Configure
                   </Button>
                   {platform.pluginAvailable && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        window.open('/connectors/wp-dcv-webhook/README.md', '_blank');
-                      }}
+                    <a
+                      href="/api/v1/merchant/integrations/wordpress/plugin/download"
+                      download
                     >
-                      <Download className="h-4 w-4 mr-1" />
-                      Plugin Guide
-                    </Button>
+                      <Button variant="ghost" size="sm">
+                        <Download className="h-4 w-4 mr-1" />
+                        Download Plugin
+                      </Button>
+                    </a>
                   )}
                 </div>
               </Card>
@@ -450,7 +449,7 @@ export function MerchantIntegrationsPage() {
               </ol>
             </div>
 
-            {/* Plugin link */}
+            {/* Plugin download */}
             {selectedPlatform.pluginAvailable && (
               <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
                 <div className="flex items-center gap-2">
@@ -458,18 +457,17 @@ export function MerchantIntegrationsPage() {
                   <span className="text-sm font-medium">WordPress Plugin Available</span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Download the DCV Webhook Connector plugin from the connectors directory.
+                  Download the DCV Webhook Connector plugin ZIP and upload it to your WordPress site via Plugins → Add New → Upload Plugin.
                 </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="mt-2"
-                  onClick={() => {
-                    window.open('/connectors/wp-dcv-webhook/README.md', '_blank');
-                  }}
+                <a
+                  href="/api/v1/merchant/integrations/wordpress/plugin/download"
+                  download
                 >
-                  View Plugin Guide
-                </Button>
+                  <Button variant="outline" size="sm" className="mt-2">
+                    <Download className="h-4 w-4 mr-1" />
+                    Download Plugin ZIP
+                  </Button>
+                </a>
               </div>
             )}
 
