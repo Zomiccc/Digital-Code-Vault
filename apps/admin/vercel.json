@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://api.yourdomain.com/api/:path*" }
+    { "source": "/api/:path*", "destination": "https://digitalvaul.onrender.com/api/:path*" }
   ]
 }
