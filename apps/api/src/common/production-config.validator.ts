@@ -79,15 +79,11 @@ export class ProductionConfigValidator {
     }
 
     if (errors.length > 0) {
-      this.logger.error('=== PRODUCTION CONFIG VALIDATION FAILED ===');
-      for (const err of errors) {
-        this.logger.error(`  ✗ ${err}`);
-      }
-      this.logger.error('=============================================');
-      throw new Error(
-        `Production config validation failed with ${errors.length} error(s). ` +
-        'Fix the above environment variables before starting the application.'
-      );
+      const message = '=== PRODUCTION CONFIG VALIDATION FAILED ===\n' +
+        errors.map(e => `  ✗ ${e}`).join('\n') +
+        '\n=============================================';
+      this.logger.error(message);
+      throw new Error(message);
     }
 
     this.logger.log('Production config validation passed — all required variables are set.');
