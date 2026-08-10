@@ -9,17 +9,13 @@
     "target": "ES2022",
     "sourceMap": true,
     "outDir": "dist",
-    "baseUrl": "./",
     "incremental": true,
     "skipLibCheck": true,
     "strict": true,
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": true,
     "strictNullChecks": true,
-    "esModuleInterop": true,
-    "paths": {
-      "@shared/*": ["../../packages/shared/src/*"]
-    }
+    "esModuleInterop": true
   },
   "include": ["src/**/*", "prisma/**/*"],
   "exclude": ["node_modules", "dist"]
