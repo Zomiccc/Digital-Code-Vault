@@ -152,8 +152,26 @@ export const api = {
   getApiLogs: (limit = 50, offset = 0) =>
     apiFetch(`/admin/api-logs?limit=${limit}&offset=${offset}`),
 
+  // Admin wallet / finance
+  getAdminWallet: () => apiFetch('/admin/wallet'),
+  getAdminWalletTransactions: (limit = 50, offset = 0) =>
+    apiFetch(`/admin/wallet/transactions?limit=${limit}&offset=${offset}`),
+  listFundingRequests: (status?: string) =>
+    apiFetch(`/admin/wallet/funding-requests${status ? `?status=${status}` : ''}`),
+  approveFundingRequest: (id: string, note?: string) =>
+    apiFetch(`/admin/wallet/funding-requests/${id}/approve`, { method: 'POST', body: JSON.stringify({ note }) }),
+  rejectFundingRequest: (id: string, note?: string) =>
+    apiFetch(`/admin/wallet/funding-requests/${id}/reject`, { method: 'POST', body: JSON.stringify({ note }) }),
+  getReconciliationReport: (limit = 100, offset = 0) =>
+    apiFetch(`/admin/wallet/reconciliation?limit=${limit}&offset=${offset}`),
+  getMerchantFinance: (merchantId: string) =>
+    apiFetch(`/admin/merchants/${merchantId}/finance`),
+
   // Merchant endpoints
   getWallet: () => apiFetch('/merchant/dashboard/wallet'),
+  listMyFundingRequests: () => apiFetch('/merchant/dashboard/funding-requests'),
+  createFundingRequest: (amount: number, note?: string) =>
+    apiFetch('/merchant/dashboard/funding-requests', { method: 'POST', body: JSON.stringify({ amount, note }) }),
   listOrders: (limit = 50, offset = 0) =>
     apiFetch(`/merchant/dashboard/orders?limit=${limit}&offset=${offset}`),
   listMerchantProducts: () => apiFetch('/products'),
@@ -186,6 +204,19 @@ export const api = {
   // Webhook statistics
   getWebhookStatistics: () => apiFetch('/webhooks/statistics'),
 
+  // Merchant webhook secret (for authenticating incoming webhooks from external platforms)
+  getWebhookSecret: () => apiFetch('/merchant/webhook-secret'),
+  regenerateWebhookSecret: () =>
+    apiFetch('/merchant/webhook-secret/regenerate', { method: 'POST' }),
+
+  // Connected product mapping update
+  updateConnectedProduct: (id: string, data: { dcv_product_id?: string; dcv_denomination_id?: string | null; inventory_source?: string }) =>
+    apiFetch(`/webhooks/connected-products/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  // Revoke API key
+  revokeApiKeyById: (id: string) =>
+    apiFetch(`/merchant/dashboard/api-keys/${id}`, { method: 'DELETE' }),
+
   // Customer endpoints
   customerProducts: () => apiFetch('/customer/products'),
   customerDenominations: (productId: string) =>
@@ -197,9 +228,45 @@ export const api = {
       body: JSON.stringify({ product_id: productId, amount, reference_id: referenceId }),
     }),
   customerProfile: () => apiFetch('/customer/profile'),
-  customerBecomeMerchant: (data: { name: string; email: string; password: string; currency?: string }) =>
+  customerBecomeMerchant: (data: { storeName: string; storeEmail: string; currency?: string }) =>
     apiFetch('/customer/become-merchant', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  // Admin merchant applications
+  listMerchantApplications: (status?: string) =>
+    apiFetch(`/admin/merchant-applications${status ? `?status=${status}` : ''}`),
+  approveMerchantApplication: (id: string) =>
+    apiFetch(`/admin/merchant-applications/${id}/approve`, { method: 'POST' }),
+  rejectMerchantApplication: (id: string, note?: string) =>
+    apiFetch(`/admin/merchant-applications/${id}/reject`, { method: 'POST', body: JSON.stringify({ note }) }),
+
+  // Admin wallet initialization
+  initializeAdminWallet: (amount: number, description?: string) =>
+    apiFetch('/admin/wallet/initialize', { method: 'POST', body: JSON.stringify({ amount, description }) }),
+
+  // Stripe endpoints
+  createMerchantFundingSession: (amount: number, currency?: string) =>
+    apiFetch('/stripe/merchant-funding/create-session', {
+      method: 'POST',
+      body: JSON.stringify({ amount, currency }),
+    }),
+  createCustomerPurchaseSession: (data: { product_id: string; amount: number; customer_email: string; customer_name?: string; denomination_id?: string; currency?: string }) =>
+    apiFetch('/stripe/customer-purchase/create-session', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  createAuthenticatedPurchaseSession: (data: { product_id: string; amount: number; denomination_id?: string; currency?: string }) =>
+    apiFetch('/stripe/customer-purchase/authenticated/create-session', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getStripePublishableKey: () => apiFetch('/stripe/publishable-key'),
+  getStripePayment: (id: string) => apiFetch(`/stripe/payment/${id}`),
+  getStripeOrder: (id: string) => apiFetch(`/stripe/order/${id}`),
+  listStripePayments: (params?: { paymentType?: string; status?: string; limit?: number; offset?: number }) => {
+    const qs = params ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]) as any)}` : '';
+    return apiFetch(`/stripe/payments${qs}`);
+  },
 };

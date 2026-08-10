@@ -6,9 +6,10 @@ import { CustomerDashboardController } from './customer-dashboard.controller';
 import { AuthModule } from '../auth/auth.module';
 import { FulfillmentModule } from '../fulfillment/fulfillment.module';
 import { ProductsModule } from '../products/products.module';
+import { CodesModule } from '../codes/codes.module';
 
 @Module({
-  imports: [AuthModule, FulfillmentModule, ProductsModule],
+  imports: [AuthModule, FulfillmentModule, ProductsModule, CodesModule],
   providers: [MerchantsService],
   controllers: [WalletController, MerchantApiController, MerchantDashboardController, CustomerDashboardController],
   exports: [MerchantsService],

@@ -164,6 +164,30 @@ async function main() {
     });
   }
 
+  // ─── Admin Wallet (demo balance: $10,000) ───
+  const existingWallet = await prisma.adminWallet.findFirst();
+  if (!existingWallet) {
+    const wallet = await prisma.adminWallet.create({
+      data: {
+        balance: 10000,
+        currency: 'USD',
+      },
+    });
+    await prisma.adminWalletTransaction.create({
+      data: {
+        adminWalletId: wallet.id,
+        type: 'CREDIT',
+        amount: 10000,
+        balanceAfter: 10000,
+        source: 'MANUAL',
+        description: 'Initial demo funding — $10,000',
+      },
+    });
+    console.log('✓ Admin wallet seeded with $10,000 demo balance');
+  } else {
+    console.log('✓ Admin wallet already exists — balance:', existingWallet.balance);
+  }
+
   console.log('Seed complete!');
   console.log('Admin login: admin@digitalcode.local / Admin123!@#');
   console.log('Merchant login: merchant@test.com / Merchant123!@#');

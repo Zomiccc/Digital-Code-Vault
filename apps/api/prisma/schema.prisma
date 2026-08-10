@@ -43,6 +43,8 @@ model Merchant {
   webhookEndpoints WebhookEndpoint[]
   products        Product[]
   connectedProducts ConnectedProduct[]
+  codeItems       CodeItem[]
+  fundingRequests FundingRequest[]
 }
 
 model MerchantUser {
@@ -106,6 +108,7 @@ model Product {
   merchant      Merchant?      @relation(fields: [merchantId], references: [id])
   denominations Denomination[]
   fulfillmentReqs FulfillmentRequest[]
+  connectedProducts ConnectedProduct[] @relation("ConnectedProductDcvProduct")
 
   @@index([merchantId])
 }
@@ -132,6 +135,8 @@ model CodeItem {
   status          String  @default("AVAILABLE")
   batchId         String?
   supplierId      String?
+  merchantId      String?
+  source          String  @default("DCV")
   reservedUntil   DateTime?
   reservedByReqId String?
   revealedAt      DateTime?
@@ -141,11 +146,14 @@ model CodeItem {
 
   denomination Denomination @relation(fields: [denominationId], references: [id], onDelete: Cascade)
   supplier     Supplier?    @relation(fields: [supplierId], references: [id])
+  merchant     Merchant?    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
 
   @@index([denominationId, status])
   @@index([status])
   @@index([codeHash])
   @@index([batchId])
+  @@index([merchantId])
+  @@index([denominationId, status, merchantId])
 }
 
 model FulfillmentRequest {
@@ -162,6 +170,8 @@ model FulfillmentRequest {
   customerEmail   String?
   customerName    String?
   customerAddress String?
+  inventorySource String?            @default("DCV")
+  walletCharged   Boolean            @default(false)
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
@@ -273,13 +283,35 @@ model Customer {
   passwordHash String
   isActive     Boolean  @default(true)
   merchantId   String?
+  merchantAppStatus String? // PENDING | APPROVED | REJECTED
   lastLoginAt  DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   verificationCode VerificationCode?
+  merchantApplication MerchantApplication?
 
   @@index([merchantId])
+  @@index([merchantAppStatus])
+}
+
+model MerchantApplication {
+  id            String   @id @default(uuid())
+  customerId    String   @unique
+  storeName     String
+  storeEmail    String
+  currency      String   @default("USD")
+  status        String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  adminNote     String?
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([createdAt])
 }
 
 model VerificationCode {
@@ -354,6 +386,59 @@ model IncomingWebhook {
   @@index([createdAt])
 }
 
+model AdminWallet {
+  id            String   @id @default(uuid())
+  balance       Decimal  @default(0)
+  currency      String   @default("USD")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  transactions  AdminWalletTransaction[]
+  fundingRequests FundingRequest[] @relation("AdminWalletFundingRequests")
+}
+
+model AdminWalletTransaction {
+  id            String   @id @default(uuid())
+  adminWalletId String
+  type          String   // CREDIT | DEBIT
+  amount        Decimal
+  balanceAfter  Decimal
+  referenceId   String?  // fulfillment ID or funding request ID
+  source        String   // FULFILLMENT | FUNDING | MANUAL | REFUND
+  description   String?
+  createdAt     DateTime @default(now())
+
+  adminWallet   AdminWallet @relation(fields: [adminWalletId], references: [id], onDelete: Cascade)
+
+  @@index([adminWalletId])
+  @@index([referenceId])
+  @@index([source])
+  @@index([createdAt])
+}
+
+model FundingRequest {
+  id            String   @id @default(uuid())
+  merchantId    String
+  adminWalletId String
+  amount        Decimal
+  currency      String   @default("USD")
+  note          String?
+  status        String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  adminNote     String?
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  merchant      Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  adminWallet   AdminWallet @relation("AdminWalletFundingRequests", fields: [adminWalletId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId])
+  @@index([adminWalletId])
+  @@index([status])
+  @@index([createdAt])
+}
+
 model ConnectedProduct {
   id              String   @id @default(uuid())
   merchantId      String
@@ -369,15 +454,75 @@ model ConnectedProduct {
   currency        String?
   stock           Int      @default(0)
   status          String   @default("ACTIVE")
+  inventorySource String?  @default("DCV")
+  dcvProductId    String?
+  dcvDenominationId String?
   lastSyncedAt    DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  dcvProduct    Product?     @relation("ConnectedProductDcvProduct", fields: [dcvProductId], references: [id], onDelete: SetNull)
 
   @@unique([merchantId, platform, platformProductId])
   @@unique([merchantId, platform, platformSku])
   @@index([merchantId])
   @@index([platform])
   @@index([status])
+  @@index([dcvProductId])
+}
+
+model PaymentRecord {
+  id                    String    @id @default(uuid())
+  customerId            String?
+  merchantId            String?
+  customerOrderId       String?  @unique
+  stripeCheckoutSessionId String?  @unique
+  stripePaymentIntentId String?  @unique
+  stripeEventId         String?  @unique
+  amount                Decimal
+  currency              String   @default("USD")
+  status                String   @default("PENDING") // PENDING | SUCCEEDED | FAILED | CANCELED | REFUNDED
+  paymentType           String   // CUSTOMER_PURCHASE | MERCHANT_WALLET_FUNDING
+  description           String?
+  metadata              String?
+  refundAmount          Decimal?
+  refundReason          String?
+  refundedAt            DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  paidAt                DateTime?
+
+  customerOrder         CustomerOrder? @relation(fields: [customerOrderId], references: [id])
+
+  @@index([merchantId])
+  @@index([customerId])
+  @@index([status])
+  @@index([paymentType])
+  @@index([createdAt])
+}
+
+model CustomerOrder {
+  id              String   @id @default(uuid())
+  customerId      String?
+  customerEmail   String
+  customerName    String?
+  productId       String
+  denominationId  String?
+  amount          Decimal
+  currency        String   @default("USD")
+  status          String   @default("PENDING_PAYMENT") // PENDING_PAYMENT | PAID | FULFILLED | FAILED | CANCELED
+  fulfillmentId   String?
+  revealToken     String?
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  payment         PaymentRecord?
+
+  @@index([customerId])
+  @@index([customerEmail])
+  @@index([status])
+  @@index([productId])
+  @@index([createdAt])
 }

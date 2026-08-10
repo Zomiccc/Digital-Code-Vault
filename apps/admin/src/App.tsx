@@ -8,8 +8,11 @@ import { ProductsPage } from '@/pages/ProductsPage';
 import { InventoryPage } from '@/pages/InventoryPage';
 import { BulkUploadPage } from '@/pages/BulkUploadPage';
 import { FulfillmentPage } from '@/pages/FulfillmentPage';
+import { FinancePage } from '@/pages/FinancePage';
+import { MerchantWalletPage } from '@/pages/MerchantWalletPage';
 import { AuditLogsPage } from '@/pages/AuditLogsPage';
 import { StaffPage } from '@/pages/StaffPage';
+import { MerchantApplicationsPage } from '@/pages/MerchantApplicationsPage';
 import {
   MerchantDashboardPage,
   MerchantOrdersPage,
@@ -20,12 +23,14 @@ import {
   IncomingWebhooksPage,
   ConnectedProductsPage,
 } from '@/pages/MerchantPages';
+import { MerchantIntegrationsPage } from '@/pages/MerchantIntegrationsPage';
 import {
   CustomerDashboardPage,
   CustomerProductsPage,
   CustomerCreateOrderPage,
   CustomerOrdersPage,
   CustomerBecomeMerchantPage,
+  CustomerPurchaseSuccessPage,
 } from '@/pages/CustomerPages';
 
 function ProtectedRoutes() {
@@ -48,33 +53,44 @@ function ProtectedRoutes() {
       <Routes>
         {user.role === 'admin' ? (
           <>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/merchants" element={<MerchantsPage />} />
-            <Route path="/products" element={<ProductsPage />} />
-            <Route path="/inventory" element={<InventoryPage />} />
-            <Route path="/upload" element={<BulkUploadPage />} />
-            <Route path="/fulfillment" element={<FulfillmentPage />} />
-            <Route path="/audit" element={<AuditLogsPage />} />
-            <Route path="/staff" element={<StaffPage />} />
+            <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
+            <Route path="/admin/dashboard" element={<DashboardPage />} />
+            <Route path="/admin/merchants" element={<MerchantsPage />} />
+            <Route path="/admin/products" element={<ProductsPage />} />
+            <Route path="/admin/inventory" element={<InventoryPage />} />
+            <Route path="/admin/upload" element={<BulkUploadPage />} />
+            <Route path="/admin/fulfillment" element={<FulfillmentPage />} />
+            <Route path="/admin/finance" element={<FinancePage />} />
+            <Route path="/admin/applications" element={<MerchantApplicationsPage />} />
+            <Route path="/admin/audit" element={<AuditLogsPage />} />
+            <Route path="/admin/staff" element={<StaffPage />} />
+            <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
           </>
         ) : user.role === 'merchant' ? (
           <>
-            <Route path="/" element={<MerchantDashboardPage />} />
-            <Route path="/orders" element={<MerchantOrdersPage />} />
-            <Route path="/products" element={<MerchantProductsPage />} />
-            <Route path="/create-order" element={<MerchantCreateOrderPage />} />
-            <Route path="/api-keys" element={<MerchantApiKeysPage />} />
-            <Route path="/webhooks" element={<MerchantWebhooksPage />} />
-            <Route path="/incoming-webhooks" element={<IncomingWebhooksPage />} />
-            <Route path="/connected-products" element={<ConnectedProductsPage />} />
+            <Route path="/merchant" element={<Navigate to="/merchant/dashboard" replace />} />
+            <Route path="/merchant/dashboard" element={<MerchantDashboardPage />} />
+            <Route path="/merchant/wallet" element={<MerchantWalletPage />} />
+            <Route path="/merchant/orders" element={<MerchantOrdersPage />} />
+            <Route path="/merchant/products" element={<MerchantProductsPage />} />
+            <Route path="/merchant/create-order" element={<MerchantCreateOrderPage />} />
+            <Route path="/merchant/api-keys" element={<MerchantApiKeysPage />} />
+            <Route path="/merchant/webhooks" element={<MerchantWebhooksPage />} />
+            <Route path="/merchant/incoming-webhooks" element={<IncomingWebhooksPage />} />
+            <Route path="/merchant/connected-products" element={<ConnectedProductsPage />} />
+            <Route path="/merchant/integrations" element={<MerchantIntegrationsPage />} />
+            <Route path="/" element={<Navigate to="/merchant/dashboard" replace />} />
           </>
         ) : (
           <>
-            <Route path="/" element={<CustomerDashboardPage />} />
-            <Route path="/browse" element={<CustomerProductsPage />} />
-            <Route path="/order" element={<CustomerCreateOrderPage />} />
-            <Route path="/my-orders" element={<CustomerOrdersPage />} />
-            <Route path="/become-merchant" element={<CustomerBecomeMerchantPage />} />
+            <Route path="/customer" element={<Navigate to="/customer/dashboard" replace />} />
+            <Route path="/customer/dashboard" element={<CustomerDashboardPage />} />
+            <Route path="/customer/browse" element={<CustomerProductsPage />} />
+            <Route path="/customer/order" element={<CustomerCreateOrderPage />} />
+            <Route path="/customer/purchase-success" element={<CustomerPurchaseSuccessPage />} />
+            <Route path="/customer/my-orders" element={<CustomerOrdersPage />} />
+            <Route path="/customer/become-merchant" element={<CustomerBecomeMerchantPage />} />
+            <Route path="/" element={<Navigate to="/customer/dashboard" replace />} />
           </>
         )}
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -88,6 +104,7 @@ export default function App() {
     <AuthProvider>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<LoginPage />} />
         <Route path="/*" element={<ProtectedRoutes />} />
       </Routes>
     </AuthProvider>

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { EncryptionService } from '../encryption/encryption.service';
+import { WalletService } from '../wallet/wallet.service';
 import * as argon2 from 'argon2';
 import { nanoid } from 'nanoid';
 
@@ -11,6 +12,7 @@ export class MerchantsService {
     private prisma: PrismaService,
     private authService: AuthService,
     private encryptionService: EncryptionService,
+    private walletService: WalletService,
   ) {}
 
   async createMerchant(data: {
@@ -109,21 +111,55 @@ export class MerchantsService {
   }
 
   async addWalletCredit(merchantId: string, amount: number, adminId: string, ip?: string) {
-    const merchant = await this.prisma.merchant.update({
-      where: { id: merchantId },
-      data: { walletBalance: { increment: amount } },
+    const adminWalletId = await this.walletService.getOrCreateAdminWallet();
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      // 1. Debit admin wallet
+      const updatedAdminWallet = await tx.adminWallet.update({
+        where: { id: adminWalletId },
+        data: { balance: { decrement: amount } },
+      });
+
+      if (Number(updatedAdminWallet.balance) < 0) {
+        throw new BadRequestException({
+          error: 'INSUFFICIENT_ADMIN_WALLET',
+          code: 'INSUFFICIENT_ADMIN_WALLET',
+          message: `Admin wallet has insufficient balance. Required: ${amount}, Available: ${Number(updatedAdminWallet.balance) + amount}`,
+        });
+      }
+
+      // 2. Create admin wallet transaction
+      await tx.adminWalletTransaction.create({
+        data: {
+          adminWalletId,
+          type: 'DEBIT',
+          amount,
+          balanceAfter: updatedAdminWallet.balance,
+          source: 'MANUAL',
+          description: `Manual credit to merchant ${merchantId} by admin ${adminId}`,
+        },
+      });
+
+      // 3. Credit merchant wallet
+      const updatedMerchant = await tx.merchant.update({
+        where: { id: merchantId },
+        data: { walletBalance: { increment: amount } },
+      });
+
+      // 4. Create merchant wallet transaction
+      await tx.walletTransaction.create({
+        data: {
+          merchantId,
+          type: 'CREDIT',
+          amount,
+          balanceAfter: updatedMerchant.walletBalance,
+        },
+      });
+
+      return { new_balance: updatedMerchant.walletBalance };
     });
 
-    await this.prisma.walletTransaction.create({
-      data: {
-        merchantId,
-        type: 'CREDIT',
-        amount,
-        balanceAfter: merchant.walletBalance,
-      },
-    });
-
-    return { success: true, new_balance: merchant.walletBalance };
+    return { success: true, ...result };
   }
 
   async getWallet(merchantId: string) {

@@ -327,59 +327,191 @@ export class AuthService {
     };
   }
 
-  async customerBecomeMerchant(customerId: string, data: { name: string; email: string; password: string; currency?: string }, ip?: string) {
+  async customerBecomeMerchant(customerId: string, data: { storeName: string; storeEmail: string; currency?: string }, ip?: string) {
     const customer = await this.prisma.customer.findUnique({ where: { id: customerId } });
     if (!customer) {
       throw new UnauthorizedException('Customer not found');
     }
 
-    const existingMerchant = await this.prisma.merchant.findUnique({ where: { email: data.email } });
+    if (customer.merchantId) {
+      throw new ConflictException('You are already a merchant');
+    }
+
+    if (customer.merchantAppStatus === 'PENDING') {
+      throw new ConflictException('You already have a pending merchant application');
+    }
+
+    const existingMerchant = await this.prisma.merchant.findUnique({ where: { email: data.storeEmail } });
     if (existingMerchant) {
       throw new ConflictException('A merchant with this email already exists');
     }
 
-    const passwordHash = await argon2.hash(data.password);
-
-    const merchant = await this.prisma.merchant.create({
+    // Create application — admin must approve before merchant is created
+    const application = await this.prisma.merchantApplication.create({
       data: {
-        name: data.name,
-        email: data.email,
-        walletBalance: 0,
+        customerId,
+        storeName: data.storeName,
+        storeEmail: data.storeEmail,
         currency: data.currency || 'USD',
-        status: 'ACTIVE',
-        allowedProductIds: JSON.stringify([]),
-        users: {
-          create: {
-            email: data.email,
-            name: data.name,
-            passwordHash,
-          },
-        },
+        status: 'PENDING',
       },
-      include: { users: true },
     });
 
     await this.prisma.customer.update({
       where: { id: customerId },
-      data: { merchantId: merchant.id },
+      data: { merchantAppStatus: 'PENDING' },
     });
 
     await this.auditService.log({
       actorType: 'CUSTOMER',
       actorId: customerId,
-      action: 'customer.become_merchant',
-      entity: 'Merchant',
-      entityId: merchant.id,
+      action: 'customer.merchant_application_submitted',
+      entity: 'MerchantApplication',
+      entityId: application.id,
       ip,
     });
 
-    const user = merchant.users[0];
-    const tokens = await this.generateMerchantTokens(user.id, user.email, merchant.id);
+    return {
+      success: true,
+      message: 'Merchant application submitted. An admin will review it.',
+      applicationId: application.id,
+      status: 'PENDING',
+    };
+  }
+
+  async approveMerchantApplication(applicationId: string, adminId: string, ip?: string) {
+    const application = await this.prisma.merchantApplication.findUnique({
+      where: { id: applicationId },
+      include: { customer: true },
+    });
+
+    if (!application) {
+      throw new UnauthorizedException('Application not found');
+    }
+
+    if (application.status !== 'PENDING') {
+      throw new ConflictException(`Application already ${application.status}`);
+    }
+
+    // Create merchant + link to customer in a single transaction
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Create merchant with a merchant user using the customer's password hash
+      const merchant = await tx.merchant.create({
+        data: {
+          name: application.storeName,
+          email: application.storeEmail,
+          walletBalance: 0,
+          currency: application.currency,
+          status: 'ACTIVE',
+          allowedProductIds: JSON.stringify([]),
+          users: {
+            create: {
+              email: application.customer.email,
+              name: application.customer.name,
+              passwordHash: application.customer.passwordHash,
+            },
+          },
+        },
+        include: { users: true },
+      });
+
+      // Link customer to merchant
+      await tx.customer.update({
+        where: { id: application.customerId },
+        data: {
+          merchantId: merchant.id,
+          merchantAppStatus: 'APPROVED',
+        },
+      });
+
+      // Update application status
+      await tx.merchantApplication.update({
+        where: { id: applicationId },
+        data: {
+          status: 'APPROVED',
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+        },
+      });
+
+      return { merchant, merchantUser: merchant.users[0] };
+    });
+
+    await this.auditService.log({
+      actorType: 'ADMIN',
+      actorId: adminId,
+      action: 'admin.merchant_application_approved',
+      entity: 'MerchantApplication',
+      entityId: applicationId,
+      ip,
+    });
 
     return {
-      user: { id: user.id, email: user.email, name: user.name, merchantId: merchant.id, merchantName: merchant.name, role: 'merchant' },
-      ...tokens,
+      success: true,
+      message: 'Merchant application approved. Customer can now log in as a merchant.',
+      merchantId: result.merchant.id,
+      merchantName: result.merchant.name,
     };
+  }
+
+  async rejectMerchantApplication(applicationId: string, adminId: string, note: string, ip?: string) {
+    const application = await this.prisma.merchantApplication.findUnique({
+      where: { id: applicationId },
+    });
+
+    if (!application) {
+      throw new UnauthorizedException('Application not found');
+    }
+
+    if (application.status !== 'PENDING') {
+      throw new ConflictException(`Application already ${application.status}`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.merchantApplication.update({
+        where: { id: applicationId },
+        data: {
+          status: 'REJECTED',
+          adminNote: note,
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+        },
+      });
+
+      await tx.customer.update({
+        where: { id: application.customerId },
+        data: { merchantAppStatus: 'REJECTED' },
+      });
+    });
+
+    await this.auditService.log({
+      actorType: 'ADMIN',
+      actorId: adminId,
+      action: 'admin.merchant_application_rejected',
+      entity: 'MerchantApplication',
+      entityId: applicationId,
+      ip,
+    });
+
+    return {
+      success: true,
+      message: 'Merchant application rejected.',
+    };
+  }
+
+  async listMerchantApplications(status?: string) {
+    const where: any = {};
+    if (status) where.status = status;
+
+    return this.prisma.merchantApplication.findMany({
+      where,
+      include: {
+        customer: {
+          select: { id: true, name: true, email: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   // ─── API Key Management ───

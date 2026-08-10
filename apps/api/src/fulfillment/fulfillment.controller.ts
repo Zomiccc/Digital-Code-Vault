@@ -55,6 +55,7 @@ export class FulfillmentController {
       customerAddress: body.customer_address,
       actorType: 'MERCHANT',
       ip: req.ip,
+      inventorySource: body.inventory_source,
     });
   }
 
@@ -133,6 +134,7 @@ export class PaymentNotificationController {
       customerAddress: body.customer_address,
       actorType: 'MERCHANT',
       ip: req.ip,
+      inventorySource: body.inventory_source,
     });
   }
 }
@@ -176,6 +178,7 @@ export class SandboxController {
       sandbox: true,
       actorType: 'MERCHANT',
       ip: req.ip,
+      inventorySource: body.inventory_source,
     });
   }
 }

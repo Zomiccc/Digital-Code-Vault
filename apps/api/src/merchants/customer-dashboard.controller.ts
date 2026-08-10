@@ -179,7 +179,7 @@ export class CustomerDashboardController {
       createdAt: f.createdAt,
       customer_address: f.customerAddress,
       delivery_link: f.deliveryToken
-        ? `http://localhost:3000/api/v1/reveal/${f.deliveryToken.tokenHash}`
+        ? `/api/v1/reveal/${f.deliveryToken.tokenHash}`
         : null,
       revealed: f.deliveryToken?.revealedAt ? true : false,
     }));
@@ -188,17 +188,17 @@ export class CustomerDashboardController {
   @Post('become-merchant')
   @UseGuards(CustomerAuthGuard)
   async becomeMerchant(@Body() body: any, @Req() req: any) {
-    if (!body.name || !body.email || !body.password) {
+    if (!body.storeName || !body.storeEmail) {
       throw new BadRequestException({
         error: 'INVALID_REQUEST',
         code: 'MISSING_FIELDS',
-        message: 'name, email, and password are required',
+        message: 'storeName and storeEmail are required',
       });
     }
 
     return this.authService.customerBecomeMerchant(
       req.user.id,
-      { name: body.name, email: body.email, password: body.password, currency: body.currency },
+      { storeName: body.storeName, storeEmail: body.storeEmail, currency: body.currency },
       req.ip,
     );
   }
@@ -218,6 +218,7 @@ export class CustomerDashboardController {
       name: customer.name,
       merchantId: customer.merchantId,
       isMerchant: !!customer.merchantId,
+      merchantAppStatus: customer.merchantAppStatus,
     };
   }
 }

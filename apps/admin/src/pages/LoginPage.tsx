@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Shield, Loader2, Lock, Mail, User, Store, Gift } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { Button, Input } from '@/components/ui';
@@ -7,7 +7,8 @@ import { Button, Input } from '@/components/ui';
 export function LoginPage() {
   const { login, register } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const location = useLocation();
+  const [mode, setMode] = useState<'login' | 'register'>(location.pathname === '/register' ? 'register' : 'login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -20,11 +21,13 @@ export function LoginPage() {
     setLoading(true);
     try {
       if (mode === 'login') {
-        await login(email, password);
+        const user = await login(email, password);
+        const redirect = user.role === 'admin' ? '/admin/dashboard' : user.role === 'merchant' ? '/merchant/dashboard' : '/customer/dashboard';
+        navigate(redirect);
       } else {
         await register(name, email, password);
+        navigate('/customer/dashboard');
       }
-      navigate('/');
     } catch (err: any) {
       setError(err.message || 'Authentication failed');
     } finally {

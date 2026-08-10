@@ -2,7 +2,7 @@ import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom'
 import { ReactNode, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Wallet, FileText, Package, Key, LogOut, Menu, X, Store, Plus, Trash2, Loader2, ShoppingCart, Webhook, Copy, Check, ExternalLink, Inbox, Send, Plug,
+  Wallet, FileText, Package, Key, LogOut, Menu, X, Store, Plus, Trash2, Loader2, ShoppingCart, Webhook, Copy, Check, ExternalLink, Inbox, Send, Plug, Boxes, Upload, Ban, Link,
 } from 'lucide-react';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
@@ -119,6 +119,8 @@ const navItems = [
   { to: '/', label: 'Dashboard', icon: Wallet },
   { to: '/orders', label: 'Orders', icon: FileText },
   { to: '/products', label: 'Products', icon: Package },
+  { to: '/inventory', label: 'My Inventory', icon: Boxes },
+  { to: '/product-mapping', label: 'Product Mapping', icon: Link },
   { to: '/create-order', label: 'Create Order', icon: ShoppingCart },
   { to: '/api-keys', label: 'API Keys', icon: Key },
   { to: '/connect-site', label: 'Connect Your Site', icon: Plug },
@@ -1171,6 +1173,379 @@ function WebhooksPage() {
   );
 }
 
+// ─── Inventory Page ───
+function InventoryPage() {
+  const queryClient = useQueryClient();
+  const { data: statsData, isLoading: statsLoading } = useQuery({ queryKey: ['inventory-stats'], queryFn: api.getInventoryStats });
+  const { data: inventoryData, isLoading: inventoryLoading } = useQuery({ queryKey: ['inventory'], queryFn: () => api.listInventory(100, 0) });
+  const { data: productsData } = useQuery({ queryKey: ['merchant-products'], queryFn: api.listMerchantProducts });
+
+  const [showUpload, setShowUpload] = useState(false);
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [selectedDenomId, setSelectedDenomId] = useState('');
+  const [codesText, setCodesText] = useState('');
+  const [uploadResult, setUploadResult] = useState<any>(null);
+
+  const uploadMutation = useMutation({
+    mutationFn: () => {
+      const codes = codesText.split('\n').map((c) => c.trim()).filter(Boolean);
+      return api.uploadCodes(selectedDenomId, codes);
+    },
+    onSuccess: (data) => {
+      setUploadResult(data);
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
+      setCodesText('');
+      setShowUpload(false);
+    },
+  });
+
+  const voidMutation = useMutation({
+    mutationFn: (id: string) => api.voidCode(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
+    },
+  });
+
+  const selectedProduct = productsData?.find((p: any) => p.id === selectedProductId);
+  const denominations = selectedProduct?.denominations || [];
+
+  const stats = statsData?.stats || [];
+  const items = inventoryData?.items || [];
+
+  const statusBadge = (status: string) => {
+    const colors: Record<string, string> = {
+      AVAILABLE: 'bg-green-100 text-green-800',
+      RESERVED: 'bg-yellow-100 text-yellow-800',
+      ALLOCATED: 'bg-blue-100 text-blue-800',
+      DELIVERED: 'bg-purple-100 text-purple-800',
+      VOID: 'bg-red-100 text-red-800',
+    };
+    return <Badge className={colors[status] || 'bg-gray-100 text-gray-800'}>{status}</Badge>;
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">My Inventory</h1>
+          <p className="text-sm text-muted-foreground">Manage your own digital codes uploaded to the platform</p>
+        </div>
+        <Button onClick={() => { setShowUpload(!showUpload); setUploadResult(null); }}>
+          <Upload className="mr-2 h-4 w-4" /> Upload Codes
+        </Button>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {statsLoading ? (
+          <div className="text-muted-foreground">Loading stats...</div>
+        ) : stats.length === 0 ? (
+          <div className="col-span-full text-muted-foreground text-sm">No inventory yet. Upload codes to get started.</div>
+        ) : (
+          stats.map((s: any) => (
+            <Card key={s.status}>
+              <div className="text-sm text-muted-foreground">{s.status}</div>
+              <div className="text-2xl font-bold">{s.count}</div>
+            </Card>
+          ))
+        )}
+      </div>
+
+      {/* Upload Form */}
+      {showUpload && (
+        <Card>
+          <h3 className="font-bold mb-4">Upload Digital Codes</h3>
+          <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-muted-foreground">Product</label>
+                <select
+                  value={selectedProductId}
+                  onChange={(e) => { setSelectedProductId(e.target.value); setSelectedDenomId(''); }}
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                >
+                  <option value="">Select a product...</option>
+                  {productsData?.map((p: any) => (
+                    <option key={p.id} value={p.id}>{p.name} ({p.region})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-muted-foreground">Denomination</label>
+                <select
+                  value={selectedDenomId}
+                  onChange={(e) => setSelectedDenomId(e.target.value)}
+                  disabled={!selectedProductId}
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary disabled:opacity-50"
+                >
+                  <option value="">Select a denomination...</option>
+                  {denominations.map((d: any) => (
+                    <option key={d.id} value={d.id}>${d.faceValue} {d.currency || 'USD'}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-muted-foreground">Codes (one per line)</label>
+              <textarea
+                value={codesText}
+                onChange={(e) => setCodesText(e.target.value)}
+                rows={8}
+                placeholder={'Enter codes, one per line...\nCODE-XXXX-XXXX\nCODE-YYYY-YYYY'}
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary font-mono"
+              />
+            </div>
+            {uploadMutation.isError && (
+              <div className="text-sm text-destructive">Error: {(uploadMutation.error as Error).message}</div>
+            )}
+            {uploadResult && (
+              <div className="rounded-lg bg-green-50 p-3 text-sm text-green-800">
+                Upload complete: {uploadResult.inserted} inserted, {uploadResult.duplicates} duplicates, {uploadResult.errors?.length || 0} errors.
+                {uploadResult.batchId && <div className="mt-1 text-xs text-muted-foreground">Batch ID: {uploadResult.batchId}</div>}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Button
+                onClick={() => uploadMutation.mutate()}
+                disabled={!selectedDenomId || !codesText.trim() || uploadMutation.isPending}
+              >
+                {uploadMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                Upload
+              </Button>
+              <Button variant="ghost" onClick={() => { setShowUpload(false); setUploadResult(null); }}>Cancel</Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Inventory Table */}
+      <Card>
+        <h3 className="font-bold mb-4">Code Inventory ({inventoryData?.total || 0})</h3>
+        {inventoryLoading ? (
+          <div className="text-muted-foreground">Loading...</div>
+        ) : items.length === 0 ? (
+          <div className="text-muted-foreground text-sm">No codes uploaded yet.</div>
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <Th>Product</Th>
+                <Th>Denomination</Th>
+                <Th>Status</Th>
+                <Th>Source</Th>
+                <Th>Batch ID</Th>
+                <Th>Created</Th>
+                <Th>Actions</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item: any) => (
+                <tr key={item.id}>
+                  <Td>{item.denomination?.product || '—'}</Td>
+                  <Td>${item.denomination?.face_value || '—'}</Td>
+                  <Td>{statusBadge(item.status)}</Td>
+                  <Td><Badge className="bg-secondary text-secondary-foreground">{item.source}</Badge></Td>
+                  <Td className="font-mono text-xs text-muted-foreground">{item.batch_id?.slice(0, 12) || '—'}</Td>
+                  <Td className="text-muted-foreground">{formatDate(item.created_at)}</Td>
+                  <Td>
+                    {item.status === 'AVAILABLE' && (
+                      <Button
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => voidMutation.mutate(item.id)}
+                        disabled={voidMutation.isPending}
+                      >
+                        <Ban className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ─── Product Mapping Page ───
+function ProductMappingPage() {
+  const queryClient = useQueryClient();
+  const { data: connectedProducts, isLoading } = useQuery({ queryKey: ['connected-products'], queryFn: api.listConnectedProducts });
+  const { data: products } = useQuery({ queryKey: ['merchant-products'], queryFn: api.listMerchantProducts });
+
+  const [denominationsByProduct, setDenominationsByProduct] = useState<Record<string, any[]>>({});
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<{ dcvProductId: string; dcvDenominationId: string; inventorySource: string }>({ dcvProductId: '', dcvDenominationId: '', inventorySource: 'DCV' });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => api.updateConnectedProduct(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['connected-products'] });
+      setEditingId(null);
+    },
+  });
+
+  const loadDenominations = async (productId: string) => {
+    if (!denominationsByProduct[productId]) {
+      const denoms = await api.getDenominations(productId);
+      setDenominationsByProduct((prev) => ({ ...prev, [productId]: denoms }));
+    }
+  };
+
+  const startEdit = (cp: any) => {
+    setEditingId(cp.id);
+    setEditForm({
+      dcvProductId: cp.dcvProductId || '',
+      dcvDenominationId: cp.dcvDenominationId || '',
+      inventorySource: cp.inventorySource || 'DCV',
+    });
+    if (cp.dcvProductId) loadDenominations(cp.dcvProductId);
+  };
+
+  const saveEdit = (id: string) => {
+    updateMutation.mutate({
+      id,
+      data: {
+        dcv_product_id: editForm.dcvProductId || null,
+        dcv_denomination_id: editForm.dcvDenominationId || null,
+        inventory_source: editForm.inventorySource,
+      },
+    });
+  };
+
+  const onProductChange = (productId: string) => {
+    setEditForm((prev) => ({ ...prev, dcvProductId: productId, dcvDenominationId: '' }));
+    if (productId) loadDenominations(productId);
+  };
+
+  const sourceBadge = (source: string) => {
+    const colors: Record<string, string> = {
+      DCV: 'bg-blue-100 text-blue-800',
+      MERCHANT: 'bg-green-100 text-green-800',
+      AUTO: 'bg-purple-100 text-purple-800',
+    };
+    return <Badge className={colors[source] || 'bg-gray-100 text-gray-800'}>{source || 'DCV'}</Badge>;
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold">Product Mapping</h1>
+        <p className="text-sm text-muted-foreground">Map your store's products (by SKU) to DCV digital products and denominations</p>
+      </div>
+
+      <Card>
+        <div className="mb-4 rounded-lg bg-blue-50 p-3 text-sm text-blue-800">
+          <strong>How it works:</strong> When a customer purchases a product on your store, DCV uses the SKU to find the mapped DCV product and allocates a code from the correct inventory pool.
+          Unmapped products will use fuzzy name matching as a fallback.
+        </div>
+
+        {isLoading ? (
+          <div className="text-muted-foreground">Loading...</div>
+        ) : !connectedProducts || connectedProducts.length === 0 ? (
+          <div className="text-muted-foreground text-sm">
+            No connected products yet. Products will appear here automatically when webhooks are received from your store.
+          </div>
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <Th>Store Product</Th>
+                <Th>SKU</Th>
+                <Th>Platform</Th>
+                <Th>DCV Product</Th>
+                <Th>Denomination</Th>
+                <Th>Inventory</Th>
+                <Th>Actions</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {connectedProducts.map((cp: any) => (
+                <tr key={cp.id}>
+                  <Td className="font-medium">{cp.name}</Td>
+                  <Td className="font-mono text-xs">{cp.platformSku || cp.sku || '—'}</Td>
+                  <Td><Badge className="bg-secondary text-secondary-foreground">{cp.platform}</Badge></Td>
+                  {editingId === cp.id ? (
+                    <>
+                      <Td>
+                        <select
+                          value={editForm.dcvProductId}
+                          onChange={(e) => onProductChange(e.target.value)}
+                          className="w-full rounded-lg border border-input bg-background px-2 py-1 text-sm"
+                        >
+                          <option value="">Not mapped</option>
+                          {products?.map((p: any) => (
+                            <option key={p.id} value={p.id}>{p.name} ({p.region})</option>
+                          ))}
+                        </select>
+                      </Td>
+                      <Td>
+                        <select
+                          value={editForm.dcvDenominationId}
+                          onChange={(e) => setEditForm((prev) => ({ ...prev, dcvDenominationId: e.target.value }))}
+                          disabled={!editForm.dcvProductId}
+                          className="w-full rounded-lg border border-input bg-background px-2 py-1 text-sm disabled:opacity-50"
+                        >
+                          <option value="">Auto (by amount)</option>
+                          {denominationsByProduct[editForm.dcvProductId]?.map((d: any) => (
+                            <option key={d.id} value={d.id}>${d.faceValue} {d.currency}</option>
+                          ))}
+                        </select>
+                      </Td>
+                      <Td>
+                        <select
+                          value={editForm.inventorySource}
+                          onChange={(e) => setEditForm((prev) => ({ ...prev, inventorySource: e.target.value }))}
+                          className="w-full rounded-lg border border-input bg-background px-2 py-1 text-sm"
+                        >
+                          <option value="DCV">DCV</option>
+                          <option value="MERCHANT">MERCHANT</option>
+                          <option value="AUTO">AUTO</option>
+                        </select>
+                      </Td>
+                      <Td>
+                        <div className="flex gap-1">
+                          <Button onClick={() => saveEdit(cp.id)} disabled={updateMutation.isPending} className="px-2 py-1 text-xs">
+                            {updateMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                          </Button>
+                          <Button variant="ghost" onClick={() => setEditingId(null)} className="px-2 py-1 text-xs">
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </Td>
+                    </>
+                  ) : (
+                    <>
+                      <Td>
+                        {cp.dcvProduct ? (
+                          <span className="text-sm">{cp.dcvProduct.name} ({cp.dcvProduct.region})</span>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">Not mapped</span>
+                        )}
+                      </Td>
+                      <Td className="text-muted-foreground text-xs">{cp.dcvDenominationId ? 'Exact' : 'Auto'}</Td>
+                      <Td>{sourceBadge(cp.inventorySource)}</Td>
+                      <Td>
+                        <Button variant="ghost" onClick={() => startEdit(cp)} className="px-2 py-1 text-xs">
+                          Edit
+                        </Button>
+                      </Td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 // ─── App ───
 function ProtectedRoutes() {
   const { user, loading } = useAuth();
@@ -1182,6 +1557,8 @@ function ProtectedRoutes() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/orders" element={<OrdersPage />} />
         <Route path="/products" element={<ProductsPage />} />
+        <Route path="/inventory" element={<InventoryPage />} />
+        <Route path="/product-mapping" element={<ProductMappingPage />} />
         <Route path="/create-order" element={<CreateOrderPage />} />
         <Route path="/api-keys" element={<ApiKeysPage />} />
         <Route path="/connect-site" element={<ConnectSitePage />} />

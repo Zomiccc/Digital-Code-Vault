@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Req, UseGuards, BadRequestException, Headers } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Req, UseGuards, BadRequestException, Headers } from '@nestjs/common';
 import { WebhookService } from './webhook.service';
 import { ApiKeyGuard } from '../auth/guards/api-key.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -58,6 +58,22 @@ export class WebhooksController {
   @UseGuards(JwtAuthGuard)
   async listConnectedProducts(@Req() req: any) {
     return this.webhookService.listConnectedProducts(req.user.merchantId);
+  }
+
+  @Put('connected-products/:id')
+  @UseGuards(JwtAuthGuard)
+  async updateConnectedProduct(
+    @Param('id') id: string,
+    @Body() body: { dcv_product_id?: string; dcv_denomination_id?: string | null; inventory_source?: string },
+    @Req() req: any,
+  ) {
+    return this.webhookService.updateConnectedProductMapping(
+      id,
+      req.user.merchantId,
+      body.dcv_product_id,
+      body.dcv_denomination_id,
+      body.inventory_source,
+    );
   }
 
   @Get('statistics')

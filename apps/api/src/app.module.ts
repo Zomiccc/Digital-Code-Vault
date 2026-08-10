@@ -16,6 +16,8 @@ import { WebhooksModule } from './webhooks/webhooks.module';
 import { AdminModule } from './admin/admin.module';
 import { HealthModule } from './health/health.module';
 import { EmailModule } from './email/email.module';
+import { WalletModule } from './wallet/wallet.module';
+import { StripeModule } from './stripe/stripe.module';
 
 @Module({
   imports: [
@@ -38,6 +40,8 @@ import { EmailModule } from './email/email.module';
     AdminModule,
     HealthModule,
     EmailModule,
+    WalletModule,
+    StripeModule,
   ],
 })
 export class AppModule {}

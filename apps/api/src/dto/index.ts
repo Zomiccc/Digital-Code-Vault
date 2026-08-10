@@ -28,6 +28,10 @@ export class CreateFulfillmentDto {
   @IsOptional()
   @IsString()
   customer_address?: string;
+
+  @IsOptional()
+  @IsString()
+  inventory_source?: string; // 'DCV' | 'MERCHANT' | 'AUTO'
 }
 
 export class CreateMerchantDto {
@@ -153,4 +157,20 @@ export class CreateWebhookDto {
 
   @IsOptional()
   skipVerification?: boolean;
+}
+
+export class CreateFundingRequestDto {
+  @IsNumber()
+  @Min(0.01)
+  amount!: number;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
+}
+
+export class FundingRequestActionDto {
+  @IsOptional()
+  @IsString()
+  note?: string;
 }

@@ -93,4 +93,27 @@ export const api = {
 
   // Incoming webhooks (received from merchant's connected sites)
   listIncomingWebhooks: () => apiFetch('/webhooks/incoming'),
+
+  // Merchant inventory management
+  listInventory: (limit = 50, offset = 0) =>
+    apiFetch(`/merchant/dashboard/inventory?limit=${limit}&offset=${offset}`),
+  getInventoryStats: () => apiFetch('/merchant/dashboard/inventory/stats'),
+  uploadCodes: (denominationId: string, codes: string[]) =>
+    apiFetch('/merchant/dashboard/inventory/upload', {
+      method: 'POST',
+      body: JSON.stringify({ denomination_id: denominationId, codes }),
+    }),
+  voidCode: (id: string) =>
+    apiFetch(`/merchant/dashboard/inventory/${id}/void`, { method: 'POST' }),
+  listMerchantProducts: () => apiFetch('/merchant/dashboard/products'),
+
+  // Connected product mapping (SKU → DCV product/denomination)
+  listConnectedProducts: () => apiFetch('/webhooks/connected-products'),
+  updateConnectedProduct: (id: string, data: { dcv_product_id?: string; dcv_denomination_id?: string | null; inventory_source?: string }) =>
+    apiFetch(`/webhooks/connected-products/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  getDenominations: (productId: string) =>
+    apiFetch(`/products/${productId}/denominations`),
 };

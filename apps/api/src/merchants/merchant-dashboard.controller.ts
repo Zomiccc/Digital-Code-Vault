@@ -3,8 +3,11 @@ import { MerchantsService } from './merchants.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { WebhookService } from '../webhooks/webhook.service';
 import { FulfillmentService } from '../fulfillment/fulfillment.service';
+import { WalletService } from '../wallet/wallet.service';
+import { CodesService } from '../codes/codes.service';
+import { ProductsService } from '../products/products.service';
 import { nanoid } from 'nanoid';
-import { CreateApiKeyDto, CreateWebhookDto, CreateFulfillmentDto } from '../dto';
+import { CreateApiKeyDto, CreateWebhookDto, CreateFulfillmentDto, CreateFundingRequestDto } from '../dto';
 
 @Controller('merchant')
 export class MerchantDashboardController {
@@ -12,12 +15,27 @@ export class MerchantDashboardController {
     private merchantsService: MerchantsService,
     private webhookService: WebhookService,
     private fulfillmentService: FulfillmentService,
+    private codesService: CodesService,
+    private productsService: ProductsService,
+    private walletService: WalletService,
   ) {}
 
   @Get('dashboard/wallet')
   @UseGuards(JwtAuthGuard)
   async getWallet(@Req() req: any) {
     return this.merchantsService.getWallet(req.user.merchantId);
+  }
+
+  @Get('dashboard/funding-requests')
+  @UseGuards(JwtAuthGuard)
+  async listMyFundingRequests(@Req() req: any) {
+    return this.walletService.listFundingRequests(req.user.merchantId);
+  }
+
+  @Post('dashboard/funding-requests')
+  @UseGuards(JwtAuthGuard)
+  async createFundingRequest(@Body() body: CreateFundingRequestDto, @Req() req: any) {
+    return this.walletService.createFundingRequest(req.user.merchantId, body.amount, body.note);
   }
 
   @Get('dashboard/orders')
@@ -72,6 +90,7 @@ export class MerchantDashboardController {
       actorType: 'MERCHANT',
       actorId: req.user.id,
       ip: req.ip,
+      inventorySource: body.inventory_source,
     });
   }
 
@@ -112,5 +131,64 @@ export class MerchantDashboardController {
   @UseGuards(JwtAuthGuard)
   async regenerateWebhookSecret(@Req() req: any) {
     return this.merchantsService.regenerateWebhookSecret(req.user.merchantId);
+  }
+
+  // ─── Merchant Inventory Management ───
+
+  @Get('dashboard/inventory')
+  @UseGuards(JwtAuthGuard)
+  async listInventory(
+    @Req() req: any,
+    @Query('denominationId') denominationId?: string,
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.codesService.listMerchantCodes(req.user.merchantId, {
+      denominationId,
+      status,
+      limit: limit ? parseInt(limit) : 50,
+      offset: offset ? parseInt(offset) : 0,
+    });
+  }
+
+  @Get('dashboard/inventory/stats')
+  @UseGuards(JwtAuthGuard)
+  async getInventoryStats(@Req() req: any) {
+    return this.codesService.getMerchantInventoryStats(req.user.merchantId);
+  }
+
+  @Post('dashboard/inventory/upload')
+  @UseGuards(JwtAuthGuard)
+  async uploadCodes(
+    @Body() body: { denomination_id: string; codes: string[] },
+    @Req() req: any,
+  ) {
+    if (!body.denomination_id || !body.codes || !Array.isArray(body.codes)) {
+      throw new BadRequestException({
+        error: 'INVALID_REQUEST',
+        code: 'MISSING_FIELDS',
+        message: 'denomination_id and codes array are required',
+      });
+    }
+
+    return this.codesService.merchantBulkUpload(
+      body.denomination_id,
+      body.codes,
+      req.user.merchantId,
+      req.ip,
+    );
+  }
+
+  @Post('dashboard/inventory/:id/void')
+  @UseGuards(JwtAuthGuard)
+  async voidCode(@Param('id') id: string, @Req() req: any) {
+    return this.codesService.voidMerchantCode(id, req.user.merchantId, req.ip);
+  }
+
+  @Get('dashboard/products')
+  @UseGuards(JwtAuthGuard)
+  async listProducts(@Req() req: any) {
+    return this.productsService.listProductsForMerchant(req.user.merchantId);
   }
 }

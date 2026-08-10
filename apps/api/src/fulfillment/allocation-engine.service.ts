@@ -148,73 +148,6 @@ export class AllocationEngineService {
   }
 
   /**
-   * Reserves specific code items for a fulfillment request.
-   * Uses SELECT ... FOR UPDATE SKIP LOCKED to prevent double-allocation under concurrency.
-   * All within a transaction.
-   */
-  async reserveCodes(
-    tx: Prisma.TransactionClient,
-    fulfillmentRequestId: string,
-    combination: { denominationId: string; faceValue: number; count: number }[],
-    reservationTtlMinutes: number,
-  ): Promise<AllocationResult[]> {
-    const reservedUntil = new Date(Date.now() + reservationTtlMinutes * 60 * 1000);
-    const results: AllocationResult[] = [];
-
-    for (const combo of combination) {
-      // Use Prisma findMany for SQLite (no FOR UPDATE SKIP LOCKED)
-      const codeItems = await tx.codeItem.findMany({
-        where: { denominationId: combo.denominationId, status: 'AVAILABLE' },
-        orderBy: { createdAt: 'asc' },
-        take: combo.count,
-        select: { id: true, denominationId: true },
-      });
-
-      if (codeItems.length < combo.count) {
-        // Not enough available — will cause rollback
-        throw new BadRequestException({
-          error: 'INSUFFICIENT_STOCK',
-          code: 'INSUFFICIENT_STOCK',
-          message: `Only ${codeItems.length} codes available for denomination ${combo.faceValue}, needed ${combo.count}`,
-        });
-      }
-
-      const codeItemIds = codeItems.map((c) => c.id);
-
-      // Optimistic concurrency: only update codes that are still AVAILABLE
-      // This prevents double-allocation under concurrent requests even without row-level locks
-      const updateResult = await tx.codeItem.updateMany({
-        where: {
-          id: { in: codeItemIds },
-          status: 'AVAILABLE',
-        },
-        data: {
-          status: 'RESERVED',
-          reservedUntil,
-          reservedByReqId: fulfillmentRequestId,
-        },
-      });
-
-      // If fewer rows updated than expected, another request grabbed some codes first
-      if (updateResult.count < combo.count) {
-        throw new BadRequestException({
-          error: 'INSUFFICIENT_STOCK',
-          code: 'STOCK_CONFLICT',
-          message: `Stock conflict detected for denomination ${combo.faceValue}. ${updateResult.count}/${combo.count} codes available after concurrent request. Please retry.`,
-        });
-      }
-
-      results.push({
-        denominationId: combo.denominationId,
-        faceValue: combo.faceValue,
-        codeItemIds,
-      });
-    }
-
-    return results;
-  }
-
-  /**
    * Confirms reserved codes as ALLOCATED (after wallet debit succeeds).
    */
   async confirmAllocation(
@@ -303,16 +236,29 @@ export class AllocationEngineService {
 
   /**
    * Gets available denomination stock for a product.
+   If merchantId is provided, returns stock for that merchant only.
+   If merchantId is null/undefined, returns DCV-owned stock (merchantId is null).
+   If merchantId is '__ALL__', returns all stock regardless of owner.
    */
   async getAvailableStock(
     tx: Prisma.TransactionClient | PrismaService,
     productId: string,
+    merchantId?: string | null,
   ): Promise<DenominationStock[]> {
+    const codeItemWhere: any = { status: 'AVAILABLE' };
+    if (merchantId === '__ALL__') {
+      // No merchant filter — return all available codes
+    } else if (merchantId) {
+      codeItemWhere.merchantId = merchantId;
+    } else {
+      codeItemWhere.merchantId = null;
+    }
+
     const denominations = await (tx as PrismaService).denomination.findMany({
       where: { productId },
       include: {
         codeItems: {
-          where: { status: 'AVAILABLE' },
+          where: codeItemWhere,
           select: { id: true },
         },
       },
@@ -323,5 +269,84 @@ export class AllocationEngineService {
       faceValue: Number(d.faceValue),
       availableCount: d.codeItems.length,
     }));
+  }
+
+  /**
+   * Reserves specific code items for a fulfillment request.
+   Uses SELECT ... FOR UPDATE SKIP LOCKED to prevent double-allocation under concurrency.
+   All within a transaction.
+   If merchantId is provided, only reserves codes owned by that merchant.
+   If merchantId is null/undefined, only reserves DCV-owned codes (merchantId is null).
+   */
+  async reserveCodes(
+    tx: Prisma.TransactionClient,
+    fulfillmentRequestId: string,
+    combination: { denominationId: string; faceValue: number; count: number }[],
+    reservationTtlMinutes: number,
+    merchantId?: string | null,
+  ): Promise<AllocationResult[]> {
+    const reservedUntil = new Date(Date.now() + reservationTtlMinutes * 60 * 1000);
+    const results: AllocationResult[] = [];
+
+    for (const combo of combination) {
+      const codeItemWhere: any = { denominationId: combo.denominationId, status: 'AVAILABLE' };
+      if (merchantId) {
+        codeItemWhere.merchantId = merchantId;
+      } else {
+        codeItemWhere.merchantId = null;
+      }
+
+      const codeItems = await tx.codeItem.findMany({
+        where: codeItemWhere,
+        orderBy: { createdAt: 'asc' },
+        take: combo.count,
+        select: { id: true, denominationId: true },
+      });
+
+      if (codeItems.length < combo.count) {
+        throw new BadRequestException({
+          error: 'INSUFFICIENT_STOCK',
+          code: 'INSUFFICIENT_STOCK',
+          message: `Only ${codeItems.length} codes available for denomination ${combo.faceValue}, needed ${combo.count}`,
+        });
+      }
+
+      const codeItemIds = codeItems.map((c) => c.id);
+
+      const updateWhere: any = {
+        id: { in: codeItemIds },
+        status: 'AVAILABLE',
+      };
+      if (merchantId) {
+        updateWhere.merchantId = merchantId;
+      } else {
+        updateWhere.merchantId = null;
+      }
+
+      const updateResult = await tx.codeItem.updateMany({
+        where: updateWhere,
+        data: {
+          status: 'RESERVED',
+          reservedUntil,
+          reservedByReqId: fulfillmentRequestId,
+        },
+      });
+
+      if (updateResult.count < combo.count) {
+        throw new BadRequestException({
+          error: 'INSUFFICIENT_STOCK',
+          code: 'STOCK_CONFLICT',
+          message: `Stock conflict detected for denomination ${combo.faceValue}. ${updateResult.count}/${combo.count} codes available after concurrent request. Please retry.`,
+        });
+      }
+
+      results.push({
+        denominationId: combo.denominationId,
+        faceValue: combo.faceValue,
+        codeItemIds,
+      });
+    }
+
+    return results;
   }
 }

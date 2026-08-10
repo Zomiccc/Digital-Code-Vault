@@ -9,14 +9,24 @@ export class EmailService {
   private readonly logger = new Logger(EmailService.name);
   private readonly apiKey: string;
   private readonly fromEmail: string;
+  private readonly fromName: string;
+  private readonly provider: string;
 
   constructor(
     private configService: ConfigService,
     private prisma: PrismaService,
   ) {
-    this.apiKey = this.configService.get<string>('RESEND_API_KEY') || '';
-    // Use configured from email or default to Resend's verified domain
-    this.fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL') || 'onboarding@resend.dev';
+    this.provider = this.configService.get<string>('EMAIL_PROVIDER') || 'resend';
+
+    if (this.provider === 'sendgrid') {
+      this.apiKey = this.configService.get<string>('SENDGRID_API_KEY') || '';
+      this.fromEmail = this.configService.get<string>('SENDGRID_FROM_EMAIL') || 'noreply@digitalcode.local';
+      this.fromName = this.configService.get<string>('SENDGRID_FROM_NAME') || 'CodeHub';
+    } else {
+      this.apiKey = this.configService.get<string>('RESEND_API_KEY') || '';
+      this.fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL') || 'onboarding@resend.dev';
+      this.fromName = 'CodeHub';
+    }
   }
 
   /**
@@ -49,48 +59,28 @@ export class EmailService {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const body: any = {
-          from: this.fromEmail,
-          to,
-          subject,
-          html,
-        };
+        let response: Response;
 
-        if (options?.text) {
-          body.text = options.text;
+        if (this.provider === 'sendgrid') {
+          response = await this.sendViaSendGrid(to, subject, html, options);
+        } else {
+          response = await this.sendViaResend(to, subject, html, options);
         }
-
-        if (options?.attachments && options.attachments.length > 0) {
-          body.attachments = options.attachments.map((att) => ({
-            filename: att.filename,
-            content: att.content.toString('base64'),
-            content_type: att.contentType || 'application/octet-stream',
-          }));
-        }
-
-        const response = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(15000),
-        });
 
         if (response.status >= 200 && response.status < 300) {
-          const data = await response.json();
-          this.logger.log(`Email sent to ${to} (id: ${data.id})`);
+          const data = await response.json().catch(() => ({}));
+          const messageId = data.id || data.message_id || 'sendgrid-accepted';
+          this.logger.log(`Email sent to ${to} via ${this.provider} (id: ${messageId})`);
           if (emailLog) {
             await this.prisma.emailLog.update({
               where: { id: emailLog.id },
-              data: { status: 'SENT', providerResponse: data.id, sentAt: new Date() },
+              data: { status: 'SENT', providerResponse: messageId, sentAt: new Date() },
             }).catch(() => {});
           }
           return true;
         } else {
           const errorText = await response.text();
-          this.logger.error(`Email send failed (attempt ${attempt}/${maxRetries}): ${response.status} ${errorText}`);
+          this.logger.error(`Email send failed via ${this.provider} (attempt ${attempt}/${maxRetries}): ${response.status} ${errorText}`);
 
           if (attempt < maxRetries && response.status >= 500) {
             await new Promise((r) => setTimeout(r, baseDelay * Math.pow(2, attempt - 1)));
@@ -105,7 +95,7 @@ export class EmailService {
           return false;
         }
       } catch (err) {
-        this.logger.error(`Email send error (attempt ${attempt}/${maxRetries}): ${(err as Error).message}`);
+        this.logger.error(`Email send error via ${this.provider} (attempt ${attempt}/${maxRetries}): ${(err as Error).message}`);
         if (attempt < maxRetries) {
           await new Promise((r) => setTimeout(r, baseDelay * Math.pow(2, attempt - 1)));
           continue;
@@ -120,6 +110,79 @@ export class EmailService {
       }
     }
     return false;
+  }
+
+  private async sendViaResend(
+    to: string,
+    subject: string,
+    html: string,
+    options?: { text?: string; attachments?: Array<{ filename: string; content: Buffer | string; contentType?: string }> },
+  ): Promise<Response> {
+    const body: any = {
+      from: this.fromEmail,
+      to,
+      subject,
+      html,
+    };
+
+    if (options?.text) body.text = options.text;
+
+    if (options?.attachments && options.attachments.length > 0) {
+      body.attachments = options.attachments.map((att) => ({
+        filename: att.filename,
+        content: att.content.toString('base64'),
+        content_type: att.contentType || 'application/octet-stream',
+      }));
+    }
+
+    return fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
+    });
+  }
+
+  private async sendViaSendGrid(
+    to: string,
+    subject: string,
+    html: string,
+    options?: { text?: string; attachments?: Array<{ filename: string; content: Buffer | string; contentType?: string }> },
+  ): Promise<Response> {
+    const body: any = {
+      personalizations: [{ to: [{ email: to }] }],
+      from: { email: this.fromEmail, name: this.fromName },
+      subject,
+      content: [
+        { type: 'text/html', value: html },
+      ],
+    };
+
+    if (options?.text) {
+      body.content.unshift({ type: 'text/plain', value: options.text });
+    }
+
+    if (options?.attachments && options.attachments.length > 0) {
+      body.attachments = options.attachments.map((att) => ({
+        filename: att.filename,
+        content: att.content.toString('base64'),
+        type: att.contentType || 'application/octet-stream',
+        disposition: 'attachment',
+      }));
+    }
+
+    return fetch('https://api.sendgrid.com/v3/mail/send', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
+    });
   }
 
   /**
@@ -430,6 +493,7 @@ export class EmailService {
     paymentMethod: string,
     billingAddress?: string,
     invoiceBuffer?: Buffer,
+    revealLink?: string,
   ): Promise<boolean> {
     const html = `
       <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;background:#f8fafc;">
@@ -467,9 +531,7 @@ export class EmailService {
               A PDF invoice has been attached to this email for your records.
             </p>
 
-            <div style="text-align:center;margin:24px 0;">
-              <a href="https://codevault.com/reveal/placeholder" style="display:inline-block;background:#6366f1;color:#fff;font-weight:600;font-size:16px;padding:14px 32px;border-radius:8px;text-decoration:none;">Reveal My Code</a>
-            </div>
+            ${revealLink ? `<div style="text-align:center;margin:24px 0;"><a href="${revealLink}" style="display:inline-block;background:#6366f1;color:#fff;font-weight:600;font-size:16px;padding:14px 32px;border-radius:8px;text-decoration:none;">Reveal My Code</a></div>` : ''}
           </div>
           <div style="background:#1e293b;padding:16px;text-align:center;">
             <div style="display:flex;justify-content:center;gap:16px;margin-bottom:8px;">

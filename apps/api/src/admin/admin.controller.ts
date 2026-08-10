@@ -8,6 +8,7 @@ import { ProductsService } from '../products/products.service';
 import { CodesService } from '../codes/codes.service';
 import { AuthService } from '../auth/auth.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { WalletService } from '../wallet/wallet.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -16,6 +17,7 @@ import {
   CreateMerchantDto, UpdateMerchantStatusDto, CreditWalletDto,
   CreateProductDto, CreateDenominationDto, CreateSupplierDto,
   BulkUploadCodesDto, CreateAdminUserDto,
+  FundingRequestActionDto,
 } from '../dto';
 
 @Controller('admin')
@@ -28,6 +30,7 @@ export class AdminController {
     private codesService: CodesService,
     private authService: AuthService,
     private prisma: PrismaService,
+    private walletService: WalletService,
   ) {}
 
   @Get('stats')
@@ -58,6 +61,61 @@ export class AdminController {
   @Roles('SUPER_ADMIN', 'FINANCE')
   async creditWallet(@Param('id') id: string, @Body() body: CreditWalletDto, @CurrentUser() user: any, @Req() req: any) {
     return this.merchantsService.addWalletCredit(id, body.amount, user.id, req.ip);
+  }
+
+  // ─── Admin Wallet / Finance ───
+
+  @Get('wallet')
+  async getAdminWallet() {
+    return this.walletService.getAdminWallet();
+  }
+
+  @Get('wallet/transactions')
+  async getAdminWalletTransactions(@Query('limit') limit?: string, @Query('offset') offset?: string) {
+    return this.walletService.getAdminWalletTransactions(
+      limit ? parseInt(limit) : 50,
+      offset ? parseInt(offset) : 0,
+    );
+  }
+
+  @Get('wallet/funding-requests')
+  async listFundingRequests(@Query('status') status?: string) {
+    return this.walletService.listFundingRequests(undefined, status);
+  }
+
+  @Post('wallet/funding-requests/:id/approve')
+  @Roles('SUPER_ADMIN', 'FINANCE')
+  async approveFundingRequest(
+    @Param('id') id: string,
+    @Body() body: FundingRequestActionDto,
+    @CurrentUser() user: any,
+    @Req() req: any,
+  ) {
+    return this.walletService.approveFundingRequest(id, user.id, body.note, req.ip);
+  }
+
+  @Post('wallet/funding-requests/:id/reject')
+  @Roles('SUPER_ADMIN', 'FINANCE')
+  async rejectFundingRequest(
+    @Param('id') id: string,
+    @Body() body: FundingRequestActionDto,
+    @CurrentUser() user: any,
+    @Req() req: any,
+  ) {
+    return this.walletService.rejectFundingRequest(id, user.id, body.note, req.ip);
+  }
+
+  @Get('wallet/reconciliation')
+  async getReconciliationReport(@Query('limit') limit?: string, @Query('offset') offset?: string) {
+    return this.walletService.getReconciliationReport(
+      limit ? parseInt(limit) : 100,
+      offset ? parseInt(offset) : 0,
+    );
+  }
+
+  @Get('merchants/:id/finance')
+  async getMerchantFinance(@Param('id') id: string) {
+    return this.walletService.getMerchantFinanceDetail(id);
   }
 
   // ─── Products & Denominations ───
@@ -220,5 +278,29 @@ export class AdminController {
       limit ? parseInt(limit) : 50,
       offset ? parseInt(offset) : 0,
     );
+  }
+
+  // ─── Merchant Applications ───
+
+  @Get('merchant-applications')
+  async listMerchantApplications(@Query('status') status?: string) {
+    return this.authService.listMerchantApplications(status);
+  }
+
+  @Post('merchant-applications/:id/approve')
+  async approveMerchantApplication(@Param('id') id: string, @CurrentUser() user: any, @Req() req: any) {
+    return this.authService.approveMerchantApplication(id, user.id, req.ip);
+  }
+
+  @Post('merchant-applications/:id/reject')
+  async rejectMerchantApplication(@Param('id') id: string, @Body() body: { note?: string }, @CurrentUser() user: any, @Req() req: any) {
+    return this.authService.rejectMerchantApplication(id, user.id, body.note || 'Application rejected', req.ip);
+  }
+
+  // ─── Admin Wallet Initialization ───
+
+  @Post('wallet/initialize')
+  async initializeWallet(@Body() body: { amount: number; description?: string }, @CurrentUser() user: any, @Req() req: any) {
+    return this.walletService.initializeAdminWallet(body.amount, body.description || 'Manual funding', user.id, req.ip);
   }
 }

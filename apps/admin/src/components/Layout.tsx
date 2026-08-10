@@ -3,39 +3,43 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Package, Database, Upload, FileText,
   ScrollText, UserCog, LogOut, Menu, X, Shield, ChevronRight,
-  Wallet, Key, ShoppingCart, Webhook, Store, Gift,
+  Wallet, Key, ShoppingCart, Webhook, Store, Gift, Plug,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
 
 const adminNav = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/merchants', label: 'Merchants', icon: Users },
-  { to: '/products', label: 'Products', icon: Package },
-  { to: '/inventory', label: 'Inventory', icon: Database },
-  { to: '/upload', label: 'Bulk Upload', icon: Upload },
-  { to: '/fulfillment', label: 'Fulfillment', icon: FileText },
-  { to: '/audit', label: 'Audit Logs', icon: ScrollText },
-  { to: '/staff', label: 'Staff', icon: UserCog },
+  { to: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/admin/merchants', label: 'Merchants', icon: Users },
+  { to: '/admin/applications', label: 'Applications', icon: Store },
+  { to: '/admin/products', label: 'Products', icon: Package },
+  { to: '/admin/inventory', label: 'Inventory', icon: Database },
+  { to: '/admin/upload', label: 'Bulk Upload', icon: Upload },
+  { to: '/admin/fulfillment', label: 'Fulfillment', icon: FileText },
+  { to: '/admin/finance', label: 'Finance', icon: Wallet },
+  { to: '/admin/audit', label: 'Audit Logs', icon: ScrollText },
+  { to: '/admin/staff', label: 'Staff', icon: UserCog },
 ];
 
 const merchantNav = [
-  { to: '/', label: 'Dashboard', icon: Wallet },
-  { to: '/orders', label: 'Orders', icon: FileText },
-  { to: '/products', label: 'Products', icon: Package },
-  { to: '/create-order', label: 'Create Order', icon: ShoppingCart },
-  { to: '/api-keys', label: 'API Keys', icon: Key },
-  { to: '/webhooks', label: 'Webhooks', icon: Webhook },
-  { to: '/incoming-webhooks', label: 'Incoming Webhooks', icon: ScrollText },
-  { to: '/connected-products', label: 'Connected Products', icon: Package },
+  { to: '/merchant/dashboard', label: 'Dashboard', icon: Wallet },
+  { to: '/merchant/wallet', label: 'Wallet & Funding', icon: Wallet },
+  { to: '/merchant/orders', label: 'Orders', icon: FileText },
+  { to: '/merchant/products', label: 'Products', icon: Package },
+  { to: '/merchant/create-order', label: 'Create Order', icon: ShoppingCart },
+  { to: '/merchant/integrations', label: 'Integrations', icon: Plug },
+  { to: '/merchant/api-keys', label: 'API Keys', icon: Key },
+  { to: '/merchant/webhooks', label: 'Webhooks', icon: Webhook },
+  { to: '/merchant/incoming-webhooks', label: 'Incoming Webhooks', icon: ScrollText },
+  { to: '/merchant/connected-products', label: 'Connected Products', icon: Package },
 ];
 
 const customerNav = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/browse', label: 'Browse Products', icon: Package },
-  { to: '/order', label: 'Place Order', icon: ShoppingCart },
-  { to: '/my-orders', label: 'My Orders', icon: FileText },
-  { to: '/become-merchant', label: 'Become Merchant', icon: Store },
+  { to: '/customer/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/customer/browse', label: 'Browse Products', icon: Package },
+  { to: '/customer/order', label: 'Place Order', icon: ShoppingCart },
+  { to: '/customer/my-orders', label: 'My Orders', icon: FileText },
+  { to: '/customer/become-merchant', label: 'Become Merchant', icon: Store },
 ];
 
 export function Layout({ children }: { children: ReactNode }) {
@@ -54,7 +58,7 @@ export function Layout({ children }: { children: ReactNode }) {
   };
 
   const activeLabel = navItems.find((item) =>
-    item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to),
+    location.pathname === item.to || location.pathname.startsWith(item.to + '/') || location.pathname === item.to,
   )?.label || 'Dashboard';
 
   return (
@@ -80,7 +84,7 @@ export function Layout({ children }: { children: ReactNode }) {
             <NavLink
               key={item.to}
               to={item.to}
-              end={item.to === '/'}
+              end={item.to.endsWith('/dashboard')}
               onClick={() => setSidebarOpen(false)}
               className={({ isActive }) =>
                 cn(

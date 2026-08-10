@@ -562,7 +562,7 @@ export class WebhookService implements OnModuleDestroy {
     };
   }
 
-  private async syncConnectedProduct(webhook: any, merchantId: string): Promise<string | null> {
+  private async syncConnectedProduct(webhook: any, merchantId: string): Promise<{ id: string; inventorySource: string | null } | null> {
     try {
       if (!merchantId) {
         this.logger.warn(`[WEBHOOK] No merchantId, skipping ConnectedProduct sync`);
@@ -605,7 +605,7 @@ export class WebhookService implements OnModuleDestroy {
           },
         });
         this.logger.log(`[WEBHOOK] Updated ConnectedProduct: ${existing.id}`);
-        return existing.id;
+        return { id: existing.id, inventorySource: existing.inventorySource };
       } else {
         // Create new
         const created = await this.prisma.connectedProduct.create({
@@ -625,7 +625,7 @@ export class WebhookService implements OnModuleDestroy {
           },
         });
         this.logger.log(`[WEBHOOK] Created ConnectedProduct for ${webhook.platform}: ${created.id}`);
-        return created.id;
+        return { id: created.id, inventorySource: created.inventorySource };
       }
     } catch (error) {
       this.logger.error(`[WEBHOOK] Error syncing ConnectedProduct: ${(error as Error).message}`);
@@ -659,6 +659,30 @@ export class WebhookService implements OnModuleDestroy {
           },
         });
         return;
+      }
+
+      // Deduplicate by orderId: if another webhook for the same order was already COMPLETED, skip
+      if (webhook.orderId && webhook.merchantId) {
+        const existingFulfilled = await this.prisma.incomingWebhook.findFirst({
+          where: {
+            orderId: webhook.orderId,
+            merchantId: webhook.merchantId,
+            processingStatus: 'COMPLETED',
+            id: { not: webhookId },
+          },
+        });
+        if (existingFulfilled) {
+          this.logger.log(`[WEBHOOK] Order ${webhook.orderId} already fulfilled via webhook ${existingFulfilled.id}, skipping duplicate`);
+          await this.prisma.incomingWebhook.update({
+            where: { id: webhookId },
+            data: {
+              processingStatus: 'DUPLICATE_ORDER',
+              errorMessage: `Order ${webhook.orderId} already fulfilled via webhook ${existingFulfilled.id}`,
+              processedAt: new Date(),
+            },
+          });
+          return;
+        }
       }
 
       // Find merchant: must be set from webhook authentication
@@ -710,72 +734,90 @@ export class WebhookService implements OnModuleDestroy {
         amount: webhook.amount ? Number(webhook.amount) : null,
         currency: webhook.currency,
       };
-      const connectedProductId = await this.syncConnectedProduct(syncData, merchantId);
+      const connectedProduct = await this.syncConnectedProduct(syncData, merchantId);
 
-      // Find local product by name or ID using multi-strategy matching
-      this.logger.log(`[WEBHOOK] Looking for product: ${webhook.productName || webhook.productId}`);
+      // Determine inventory source from ConnectedProduct (default to AUTO)
+      const inventorySource = connectedProduct?.inventorySource || 'AUTO';
+
+      // Find local product — SKU mapping is primary, fuzzy matching is fallback
+      this.logger.log(`[WEBHOOK] Looking for product: ${webhook.productName || webhook.productId} (SKU: ${webhook.productSku || 'N/A'})`);
       let product = null;
+      let exactDenominationId: string | null = null;
       const searchName = webhook.productName || '';
       const searchId = webhook.productId || '';
+      const searchSku = webhook.productSku || '';
 
-      // Strategy 1: Exact ID match
-      if (searchId) {
-        product = await this.prisma.product.findUnique({ where: { id: searchId } });
-      }
-
-      // Strategy 2-4: Load all products once and match using multiple strategies
-      if (!product && searchName) {
-        const allProducts = await this.prisma.product.findMany();
-        const searchLower = searchName.toLowerCase();
-
-        // Strategy 2: Exact name match (case-insensitive)
-        product = allProducts.find((p) => p.name.toLowerCase() === searchLower) || null;
-
-        // Strategy 3: DB product name contains webhook name or vice versa
-        if (!product) {
-          product = allProducts.find((p) => p.name.toLowerCase().includes(searchLower)) || null;
-        }
-
-        // Strategy 4: Keyword-based matching (handles "PlayStation USA Digital Code" → "PSN")
-        if (!product) {
-          const aliases: Record<string, string[]> = {
-            'psn': ['playstation', 'psn', 'ps'],
-            'xbox': ['xbox', 'microsoft'],
-            'steam': ['steam', 'valve'],
-            'roblox': ['roblox'],
-            'google': ['google', 'android'],
-            'amazon': ['amazon', 'aws'],
-            'apple': ['apple', 'ios', 'itunes', 'appstore'],
-            'netflix': ['netflix'],
-            'spotify': ['spotify'],
-          };
-
-          for (const p of allProducts) {
-            const dbName = p.name.toLowerCase();
-            const productAliases = aliases[dbName] || [dbName];
-            for (const alias of productAliases) {
-              if (searchLower.includes(alias)) {
-                product = p;
-                this.logger.log(`[WEBHOOK] Matched product "${p.name}" via keyword alias "${alias}"`);
-                break;
-              }
-            }
-            if (product) break;
-
-            const dbWords = dbName.split(/\s+/).filter((w) => w.length >= 3);
-            if (dbWords.length > 0 && dbWords.every((w) => searchLower.includes(w))) {
-              product = p;
-              this.logger.log(`[WEBHOOK] Matched product "${p.name}" via word match`);
-              break;
+      // Strategy 1: SKU → ConnectedProduct.dcvProductId (PRIMARY — explicit mapping)
+      if (searchSku && merchantId) {
+        const cpBySku = await this.prisma.connectedProduct.findFirst({
+          where: { merchantId, platform: webhook.platform, platformSku: searchSku },
+        });
+        if (cpBySku?.dcvProductId) {
+          product = await this.prisma.product.findUnique({ where: { id: cpBySku.dcvProductId } });
+          if (product) {
+            this.logger.log(`[WEBHOOK] Matched product "${product.name}" via explicit SKU mapping (SKU: ${searchSku} → dcvProductId: ${cpBySku.dcvProductId})`);
+            if (cpBySku.dcvDenominationId) {
+              exactDenominationId = cpBySku.dcvDenominationId;
+              this.logger.log(`[WEBHOOK] Exact denomination mapping: ${exactDenominationId}`);
             }
           }
         }
       }
 
+      // Strategy 2: Exact UUID match (rarely matches for WooCommerce)
+      if (!product && searchId) {
+        product = await this.prisma.product.findUnique({ where: { id: searchId } });
+        if (product) {
+          this.logger.log(`[WEBHOOK] Matched product "${product.name}" via exact ID match`);
+        }
+      }
+
+      // Strategy 3: Exact name match (case-insensitive) — safe, no fuzzy guessing
+      if (!product && searchName) {
+        product = await this.prisma.product.findFirst({
+          where: { name: { equals: searchName } },
+        }) || null;
+        if (product) {
+          this.logger.log(`[WEBHOOK] Matched product "${product.name}" via exact name match (case-insensitive)`);
+        }
+      }
+
+      // SAFETY: No fuzzy/keyword/alias matching. Unmapped products are rejected.
       if (!product) {
-        const errMsg = `Product not found: ${searchName || searchId}. ConnectedProduct synced.`;
+        const errMsg = `No explicit product mapping found for SKU "${searchSku}" or name "${searchName}". ` +
+          `ConnectedProduct synced but no dcvProductId mapped. ` +
+          `Fulfillment rejected — no wallet debit, no inventory allocation. ` +
+          `Admin must map this product in the Connected Products dashboard.`;
         this.logger.warn(`[WEBHOOK] ${errMsg}`);
-        throw new Error(errMsg);
+
+        await this.prisma.incomingWebhook.update({
+          where: { id: webhookId },
+          data: {
+            merchantId,
+            processingStatus: 'REJECTED',
+            errorMessage: errMsg,
+            processedAt: new Date(),
+          },
+        });
+
+        // Notify admin via audit log
+        await this.prisma.auditLog.create({
+          data: {
+            actorType: 'SYSTEM',
+            actorId: 'webhook-processor',
+            action: 'webhook.product_unmapped',
+            entity: 'IncomingWebhook',
+            entityId: webhookId,
+            metadata: JSON.stringify({
+              merchantId,
+              productSku: searchSku,
+              productName: searchName,
+              orderId: webhook.orderId,
+            }),
+          },
+        });
+
+        return;
       }
 
       this.logger.log(`[WEBHOOK] Product found: ${product.id} - ${product.name}`);
@@ -799,6 +841,8 @@ export class WebhookService implements OnModuleDestroy {
             customerName: webhook.customerName || undefined,
             actorType: 'SYSTEM',
             actorId: 'webhook-processor',
+            inventorySource,
+            denominationId: exactDenominationId || undefined,
           });
           break;
         } catch (err: any) {
@@ -902,6 +946,37 @@ export class WebhookService implements OnModuleDestroy {
     return this.prisma.connectedProduct.findMany({
       where: { merchantId },
       orderBy: { lastSyncedAt: 'desc' },
+      include: { dcvProduct: { select: { id: true, name: true, region: true } } },
+    });
+  }
+
+  async updateConnectedProductMapping(
+    connectedProductId: string,
+    merchantId: string,
+    dcvProductId?: string,
+    dcvDenominationId?: string | null,
+    inventorySource?: string,
+  ) {
+    const cp = await this.prisma.connectedProduct.findFirst({
+      where: { id: connectedProductId, merchantId },
+    });
+    if (!cp) {
+      throw new BadRequestException({
+        error: 'NOT_FOUND',
+        code: 'CONNECTED_PRODUCT_NOT_FOUND',
+        message: 'Connected product not found or does not belong to this merchant',
+      });
+    }
+
+    const data: any = {};
+    if (dcvProductId !== undefined) data.dcvProductId = dcvProductId || null;
+    if (dcvDenominationId !== undefined) data.dcvDenominationId = dcvDenominationId || null;
+    if (inventorySource !== undefined) data.inventorySource = inventorySource;
+
+    return this.prisma.connectedProduct.update({
+      where: { id: connectedProductId },
+      data,
+      include: { dcvProduct: { select: { id: true, name: true, region: true } } },
     });
   }
 

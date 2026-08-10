@@ -14,6 +14,7 @@ import { AuditService } from '../audit/audit.service';
 import { AllocationEngineService, AllocationResult } from './allocation-engine.service';
 import { WebhookService } from '../webhooks/webhook.service';
 import { EmailService } from '../email/email.service';
+import { WalletService } from '../wallet/wallet.service';
 @Injectable()
 export class FulfillmentService {
   private readonly logger = new Logger(FulfillmentService.name);
@@ -26,6 +27,7 @@ export class FulfillmentService {
     private allocationEngine: AllocationEngineService,
     @Inject(forwardRef(() => WebhookService)) private webhookService: WebhookService,
     private emailService: EmailService,
+    private walletService: WalletService,
   ) {}
 
   async createFulfillment(params: {
@@ -42,8 +44,12 @@ export class FulfillmentService {
     actorId?: string;
     actorType?: 'ADMIN' | 'MERCHANT' | 'SYSTEM';
     ip?: string;
+    inventorySource?: string; // 'DCV' | 'MERCHANT' | 'AUTO' (default: 'DCV')
+    denominationId?: string; // exact denomination to use (from SKU mapping)
   }) {
     const { merchantId, productId, amount, currency, referenceId, idempotencyKey, sandbox, customerEmail, customerName, customerAddress, actorId, actorType, ip } = params;
+    const requestedSource = params.inventorySource || 'DCV';
+    const exactDenominationId = params.denominationId || null;
 
     // Validate amount
     if (amount <= 0) {
@@ -107,7 +113,8 @@ export class FulfillmentService {
     }
 
     // ─── Send order received email (before payment confirmation) ───
-    if (customerEmail) {
+    // Skip for webhook-driven orders (actorType=SYSTEM) — payment is already completed
+    if (customerEmail && actorType !== 'SYSTEM') {
       const orderDate = new Date().toLocaleString('en-US', {
         year: 'numeric', month: '2-digit', day: '2-digit',
         hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -141,52 +148,136 @@ export class FulfillmentService {
       });
     }
 
-    // Get available stock
-    const stock = await this.allocationEngine.getAvailableStock(this.prisma, productId);
-    const availableDenominations = stock.filter((s) => s.availableCount > 0);
+    // ─── Determine which inventory pool to use ───
+    // Try merchant-owned inventory first if source is MERCHANT or AUTO
+    let useMerchantPool = requestedSource === 'MERCHANT' || requestedSource === 'AUTO';
+    let merchantStock: any[] = [];
+    let dcvStock: any[] = [];
 
-    if (availableDenominations.length === 0) {
-      // Create a failed fulfillment record
-      const failedReq = await this.prisma.fulfillmentRequest.create({
-        data: {
-          merchantId,
-          productId,
-          amount,
-          currency,
-          idempotencyKey,
-          referenceId,
-          status: 'FAILED',
-          failureReason: 'No available stock for this product',
-          sandbox: sandbox || false,
-        },
-      });
+    if (useMerchantPool) {
+      merchantStock = (await this.allocationEngine.getAvailableStock(this.prisma, productId, merchantId))
+        .filter((s) => s.availableCount > 0);
+      if (merchantStock.length === 0) {
+        if (requestedSource === 'MERCHANT') {
+          // No merchant stock and no fallback allowed
+          const failedReq = await this.prisma.fulfillmentRequest.create({
+            data: {
+              merchantId,
+              productId,
+              amount,
+              currency,
+              idempotencyKey,
+              referenceId,
+              status: 'FAILED',
+              failureReason: 'No available merchant-owned stock for this product',
+              sandbox: sandbox || false,
+              inventorySource: 'MERCHANT',
+            },
+          });
 
-      await this.auditService.log({
-        actorType: actorType || 'SYSTEM',
-        actorId: actorId || merchantId,
-        action: 'fulfillment.failed',
-        entity: 'FulfillmentRequest',
-        entityId: failedReq.id,
-        metadata: { reason: 'INSUFFICIENT_STOCK', productId, amount },
-        ip,
-      });
+          await this.auditService.log({
+            actorType: actorType || 'SYSTEM',
+            actorId: actorId || merchantId,
+            action: 'fulfillment.failed',
+            entity: 'FulfillmentRequest',
+            entityId: failedReq.id,
+            metadata: { reason: 'INSUFFICIENT_STOCK', productId, amount, source: 'MERCHANT' },
+            ip,
+          });
 
-      // Fire webhook
-      this.webhookService.queueWebhookEvent(merchantId, 'fulfillment.failed', {
-        fulfillment_id: failedReq.id,
-        reference_id: referenceId,
-        reason: 'INSUFFICIENT_STOCK',
-      }).catch(() => {});
+          this.webhookService.queueWebhookEvent(merchantId, 'fulfillment.failed', {
+            fulfillment_id: failedReq.id,
+            reference_id: referenceId,
+            reason: 'INSUFFICIENT_STOCK',
+          }).catch(() => {});
 
-      throw new BadRequestException({
-        error: 'INSUFFICIENT_STOCK',
-        code: 'INSUFFICIENT_STOCK',
-        message: 'No available stock for this product',
-      });
+          throw new BadRequestException({
+            error: 'INSUFFICIENT_STOCK',
+            code: 'INSUFFICIENT_STOCK',
+            message: 'No available merchant-owned stock for this product',
+          });
+        }
+        // AUTO: fall back to DCV pool
+        useMerchantPool = false;
+      }
     }
 
-    // Find best combination
-    const combination = this.allocationEngine.findBestCombination(availableDenominations, amount);
+    // Get DCV stock if needed
+    if (!useMerchantPool) {
+      dcvStock = (await this.allocationEngine.getAvailableStock(this.prisma, productId, null))
+        .filter((s) => s.availableCount > 0);
+      if (dcvStock.length === 0) {
+        // Try all stock as last resort for AUTO mode
+        if (requestedSource === 'AUTO') {
+          dcvStock = (await this.allocationEngine.getAvailableStock(this.prisma, productId, '__ALL__'))
+            .filter((s) => s.availableCount > 0);
+        }
+      }
+      if (dcvStock.length === 0) {
+        // Create a failed fulfillment record
+        const failedReq = await this.prisma.fulfillmentRequest.create({
+          data: {
+            merchantId,
+            productId,
+            amount,
+            currency,
+            idempotencyKey,
+            referenceId,
+            status: 'FAILED',
+            failureReason: 'No available stock for this product',
+            sandbox: sandbox || false,
+            inventorySource: 'DCV',
+          },
+        });
+
+        await this.auditService.log({
+          actorType: actorType || 'SYSTEM',
+          actorId: actorId || merchantId,
+          action: 'fulfillment.failed',
+          entity: 'FulfillmentRequest',
+          entityId: failedReq.id,
+          metadata: { reason: 'INSUFFICIENT_STOCK', productId, amount },
+          ip,
+        });
+
+        // Fire webhook
+        this.webhookService.queueWebhookEvent(merchantId, 'fulfillment.failed', {
+          fulfillment_id: failedReq.id,
+          reference_id: referenceId,
+          reason: 'INSUFFICIENT_STOCK',
+        }).catch(() => {});
+
+        throw new BadRequestException({
+          error: 'INSUFFICIENT_STOCK',
+          code: 'INSUFFICIENT_STOCK',
+          message: 'No available stock for this product',
+        });
+      }
+    }
+
+    // Select the active pool
+    const activeStock = useMerchantPool ? merchantStock : dcvStock;
+    const activePoolMerchantId = useMerchantPool ? merchantId : null;
+
+    // Find best combination — use exact denomination if mapped, otherwise auto-compute
+    let combination: { denominationId: string; faceValue: number; count: number }[] | null = null;
+
+    if (exactDenominationId) {
+      const exactDenom = activeStock.find((d) => d.denominationId === exactDenominationId);
+      if (exactDenom && exactDenom.availableCount > 0) {
+        const count = Math.ceil(amount / exactDenom.faceValue);
+        if (count <= exactDenom.availableCount) {
+          combination = [{ denominationId: exactDenominationId, faceValue: exactDenom.faceValue, count }];
+        }
+      }
+      if (!combination) {
+        this.logger.warn(`Exact denomination ${exactDenominationId} not available or insufficient, falling back to auto-combination`);
+      }
+    }
+
+    if (!combination) {
+      combination = this.allocationEngine.findBestCombination(activeStock, amount);
+    }
     if (!combination) {
       const failedReq = await this.prisma.fulfillmentRequest.create({
         data: {
@@ -228,8 +319,9 @@ export class FulfillmentService {
     // Calculate total cost
     let totalCost = combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
 
-    // Sandbox mode: skip wallet balance check and debit
-    if (!sandbox) {
+    // Skip wallet check for merchant-owned inventory or sandbox mode
+    const skipWallet = sandbox || useMerchantPool;
+    if (!skipWallet) {
       // Check wallet balance
       if (Number(merchant.walletBalance) < totalCost) {
         const failedReq = await this.prisma.fulfillmentRequest.create({
@@ -282,7 +374,7 @@ export class FulfillmentService {
         // Re-fetch stock on retries (combination may have changed)
         if (attempt > 1) {
           this.logger.log(`[Fulfillment] Retry attempt ${attempt}/${MAX_RETRIES} for ${idempotencyKey}`);
-          const retryStock = await this.allocationEngine.getAvailableStock(this.prisma, productId);
+          const retryStock = await this.allocationEngine.getAvailableStock(this.prisma, productId, activePoolMerchantId);
           const retryDenoms = retryStock.filter((s) => s.availableCount > 0);
           if (retryDenoms.length === 0) {
             throw new BadRequestException({
@@ -319,6 +411,7 @@ export class FulfillmentService {
               customerEmail: customerEmail || null,
               customerName: customerName || null,
               customerAddress: customerAddress || null,
+              inventorySource: useMerchantPool ? 'MERCHANT' : 'DCV',
             },
           });
 
@@ -330,15 +423,16 @@ export class FulfillmentService {
               fulfillmentReq.id,
               combination,
               reservationTtl,
+              activePoolMerchantId,
             );
           } catch (err) {
             await this.allocationEngine.releaseReservation(tx, fulfillmentReq.id);
             throw err;
           }
 
-          // 3. Debit wallet (skip in sandbox mode)
+          // 3. Debit wallet (skip in sandbox mode or for merchant-owned inventory)
           let updatedMerchant: any;
-          if (sandbox) {
+          if (skipWallet) {
             updatedMerchant = await tx.merchant.findUnique({ where: { id: merchantId } });
           } else {
             updatedMerchant = await tx.merchant.update({
@@ -347,6 +441,15 @@ export class FulfillmentService {
                 walletBalance: { decrement: totalCost },
               },
             });
+
+            // Guard against negative balance (second safety net)
+            if (Number(updatedMerchant.walletBalance) < 0) {
+              throw new BadRequestException({
+                error: 'INSUFFICIENT_WALLET',
+                code: 'NEGATIVE_BALANCE_GUARD',
+                message: `Transaction would result in negative balance. This should not happen — pre-check failed.`,
+              });
+            }
 
             // 4. Create wallet transaction record
             await tx.walletTransaction.create({
@@ -359,6 +462,24 @@ export class FulfillmentService {
                 fulfillmentId: fulfillmentReq.id,
               },
             });
+
+            // 4b. Credit admin/platform wallet atomically
+            const adminWalletId = await this.walletService.getOrCreateAdminWallet();
+            const updatedAdminWallet = await tx.adminWallet.update({
+              where: { id: adminWalletId },
+              data: { balance: { increment: totalCost } },
+            });
+            await tx.adminWalletTransaction.create({
+              data: {
+                adminWalletId,
+                type: 'CREDIT',
+                amount: totalCost,
+                balanceAfter: updatedAdminWallet.balance,
+                referenceId: fulfillmentReq.id,
+                source: 'FULFILLMENT',
+                description: `Fulfillment revenue from merchant ${merchantId}`,
+              },
+            });
           }
 
           // 5. Confirm allocation (codes → ALLOCATED)
@@ -367,7 +488,7 @@ export class FulfillmentService {
           // 6. Update fulfillment status
           const updatedReq = await tx.fulfillmentRequest.update({
             where: { id: fulfillmentReq.id },
-            data: { status: 'ALLOCATED' },
+            data: { status: 'ALLOCATED', walletCharged: !skipWallet },
             include: { allocations: true },
           });
 
@@ -493,6 +614,7 @@ export class FulfillmentService {
           'Bank Transfer',
           customerAddress,
           invoiceBuffer,
+          deliveryLink,
         );
       }).catch((err) => {
         this.logger.error(`Failed to send payment confirmation email: ${(err as Error).message}`);
@@ -678,6 +800,24 @@ export class FulfillmentService {
         },
       });
 
+      // Reverse admin wallet credit (debit it back)
+      const adminWalletId = await this.walletService.getOrCreateAdminWallet();
+      const updatedAdminWallet = await tx.adminWallet.update({
+        where: { id: adminWalletId },
+        data: { balance: { decrement: refundAmount } },
+      });
+      await tx.adminWalletTransaction.create({
+        data: {
+          adminWalletId,
+          type: 'DEBIT',
+          amount: refundAmount,
+          balanceAfter: updatedAdminWallet.balance,
+          referenceId: fulfillmentId,
+          source: 'REFUND',
+          description: `Reversal of fulfillment ${fulfillmentId}`,
+        },
+      });
+
       // Update fulfillment status
       const updatedReq = await tx.fulfillmentRequest.update({
         where: { id: fulfillmentId },
@@ -784,6 +924,24 @@ export class FulfillmentService {
               balanceAfter: updatedMerchant.walletBalance,
               referenceId: req.id,
               fulfillmentId: req.id,
+            },
+          });
+
+          // Credit admin/platform wallet atomically
+          const adminWalletId = await this.walletService.getOrCreateAdminWallet();
+          const updatedAdminWallet = await tx.adminWallet.update({
+            where: { id: adminWalletId },
+            data: { balance: { increment: totalCost } },
+          });
+          await tx.adminWalletTransaction.create({
+            data: {
+              adminWalletId,
+              type: 'CREDIT',
+              amount: totalCost,
+              balanceAfter: updatedAdminWallet.balance,
+              referenceId: req.id,
+              source: 'FULFILLMENT',
+              description: `Supplier auto-fulfillment revenue from merchant ${req.merchantId}`,
             },
           });
 
