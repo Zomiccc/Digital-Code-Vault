@@ -12,7 +12,7 @@ import { EmailService } from '../email/email.service';
 import { AuditService } from '../audit/audit.service';
 import { EncryptionService } from '../encryption/encryption.service';
 import { nanoid } from 'nanoid';
-import type Stripe from 'stripe';
+import Stripe from 'stripe';
 
 @Injectable()
 export class StripeService {
@@ -656,13 +656,13 @@ export class StripeService {
     if (paymentRecord.paymentType === 'MERCHANT_WALLET_FUNDING' && paymentRecord.merchantId) {
       await this.prisma.$transaction(async (tx) => {
         const updatedMerchant = await tx.merchant.update({
-          where: { id: paymentRecord.merchantId },
+          where: { id: paymentRecord.merchantId! },
           data: { walletBalance: { decrement: refundAmount } },
         });
 
         await tx.walletTransaction.create({
           data: {
-            merchantId: paymentRecord.merchantId,
+            merchantId: paymentRecord.merchantId!,
             type: 'DEBIT',
             amount: refundAmount,
             balanceAfter: updatedMerchant.walletBalance,
