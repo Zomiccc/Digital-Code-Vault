@@ -1,4 +1,6 @@
-const API_BASE = '/api/v1';
+const API_BASE = import.meta.env.PROD
+  ? 'https://digitalvaul.onrender.com/api/v1'
+  : '/api/v1';
 
 function getToken(): string | null {
   return localStorage.getItem('vault_access_token');
