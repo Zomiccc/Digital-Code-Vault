@@ -49,13 +49,13 @@
     "pino": "^8.19.0",
     "pino-http": "^9.0.0",
     "reflect-metadata": "^0.2.1",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "ts-node": "^10.9.2"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.3.0",
     "@nestjs/schematics": "^10.1.0",
     "ts-loader": "^9.5.1",
-    "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.4.0"
   }
