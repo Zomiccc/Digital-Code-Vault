@@ -3,10 +3,15 @@
   "version": "1.0.0",
   "scripts": {
     "build": "nest build",
+    "postinstall": "node prisma/set-provider.js && npx prisma generate",
     "start": "node dist/main",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
-    "seed": "ts-node prisma/seed.ts",
+    "prisma:set-provider": "node prisma/set-provider.js",
+    "prisma:generate": "node prisma/set-provider.js && npx prisma generate",
+    "prisma:migrate": "node prisma/set-provider.js && npx prisma migrate dev",
+    "prisma:migrate:deploy": "node prisma/set-provider.js && npx prisma migrate deploy",
+    "seed": "node prisma/set-provider.js && ts-node prisma/seed.ts",
     "lint": "eslint \"{src,prisma}/**/*.ts\" --fix"
   },
   "prisma": {

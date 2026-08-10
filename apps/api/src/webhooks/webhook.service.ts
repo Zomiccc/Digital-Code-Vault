@@ -21,6 +21,7 @@ export class WebhookService implements OnModuleDestroy {
   private readonly maxRetries: number;
   private readonly redisUrl: string;
   private processingQueue: Promise<void> = Promise.resolve();
+  private readonly isProduction: boolean;
 
   constructor(
     private prisma: PrismaService,
@@ -30,6 +31,7 @@ export class WebhookService implements OnModuleDestroy {
   ) {
     this.maxRetries = this.configService.get<number>('WEBHOOK_MAX_RETRIES', 8);
     this.redisUrl = this.configService.get<string>('REDIS_URL', 'redis://localhost:6379');
+    this.isProduction = this.configService.get<string>('NODE_ENV') === 'production';
     this.initBullMQ();
   }
 
@@ -438,8 +440,6 @@ export class WebhookService implements OnModuleDestroy {
 
   async processIncomingWebhook(payload: any, headers: any, sourceIp?: string) {
     this.logger.log(`[WEBHOOK] Received incoming webhook`);
-    this.logger.log(`[WEBHOOK] Headers: ${JSON.stringify(headers)}`);
-    this.logger.log(`[WEBHOOK] Payload: ${JSON.stringify(payload)}`);
 
     // ─── Authenticate the webhook by verifying the merchant's webhook secret ───
     const webhookSecret =
@@ -471,13 +471,15 @@ export class WebhookService implements OnModuleDestroy {
       });
     }
 
-    this.logger.log(`[WEBHOOK] Authenticated as merchant: ${merchant.id} (${merchant.email})`);
+    this.logger.log(`[WEBHOOK] Authenticated as merchant: ${merchant.id}`);
 
     // Detect provider and normalize payload
     const detected = ProviderDetector.detect(headers, payload);
     const normalized = ProviderDetector.normalize(headers, payload);
     this.logger.log(`[WEBHOOK] Detected provider: ${detected.provider} (confidence: ${detected.confidence})`);
-    this.logger.log(`[WEBHOOK] Normalized payload: ${JSON.stringify(normalized)}`);
+    if (!this.isProduction) {
+      this.logger.log(`[WEBHOOK] Normalized payload: ${JSON.stringify(normalized)}`);
+    }
 
     // Extract or generate event ID for duplicate detection
     const eventId = normalized.eventId || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;

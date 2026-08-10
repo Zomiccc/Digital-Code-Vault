@@ -8,6 +8,7 @@ import { AppModule } from './app.module';
 import { PrismaService } from './prisma/prisma.service';
 import { SecurityHeadersMiddleware } from './common/middleware/security-headers.middleware';
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware';
+import { ProductionConfigValidator } from './common/production-config.validator';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -17,6 +18,10 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT', 3000);
+
+  // Production config validation — fails startup if critical env vars are missing
+  const configValidator = new ProductionConfigValidator(configService);
+  configValidator.validate();
 
   // CORS — must be before helmet/security headers so preflight requests are handled
   const isDev = configService.get<string>('NODE_ENV') === 'development';

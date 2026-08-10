@@ -18,10 +18,10 @@
     "build:merchant": "cd apps/merchant && npm run build",
     "build:portal": "cd apps/portal && npm run build",
     "build": "npm run build:shared && npm run build:api && npm run build:admin && npm run build:merchant && npm run build:portal",
-    "db:migrate": "cd apps/api && npx prisma migrate dev",
-    "db:generate": "cd apps/api && npx prisma generate",
+    "db:migrate": "cd apps/api && npm run prisma:migrate",
+    "db:generate": "cd apps/api && npm run prisma:generate",
     "db:seed": "cd apps/api && npm run seed",
-    "db:studio": "cd apps/api && npx prisma studio"
+    "db:studio": "cd apps/api && npm run prisma:set-provider && npx prisma studio"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
