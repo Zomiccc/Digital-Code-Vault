@@ -3,6 +3,8 @@
  * - postgresql:// → provider = "postgresql"
  * - file:         → provider = "sqlite"
  *
+ * Also updates migration_lock.toml to match.
+ *
  * Run before: prisma generate, prisma migrate, prisma studio
  * Usage: node prisma/set-provider.js
  */
@@ -27,7 +29,6 @@ const updated = schema.replace(
 );
 
 if (schema === updated) {
-  // No change needed or pattern not found — try to find the datasource block
   if (!/provider\s*=\s*"/.test(schema)) {
     console.error('Could not find provider in schema.prisma');
     process.exit(1);
@@ -36,4 +37,18 @@ if (schema === updated) {
 } else {
   fs.writeFileSync(schemaPath, updated);
   console.log(`Prisma provider set to: ${provider} (detected from DATABASE_URL)`);
+}
+
+// Also update migration_lock.toml
+const lockPath = path.join(__dirname, 'migrations', 'migration_lock.toml');
+if (fs.existsSync(lockPath)) {
+  const lock = fs.readFileSync(lockPath, 'utf8');
+  const lockUpdated = lock.replace(
+    /provider\s*=\s*"(sqlite|postgresql)"/,
+    `provider = "${provider}"`
+  );
+  if (lock !== lockUpdated) {
+    fs.writeFileSync(lockPath, lockUpdated);
+    console.log(`Migration lock provider set to: ${provider}`);
+  }
 }

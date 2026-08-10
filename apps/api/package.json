@@ -11,6 +11,7 @@
     "prisma:generate": "node prisma/set-provider.js && npx prisma generate",
     "prisma:migrate": "node prisma/set-provider.js && npx prisma migrate dev",
     "prisma:migrate:deploy": "node prisma/set-provider.js && npx prisma migrate deploy",
+    "prisma:push": "node prisma/set-provider.js && npx prisma db push",
     "seed": "node prisma/set-provider.js && ts-node prisma/seed.ts",
     "lint": "eslint \"{src,prisma}/**/*.ts\" --fix"
   },
