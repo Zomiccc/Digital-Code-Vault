@@ -749,19 +749,35 @@ export class WebhookService implements OnModuleDestroy {
       const searchId = webhook.productId || '';
       const searchSku = webhook.productSku || '';
 
-      // Strategy 1: SKU → ConnectedProduct.dcvProductId (PRIMARY — explicit mapping)
-      if (searchSku && merchantId) {
-        const cpBySku = await this.prisma.connectedProduct.findFirst({
+      // Strategy 1: ConnectedProduct.dcvProductId (PRIMARY — explicit admin mapping)
+      // Matches by SKU first (most specific), then falls back to platformProductId.
+      // This mirrors the same lookup keys used by syncConnectedProduct() so that any
+      // mapping an admin sets via the Connected Products dashboard is actually found,
+      // even when the source platform (e.g. WooCommerce) sends no SKU.
+      let cpMapping: { dcvProductId: string | null; dcvDenominationId: string | null } | null = null;
+      let matchedVia = '';
+
+      if (merchantId && searchSku) {
+        cpMapping = await this.prisma.connectedProduct.findFirst({
           where: { merchantId, platform: webhook.platform, platformSku: searchSku },
         });
-        if (cpBySku?.dcvProductId) {
-          product = await this.prisma.product.findUnique({ where: { id: cpBySku.dcvProductId } });
-          if (product) {
-            this.logger.log(`[WEBHOOK] Matched product "${product.name}" via explicit SKU mapping (SKU: ${searchSku} → dcvProductId: ${cpBySku.dcvProductId})`);
-            if (cpBySku.dcvDenominationId) {
-              exactDenominationId = cpBySku.dcvDenominationId;
-              this.logger.log(`[WEBHOOK] Exact denomination mapping: ${exactDenominationId}`);
-            }
+        if (cpMapping?.dcvProductId) matchedVia = `SKU: ${searchSku}`;
+      }
+
+      if (!cpMapping?.dcvProductId && merchantId && searchId) {
+        cpMapping = await this.prisma.connectedProduct.findFirst({
+          where: { merchantId, platform: webhook.platform, platformProductId: searchId },
+        });
+        if (cpMapping?.dcvProductId) matchedVia = `platformProductId: ${searchId}`;
+      }
+
+      if (cpMapping?.dcvProductId) {
+        product = await this.prisma.product.findUnique({ where: { id: cpMapping.dcvProductId } });
+        if (product) {
+          this.logger.log(`[WEBHOOK] Matched product "${product.name}" via explicit ConnectedProduct mapping (${matchedVia} → dcvProductId: ${cpMapping.dcvProductId})`);
+          if (cpMapping.dcvDenominationId) {
+            exactDenominationId = cpMapping.dcvDenominationId;
+            this.logger.log(`[WEBHOOK] Exact denomination mapping: ${exactDenominationId}`);
           }
         }
       }
