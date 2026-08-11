@@ -25,12 +25,13 @@ async function bootstrap() {
 
   // CORS — must be before helmet/security headers so preflight requests are handled
   const isDev = configService.get<string>('NODE_ENV') === 'development';
-  const corsOriginsRaw = configService.get<string>('CORS_ORIGIN', isDev ? '*' : '');
+  const corsOriginsRaw = (configService.get<string>('CORS_ORIGIN', isDev ? '*' : '') || '').replace(/^["']|["']$/g, '');
   const isWildcard = corsOriginsRaw.trim() === '*';
-  const allowedOrigins = corsOriginsRaw.split(',').map((o) => o.trim()).filter(Boolean);
+  const allowedOrigins = corsOriginsRaw.split(',').map((o) => o.trim().replace(/\/+$/, '')).filter(Boolean);
   app.use(cors({
     origin: (origin, callback) => {
-      if (isWildcard || !origin || allowedOrigins.includes(origin)) {
+      const normalizedOrigin = (origin || '').replace(/\/+$/, '');
+      if (isWildcard || !origin || allowedOrigins.includes(normalizedOrigin)) {
         callback(null, true);
       } else {
         callback(new Error(`Origin ${origin} not allowed by CORS`));
