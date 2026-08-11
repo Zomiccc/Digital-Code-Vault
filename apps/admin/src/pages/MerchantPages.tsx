@@ -5,7 +5,7 @@ import {
   Webhook, Copy, Check, Clock,
 } from 'lucide-react';
 import { api } from '@/lib/api';
-import { Card, Button, Badge, Table, Th, Td, Input, AddressWithMapsLink } from '@/components/ui';
+import { Card, Button, Badge, Table, Th, Td, Input, AddressWithMapsLink, Modal } from '@/components/ui';
 import { formatCurrency, formatDate, statusColor } from '@/lib/utils';
 
 export function MerchantDashboardPage() {
@@ -580,7 +580,7 @@ export function IncomingWebhooksPage() {
           <tbody>
             {Array.isArray(webhooks) && webhooks.map((w: any) => (
               <tr key={w.id}>
-                <Td className="font-mono text-xs">{w.eventId.slice(0, 12)}...</Td>
+                <Td className="font-mono text-xs">{w.eventId ? `${w.eventId.slice(0, 12)}...` : '-'}</Td>
                 <Td>{w.platform}</Td>
                 <Td>{w.provider || '-'}</Td>
                 <Td>{w.orderId || '-'}</Td>
@@ -618,12 +618,13 @@ export function IncomingWebhooksPage() {
         </Table>
       </Card>
 
-      {selectedWebhook && (
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold">Webhook Details</h2>
-            <Button variant="ghost" size="sm" onClick={() => setSelectedWebhook(null)}>Close</Button>
-          </div>
+      <Modal
+        open={!!selectedWebhook}
+        onClose={() => setSelectedWebhook(null)}
+        title="Webhook Details"
+        size="lg"
+      >
+        {selectedWebhook && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -693,7 +694,13 @@ export function IncomingWebhooksPage() {
               <div>
                 <div className="text-sm text-muted-foreground mb-2">Headers</div>
                 <pre className="bg-muted p-4 rounded-lg text-xs overflow-auto max-h-48">
-                  {JSON.stringify(JSON.parse(selectedWebhook.rawHeaders), null, 2)}
+                  {(() => {
+                    try {
+                      return JSON.stringify(JSON.parse(selectedWebhook.rawHeaders), null, 2);
+                    } catch {
+                      return selectedWebhook.rawHeaders;
+                    }
+                  })()}
                 </pre>
               </div>
             )}
@@ -706,18 +713,46 @@ export function IncomingWebhooksPage() {
             <div>
               <div className="text-sm text-muted-foreground mb-2">Raw Payload</div>
               <pre className="bg-muted p-4 rounded-lg text-xs overflow-auto max-h-96">
-                {JSON.stringify(JSON.parse(selectedWebhook.rawPayload), null, 2)}
+                {(() => {
+                  if (!selectedWebhook.rawPayload) return '-';
+                  try {
+                    return JSON.stringify(JSON.parse(selectedWebhook.rawPayload), null, 2);
+                  } catch {
+                    return selectedWebhook.rawPayload;
+                  }
+                })()}
               </pre>
             </div>
           </div>
-        </Card>
-      )}
+        )}
+      </Modal>
     </div>
   );
 }
 
 export function ConnectedProductsPage() {
+  const queryClient = useQueryClient();
   const { data: products, isLoading } = useQuery({ queryKey: ['connected-products'], queryFn: api.listConnectedProducts });
+  const { data: dcvProducts } = useQuery({ queryKey: ['merchant-products'], queryFn: api.listMerchantProducts });
+  const [mappingTarget, setMappingTarget] = useState<any>(null);
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [selectedDenominationId, setSelectedDenominationId] = useState('');
+  const [mapError, setMapError] = useState('');
+
+  const mapMutation = useMutation({
+    mutationFn: (data: { id: string; dcv_product_id: string; dcv_denomination_id: string | null }) =>
+      api.updateConnectedProduct(data.id, { dcv_product_id: data.dcv_product_id, dcv_denomination_id: data.dcv_denomination_id }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['connected-products'] });
+      setMappingTarget(null);
+      setSelectedProductId('');
+      setSelectedDenominationId('');
+      setMapError('');
+    },
+    onError: (err: any) => {
+      setMapError(err.message || 'Failed to save mapping');
+    },
+  });
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -727,13 +762,37 @@ export function ConnectedProductsPage() {
     }
   };
 
+  const openMappingModal = (p: any) => {
+    setMappingTarget(p);
+    setSelectedProductId(p.dcvProductId || '');
+    setSelectedDenominationId(p.dcvDenominationId || '');
+    setMapError('');
+  };
+
+  const selectedDcvProduct = Array.isArray(dcvProducts)
+    ? dcvProducts.find((dp: any) => dp.id === selectedProductId)
+    : null;
+
+  const handleSaveMapping = () => {
+    if (!mappingTarget) return;
+    if (!selectedProductId) {
+      setMapError('Please select a DCV product to map to.');
+      return;
+    }
+    mapMutation.mutate({
+      id: mappingTarget.id,
+      dcv_product_id: selectedProductId,
+      dcv_denomination_id: selectedDenominationId || null,
+    });
+  };
+
   if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Connected Products</h1>
-        <p className="text-sm text-muted-foreground">Products synced from external platforms via webhooks</p>
+        <p className="text-sm text-muted-foreground">Products synced from external platforms via webhooks. Map each product to a DCV product/denomination so orders can be fulfilled.</p>
       </div>
 
       <Card>
@@ -749,7 +808,9 @@ export function ConnectedProductsPage() {
               <Th>Price</Th>
               <Th>Stock</Th>
               <Th>Status</Th>
+              <Th>Mapping</Th>
               <Th>Last Synced</Th>
+              <Th>Actions</Th>
             </tr>
           </thead>
           <tbody>
@@ -764,18 +825,86 @@ export function ConnectedProductsPage() {
                 <Td>{p.price ? `${p.currency || 'USD'} ${p.price}` : '-'}</Td>
                 <Td>{p.stock ?? 0}</Td>
                 <Td><Badge className={statusColor(p.status)}>{p.status}</Badge></Td>
+                <Td>
+                  {p.dcvProductId ? (
+                    <Badge className="bg-emerald-500/10 text-emerald-500">Mapped: {p.dcvProduct?.name || p.dcvProductId}</Badge>
+                  ) : (
+                    <Badge className="bg-amber-500/10 text-amber-500">Unmapped</Badge>
+                  )}
+                </Td>
                 <Td>{p.lastSyncedAt ? formatDate(p.lastSyncedAt) : '-'}</Td>
+                <Td>
+                  <Button variant={p.dcvProductId ? 'outline' : 'primary'} size="sm" onClick={() => openMappingModal(p)}>
+                    {p.dcvProductId ? 'Edit Mapping' : 'Map Product'}
+                  </Button>
+                </Td>
               </tr>
             ))}
             {!Array.isArray(products) && (
-              <tr><td colSpan={10} className="px-4 py-3 border-t border-border text-muted-foreground text-center">Unable to load products</td></tr>
+              <tr><td colSpan={12} className="px-4 py-3 border-t border-border text-muted-foreground text-center">Unable to load products</td></tr>
             )}
             {Array.isArray(products) && products.length === 0 && (
-              <tr><td colSpan={10} className="px-4 py-3 border-t border-border text-muted-foreground text-center">No connected products yet. Products will appear here when webhooks are received.</td></tr>
+              <tr><td colSpan={12} className="px-4 py-3 border-t border-border text-muted-foreground text-center">No connected products yet. Products will appear here when webhooks are received.</td></tr>
             )}
           </tbody>
         </Table>
       </Card>
+
+      <Modal
+        open={!!mappingTarget}
+        onClose={() => { setMappingTarget(null); setMapError(''); }}
+        title="Map Connected Product"
+      >
+        {mappingTarget && (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-muted/50 p-3 text-sm">
+              <div className="font-semibold">{mappingTarget.name}</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Platform: {mappingTarget.platform} &middot; SKU: {mappingTarget.sku || '-'} &middot; Platform ID: {mappingTarget.platformProductId || '-'}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">DCV Product</label>
+              <select
+                value={selectedProductId}
+                onChange={(e) => { setSelectedProductId(e.target.value); setSelectedDenominationId(''); }}
+                className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-2.5 text-sm outline-none transition-all duration-200 focus:border-primary focus:ring-1 focus:ring-primary/30"
+              >
+                <option value="">Select a product...</option>
+                {Array.isArray(dcvProducts) && dcvProducts.map((dp: any) => (
+                  <option key={dp.id} value={dp.id}>{dp.name} ({dp.region})</option>
+                ))}
+              </select>
+            </div>
+
+            {selectedDcvProduct && Array.isArray(selectedDcvProduct.denominations) && selectedDcvProduct.denominations.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Denomination (optional)</label>
+                <select
+                  value={selectedDenominationId}
+                  onChange={(e) => setSelectedDenominationId(e.target.value)}
+                  className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-2.5 text-sm outline-none transition-all duration-200 focus:border-primary focus:ring-1 focus:ring-primary/30"
+                >
+                  <option value="">Any denomination (match by amount)</option>
+                  {selectedDcvProduct.denominations.map((d: any) => (
+                    <option key={d.id} value={d.id}>{d.currency} {d.faceValue}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {mapError && <div className="text-sm text-red-500">{mapError}</div>}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => { setMappingTarget(null); setMapError(''); }}>Cancel</Button>
+              <Button onClick={handleSaveMapping} disabled={mapMutation.isPending}>
+                {mapMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save Mapping'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
