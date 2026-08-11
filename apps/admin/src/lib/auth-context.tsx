@@ -37,6 +37,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string): Promise<UnifiedUser> => {
+    const isAuthError = (err: any) =>
+      err.message && (
+        err.message.includes('Unauthorized') ||
+        err.message.includes('Invalid credentials') ||
+        err.message.includes('API error: 401')
+      );
+
     // Try admin login first
     try {
       const result = await api.adminLogin(email, password);
@@ -46,9 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('vault_user', JSON.stringify(u));
       return u;
     } catch (adminErr: any) {
-      if (adminErr.message && !adminErr.message.includes('Unauthorized') && !adminErr.message.includes('Invalid credentials') && !adminErr.message.includes('API error: 401')) {
-        throw adminErr;
-      }
+      if (!isAuthError(adminErr)) throw adminErr;
       // Try merchant login
       try {
         const result = await api.merchantLogin(email, password);
@@ -65,9 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem('vault_user', JSON.stringify(u));
         return u;
       } catch (merchantErr: any) {
-        if (merchantErr.message && !merchantErr.message.includes('Unauthorized') && !merchantErr.message.includes('Invalid credentials') && !merchantErr.message.includes('API error: 401')) {
-          throw merchantErr;
-        }
+        if (!isAuthError(merchantErr)) throw merchantErr;
         // Try customer login
         const result = await api.customerLogin(email, password);
         const u: UnifiedUser = {

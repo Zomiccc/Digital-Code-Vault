@@ -37,7 +37,20 @@ export async function apiFetch<T = any>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, { ...options, headers, signal: controller.signal });
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error('Request timed out. Please try again.');
+    }
+    throw new Error('Unable to connect to the server. Please check your connection and try again.');
+  }
+  clearTimeout(timeoutId);
 
   if (res.status === 401) {
     const isAuthEndpoint = path.includes('/auth/');
