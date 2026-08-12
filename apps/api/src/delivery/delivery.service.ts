@@ -24,20 +24,38 @@ export class DeliveryService {
    * Does NOT reveal the code — just shows order info.
    * The link is permanent and never expires.
    */
-  async getDeliveryInfo(token: string) {
+  private async findDeliveryToken(token: string, includeMerchant = false) {
     const tokenHash = this.encryptionService.hashToken(token);
 
-    const deliveryToken = await this.prisma.deliveryToken.findUnique({
-      where: { tokenHash },
-      include: {
-        fulfillment: {
-          include: {
-            product: true,
-            allocations: true,
-          },
+    const include = {
+      fulfillment: {
+        include: {
+          product: true,
+          allocations: true,
+          ...(includeMerchant ? { merchant: true } : {}),
         },
       },
+    };
+
+    // First, try looking up by hashed token (normal flow — raw token from email link)
+    let deliveryToken = await this.prisma.deliveryToken.findUnique({
+      where: { tokenHash },
+      include,
     });
+
+    // Fallback: the token might already be the tokenHash (e.g., from customer dashboard)
+    if (!deliveryToken) {
+      deliveryToken = await this.prisma.deliveryToken.findUnique({
+        where: { tokenHash: token },
+        include,
+      });
+    }
+
+    return deliveryToken;
+  }
+
+  async getDeliveryInfo(token: string) {
+    const deliveryToken = await this.findDeliveryToken(token);
 
     if (!deliveryToken) {
       throw new NotFoundException({
@@ -107,20 +125,7 @@ export class DeliveryService {
    * The code is marked as DELIVERED on first reveal to prevent reuse.
    */
   async revealCode(token: string, ip?: string) {
-    const tokenHash = this.encryptionService.hashToken(token);
-
-    const deliveryToken = await this.prisma.deliveryToken.findUnique({
-      where: { tokenHash },
-      include: {
-        fulfillment: {
-          include: {
-            product: true,
-            allocations: true,
-            merchant: true,
-          },
-        },
-      },
-    });
+    const deliveryToken = await this.findDeliveryToken(token, true);
 
     if (!deliveryToken) {
       throw new NotFoundException({
