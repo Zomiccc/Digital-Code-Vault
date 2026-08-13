@@ -120,6 +120,9 @@ export class AllocationEngineService {
     if (availableDenoms.length === 0) return null;
     const maxDenom = Math.max(...availableDenoms.map((d) => d.faceValue));
     if (maxDenom * remainingSlots < remainingTarget) return null;
+    // Pruning: if the smallest denomination * remaining slots exceeds target, skip
+    const minDenom = Math.min(...availableDenoms.map((d) => d.faceValue));
+    if (minDenom * remainingSlots > remainingTarget) return null;
 
     // Start from the first denomination to avoid duplicate permutations
     const startIdx = currentSelection.length > 0

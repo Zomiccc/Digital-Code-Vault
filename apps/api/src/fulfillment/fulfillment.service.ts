@@ -265,13 +265,17 @@ export class FulfillmentService {
     if (exactDenominationId) {
       const exactDenom = activeStock.find((d) => d.denominationId === exactDenominationId);
       if (exactDenom && exactDenom.availableCount > 0) {
-        const count = Math.ceil(amount / exactDenom.faceValue);
-        if (count <= exactDenom.availableCount) {
-          combination = [{ denominationId: exactDenominationId, faceValue: exactDenom.faceValue, count }];
+        // Only use exact denomination if it divides the amount evenly (exact multiple)
+        const remainder = amount % exactDenom.faceValue;
+        if (remainder === 0) {
+          const count = amount / exactDenom.faceValue;
+          if (count <= exactDenom.availableCount) {
+            combination = [{ denominationId: exactDenominationId, faceValue: exactDenom.faceValue, count }];
+          }
         }
       }
       if (!combination) {
-        this.logger.warn(`Exact denomination ${exactDenominationId} not available or insufficient, falling back to auto-combination`);
+        this.logger.warn(`Exact denomination ${exactDenominationId} not available or does not evenly divide ${amount}, falling back to auto-combination`);
       }
     }
 
@@ -318,6 +322,40 @@ export class FulfillmentService {
 
     // Calculate total cost
     let totalCost = combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
+
+    // Validate combination total exactly matches the requested amount
+    if (totalCost !== amount) {
+      this.logger.error(`[Fulfillment] Combination total ${totalCost} does not match requested amount ${amount}`);
+      const failedReq = await this.prisma.fulfillmentRequest.create({
+        data: {
+          merchantId,
+          productId,
+          amount,
+          currency,
+          idempotencyKey,
+          referenceId,
+          status: 'FAILED',
+          failureReason: `Combination total ${totalCost} does not match requested amount ${amount}`,
+          sandbox: sandbox || false,
+        },
+      });
+
+      await this.auditService.log({
+        actorType: actorType || 'SYSTEM',
+        actorId: actorId || merchantId,
+        action: 'fulfillment.failed',
+        entity: 'FulfillmentRequest',
+        entityId: failedReq.id,
+        metadata: { reason: 'AMOUNT_MISMATCH', requested: amount, combinationTotal: totalCost },
+        ip,
+      });
+
+      throw new BadRequestException({
+        error: 'INSUFFICIENT_INVENTORY',
+        code: 'AMOUNT_MISMATCH',
+        message: `No combination of available denominations exactly sums to ${amount}`,
+      });
+    }
 
     // Skip wallet check for merchant-owned inventory or sandbox mode
     const skipWallet = sandbox || useMerchantPool;
@@ -394,6 +432,13 @@ export class FulfillmentService {
           combination.length = 0;
           combination.push(...retryCombo);
           totalCost = combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
+          if (totalCost !== amount) {
+            throw new BadRequestException({
+              error: 'INSUFFICIENT_INVENTORY',
+              code: 'AMOUNT_MISMATCH',
+              message: `Combination total ${totalCost} does not match requested amount ${amount} after retry`,
+            });
+          }
         }
 
         result = await this.prisma.$transaction(async (tx) => {
@@ -482,17 +527,28 @@ export class FulfillmentService {
             });
           }
 
-          // 5. Confirm allocation (codes → ALLOCATED)
+          // 5. Verify allocation results contain actual code item IDs
+          const allAllocatedIds = allocationResults.flatMap((r) => r.codeItemIds);
+          if (allAllocatedIds.length === 0) {
+            await this.allocationEngine.releaseReservation(tx, fulfillmentReq.id);
+            throw new BadRequestException({
+              error: 'ALLOCATION_FAILED',
+              code: 'NO_CODES_ALLOCATED',
+              message: 'No code items were allocated — combination produced zero results',
+            });
+          }
+
+          // 6. Confirm allocation (codes → ALLOCATED)
           await this.allocationEngine.confirmAllocation(tx, fulfillmentReq.id, allocationResults);
 
-          // 6. Update fulfillment status
+          // 7. Update fulfillment status
           const updatedReq = await tx.fulfillmentRequest.update({
             where: { id: fulfillmentReq.id },
             data: { status: 'ALLOCATED', walletCharged: !skipWallet },
             include: { allocations: true },
           });
 
-          // 7. Generate permanent delivery token (no expiry — link is permanently accessible)
+          // 8. Generate permanent delivery token (no expiry — link is permanently accessible)
           const rawToken = this.encryptionService.generateToken(32);
           const tokenHash = this.encryptionService.hashToken(rawToken);
 
@@ -894,6 +950,11 @@ export class FulfillmentService {
         }
 
         const totalCost = combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
+        if (totalCost !== Number(req.amount)) {
+          results.push({ id: req.id, success: false, reason: `Combination total ${totalCost} does not match requested amount ${req.amount}` });
+          continue;
+        }
+
         const reservationTtl = this.configService.get<number>('RESERVATION_TTL_MINUTES', 15);
 
         const result = await this.prisma.$transaction(async (tx) => {
@@ -908,6 +969,17 @@ export class FulfillmentService {
           } catch (err) {
             await this.allocationEngine.releaseReservation(tx, req.id);
             throw err;
+          }
+
+          // Verify allocation results contain actual code item IDs
+          const allAllocatedIds = allocationResults.flatMap((r) => r.codeItemIds);
+          if (allAllocatedIds.length === 0) {
+            await this.allocationEngine.releaseReservation(tx, req.id);
+            throw new BadRequestException({
+              error: 'ALLOCATION_FAILED',
+              code: 'NO_CODES_ALLOCATED',
+              message: 'No code items were allocated — combination produced zero results',
+            });
           }
 
           // Debit wallet
