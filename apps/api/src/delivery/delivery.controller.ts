@@ -2,6 +2,25 @@ import { Controller, Get, Post, Param, Req, Res, NotFoundException } from '@nest
 import { Response } from 'express';
 import { DeliveryService } from './delivery.service';
 
+/**
+ * JSON delivery API — used by the customer portal (/d/:token).
+ * Token-based, no auth. Codes are only returned by the reveal endpoint.
+ */
+@Controller('d')
+export class DeliveryApiController {
+  constructor(private deliveryService: DeliveryService) {}
+
+  @Get(':token')
+  async getDeliveryInfo(@Param('token') token: string) {
+    return this.deliveryService.getDeliveryInfo(token);
+  }
+
+  @Post(':token/reveal')
+  async revealCode(@Param('token') token: string, @Req() req: any) {
+    return this.deliveryService.revealCode(token, req.ip);
+  }
+}
+
 @Controller('reveal')
 export class DeliveryController {
   constructor(private deliveryService: DeliveryService) {}

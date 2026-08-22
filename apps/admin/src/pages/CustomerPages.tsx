@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Card, Button, Input, Badge, AddressWithMapsLink } from '@/components/ui';
-import { Gift, ShoppingBag, Copy, Check, Store, ArrowRight, Package, Loader2, CreditCard, Mail, ShieldCheck } from 'lucide-react';
+import { Gift, ShoppingBag, Copy, Check, Store, ArrowRight, Package, Loader2 } from 'lucide-react';
 
 export function CustomerDashboardPage() {
   const { data: profile } = useQuery({ queryKey: ['customer-profile'], queryFn: api.customerProfile });
@@ -140,131 +140,27 @@ export function CustomerProductsPage() {
 }
 
 export function CustomerCreateOrderPage() {
-  const queryClient = useQueryClient();
-  const [selectedProduct, setSelectedProduct] = useState('');
-  const [amount, setAmount] = useState('');
-  const [selectedDenom, setSelectedDenom] = useState('');
-  const [customerEmail, setCustomerEmail] = useState('');
-  const [customerName, setCustomerName] = useState('');
-  const [error, setError] = useState('');
-  const [redirecting, setRedirecting] = useState(false);
-
-  const { data: profile } = useQuery({ queryKey: ['customer-profile'], queryFn: api.customerProfile });
-  const { data: products, isLoading: productsLoading } = useQuery({ queryKey: ['customer-products'], queryFn: api.customerProducts });
-  const { data: denominations } = useQuery({
-    queryKey: ['customer-denoms', selectedProduct],
-    queryFn: () => api.customerDenominations(selectedProduct),
-    enabled: !!selectedProduct,
-  });
-
-  useEffect(() => {
-    if (profile?.email) setCustomerEmail(profile.email);
-    if (profile?.name) setCustomerName(profile.name);
-  }, [profile]);
-
-  const purchaseMutation = useMutation({
-    mutationFn: () => {
-      if (profile) {
-        return api.createAuthenticatedPurchaseSession({
-          product_id: selectedProduct,
-          amount: parseFloat(amount),
-          denomination_id: selectedDenom || undefined,
-        });
-      }
-      return api.createCustomerPurchaseSession({
-        product_id: selectedProduct,
-        amount: parseFloat(amount),
-        customer_email: customerEmail,
-        customer_name: customerName || undefined,
-        denomination_id: selectedDenom || undefined,
-      });
-    },
-    onSuccess: (data) => {
-      if (data.checkout_url) {
-        setRedirecting(true);
-        window.location.href = data.checkout_url;
-      }
-    },
-    onError: (err: any) => {
-      setError(err.message || 'Failed to create checkout session');
-      setRedirecting(false);
-    },
-  });
-
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 animate-slide-up">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Order Digital Codes</h1>
-        <p className="text-sm text-muted-foreground">Select a product and amount — pay securely via Stripe</p>
+        <p className="text-sm text-muted-foreground">Direct online checkout has been removed.</p>
       </div>
-
       <Card>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Product</label>
-            <select
-              value={selectedProduct}
-              onChange={(e) => { setSelectedProduct(e.target.value); setAmount(''); setSelectedDenom(''); }}
-              className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/30"
-            >
-              <option value="">Select a product...</option>
-              {products?.map((p: any) => (
-                <option key={p.id} value={p.id}>{p.name} ({p.region})</option>
-              ))}
-            </select>
-          </div>
-
-          {denominations && denominations.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {denominations.map((d: any) => (
-                <button
-                  key={d.id}
-                  onClick={() => { setAmount(String(d.face_value)); setSelectedDenom(d.id); }}
-                  className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                    selectedDenom === d.id
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
-                  }`}
-                >
-                  {`$${d.face_value}`}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <Input label="Amount (USD)" type="number" value={amount} onChange={(e) => { setAmount(e.target.value); setSelectedDenom(''); }} placeholder="10.00" required />
-
-          {!profile && (
-            <>
-              <Input label="Your Email" type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} placeholder="you@example.com" required />
-              <Input label="Your Name (optional)" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="John Doe" />
-            </>
-          )}
-
-          {error && <div className="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
-
-          <div className="rounded-lg bg-primary/5 border border-primary/20 px-4 py-3 text-sm">
-            <div className="flex items-center gap-2 text-primary font-semibold mb-1">
-              <ShieldCheck className="h-4 w-4" /> Secure Checkout
-            </div>
-            <p className="text-muted-foreground">
-              You'll be redirected to Stripe to complete your payment. Your digital code will be delivered via email after payment is confirmed.
-            </p>
-          </div>
-
-          <Button
-            onClick={() => purchaseMutation.mutate()}
-            disabled={purchaseMutation.isPending || redirecting || !selectedProduct || !amount || parseFloat(amount) <= 0 || (!profile && !customerEmail)}
-          >
-            {redirecting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Redirecting to Stripe...</> :
-             purchaseMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating...</> :
-             <><CreditCard className="mr-2 h-4 w-4" /> Buy with Stripe</>}
-          </Button>
+        <div className="space-y-3 py-6 text-center">
+          <Store className="mx-auto h-10 w-10 text-muted-foreground/50" />
+          <p className="font-medium">Codes are purchased directly from your connected merchant's site.</p>
+          <p className="text-sm text-muted-foreground max-w-md mx-auto">
+            Browse the catalog to see available products and denominations, then order on the merchant
+            storefront. Your codes appear here under "My Orders" once fulfilled.
+          </p>
+          <a href="/customer/browse"><Button>Browse Products</Button></a>
         </div>
       </Card>
     </div>
   );
 }
+
 
 export function CustomerOrdersPage() {
   const { data: orders, isLoading } = useQuery({ queryKey: ['customer-orders'], queryFn: api.customerOrders });
@@ -415,77 +311,3 @@ export function CustomerBecomeMerchantPage() {
   );
 }
 
-export function CustomerPurchaseSuccessPage() {
-  const sessionId = new URLSearchParams(window.location.search).get('session_id');
-  const [orderInfo, setOrderInfo] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!sessionId) {
-      setLoading(false);
-      return;
-    }
-    // Try to fetch the payment record — the session_id is the Stripe checkout session ID
-    // We can use the Stripe payment lookup to get status
-    api.getStripePayment(sessionId).then((data) => {
-      setOrderInfo(data);
-      setLoading(false);
-    }).catch(() => {
-      setLoading(false);
-    });
-  }, [sessionId]);
-
-  return (
-    <div className="space-y-8">
-      <div className="text-center py-8">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-500/10 mb-4">
-          <Check className="h-8 w-8 text-emerald-500" />
-        </div>
-        <h1 className="text-3xl font-semibold tracking-tight">Payment Successful!</h1>
-        <p className="text-sm text-muted-foreground mt-2">Your order is being processed</p>
-      </div>
-
-      <Card>
-        <div className="space-y-4">
-          <div className="flex items-center gap-3 rounded-lg bg-primary/5 border border-primary/20 px-4 py-3">
-            <Mail className="h-5 w-5 text-primary" />
-            <div>
-              <p className="font-semibold">Check Your Email</p>
-              <p className="text-sm text-muted-foreground">
-                Your digital code delivery link has been sent to your email address.
-              </p>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="flex items-center justify-center py-4">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
-          ) : orderInfo ? (
-            <div className="space-y-2 text-sm">
-              <div><span className="text-muted-foreground">Payment Status:</span> <Badge className="bg-emerald-500/10 text-emerald-500">{orderInfo.status}</Badge></div>
-              <div><span className="text-muted-foreground">Amount:</span> <span className="font-semibold">${orderInfo.amount}</span></div>
-            </div>
-          ) : null}
-
-          <div className="rounded-lg bg-amber-500/5 border border-amber-500/20 px-4 py-3 text-sm">
-            <p className="text-amber-500 font-semibold mb-1">Important</p>
-            <p className="text-muted-foreground">
-              Your code is being allocated and will be delivered to your email shortly.
-              Please check your inbox (and spam folder) for the delivery link.
-            </p>
-          </div>
-
-          <div className="flex gap-2">
-            <a href="/customer/my-orders">
-              <Button variant="outline">View My Orders</Button>
-            </a>
-            <a href="/customer/browse">
-              <Button>Browse More Products</Button>
-            </a>
-          </div>
-        </div>
-      </Card>
-    </div>
-  );
-}

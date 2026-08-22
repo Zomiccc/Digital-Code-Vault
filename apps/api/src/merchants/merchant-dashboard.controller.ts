@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Delete, Body, Param, Query, Req, Res, UseGuards, BadRequestException } from '@nestjs/common';
 import { Response } from 'express';
 import { MerchantsService } from './merchants.service';
+import { SupportService } from './support.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PluginDownloadService } from './plugin-download.service';
 import { WebhookService } from '../webhooks/webhook.service';
@@ -9,12 +10,13 @@ import { WalletService } from '../wallet/wallet.service';
 import { CodesService } from '../codes/codes.service';
 import { ProductsService } from '../products/products.service';
 import { nanoid } from 'nanoid';
-import { CreateApiKeyDto, CreateWebhookDto, CreateFulfillmentDto, CreateFundingRequestDto } from '../dto';
+import { CreateApiKeyDto, CreateWebhookDto, CreateFulfillmentDto, CreateFundingRequestDto, CreateSupportMessageDto } from '../dto';
 
 @Controller('merchant')
 export class MerchantDashboardController {
   constructor(
     private merchantsService: MerchantsService,
+    private supportService: SupportService,
     private webhookService: WebhookService,
     private fulfillmentService: FulfillmentService,
     private codesService: CodesService,
@@ -38,7 +40,49 @@ export class MerchantDashboardController {
   @Post('dashboard/funding-requests')
   @UseGuards(JwtAuthGuard)
   async createFundingRequest(@Body() body: CreateFundingRequestDto, @Req() req: any) {
-    return this.walletService.createFundingRequest(req.user.merchantId, body.amount, body.note);
+    const request = await this.walletService.createFundingRequest(req.user.merchantId, body.amount, body.note, body.screenshot);
+
+    // Notify admins on the support thread so they see the proof + message together
+    await this.supportService.sendMerchantMessage(
+      req.user.merchantId,
+      req.user.name || req.user.email,
+      body.note || `I sent $${body.amount} via EasyPaisa/bank transfer — please verify and approve.`,
+      body.screenshot,
+      request.id,
+    ).catch(() => {});
+
+    return request;
+  }
+
+  @Get('dashboard/payment-details')
+  @UseGuards(JwtAuthGuard)
+  async getPaymentDetails(@Req() req: any) {
+    return this.merchantsService.getAdminPaymentDetails();
+  }
+
+  // ─── Support chat (merchant side) ───
+
+  @Get('support/messages')
+  @UseGuards(JwtAuthGuard)
+  async getSupportThread(@Req() req: any) {
+    return this.supportService.getMerchantThread(req.user.merchantId);
+  }
+
+  @Post('support/messages')
+  @UseGuards(JwtAuthGuard)
+  async sendSupportMessage(@Body() body: CreateSupportMessageDto, @Req() req: any) {
+    if (!body.body && !body.image) {
+      throw new BadRequestException('Message text or an image is required');
+    }
+    await this.supportService.sendMerchantMessage(
+      req.user.merchantId,
+      req.user.name || req.user.email,
+      body.body,
+      body.image,
+      body.fundingRequestId,
+    );
+    // Sending a merchant message marks the thread as needing admin attention
+    return { success: true };
   }
 
   @Get('dashboard/orders')
@@ -94,6 +138,7 @@ export class MerchantDashboardController {
       actorId: req.user.id,
       ip: req.ip,
       inventorySource: body.inventory_source,
+      variantId: body.variant_id,
     });
   }
 

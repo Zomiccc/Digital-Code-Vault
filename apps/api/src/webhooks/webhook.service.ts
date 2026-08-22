@@ -754,7 +754,7 @@ export class WebhookService implements OnModuleDestroy {
       // This mirrors the same lookup keys used by syncConnectedProduct() so that any
       // mapping an admin sets via the Connected Products dashboard is actually found,
       // even when the source platform (e.g. WooCommerce) sends no SKU.
-      let cpMapping: { dcvProductId: string | null; dcvDenominationId: string | null } | null = null;
+      let cpMapping: { dcvProductId: string | null; dcvDenominationId: string | null; dcvVariantId: string | null } | null = null;
       let matchedVia = '';
 
       if (merchantId && searchSku) {
@@ -778,6 +778,9 @@ export class WebhookService implements OnModuleDestroy {
           if (cpMapping.dcvDenominationId) {
             exactDenominationId = cpMapping.dcvDenominationId;
             this.logger.log(`[WEBHOOK] Exact denomination mapping: ${exactDenominationId}`);
+          }
+          if (cpMapping.dcvVariantId) {
+            this.logger.log(`[WEBHOOK] Variant mapping: ${cpMapping.dcvVariantId}`);
           }
         }
       }
@@ -861,6 +864,7 @@ export class WebhookService implements OnModuleDestroy {
             actorId: 'webhook-processor',
             inventorySource,
             denominationId: exactDenominationId || undefined,
+            variantId: cpMapping?.dcvVariantId || undefined,
           });
           break;
         } catch (err: any) {
@@ -974,6 +978,7 @@ export class WebhookService implements OnModuleDestroy {
     dcvProductId?: string,
     dcvDenominationId?: string | null,
     inventorySource?: string,
+    dcvVariantId?: string | null,
   ) {
     const cp = await this.prisma.connectedProduct.findFirst({
       where: { id: connectedProductId, merchantId },
@@ -989,6 +994,7 @@ export class WebhookService implements OnModuleDestroy {
     const data: any = {};
     if (dcvProductId !== undefined) data.dcvProductId = dcvProductId || null;
     if (dcvDenominationId !== undefined) data.dcvDenominationId = dcvDenominationId || null;
+    if (dcvVariantId !== undefined) data.dcvVariantId = dcvVariantId || null;
     if (inventorySource !== undefined) data.inventorySource = inventorySource;
 
     return this.prisma.connectedProduct.update({

@@ -14,6 +14,7 @@ import { AuditService } from '../audit/audit.service';
 import { AllocationEngineService, AllocationResult } from './allocation-engine.service';
 import { WebhookService } from '../webhooks/webhook.service';
 import { EmailService } from '../email/email.service';
+import { OrderDigestService } from '../email/order-digest.service';
 import { WalletService } from '../wallet/wallet.service';
 @Injectable()
 export class FulfillmentService {
@@ -27,6 +28,7 @@ export class FulfillmentService {
     private allocationEngine: AllocationEngineService,
     @Inject(forwardRef(() => WebhookService)) private webhookService: WebhookService,
     private emailService: EmailService,
+    private orderDigestService: OrderDigestService,
     private walletService: WalletService,
   ) {}
 
@@ -46,10 +48,12 @@ export class FulfillmentService {
     ip?: string;
     inventorySource?: string; // 'DCV' | 'MERCHANT' | 'AUTO' (default: 'DCV')
     denominationId?: string; // exact denomination to use (from SKU mapping)
+    variantId?: string; // variant to use for FulfillmentCombination lookup
   }) {
     const { merchantId, productId, amount, currency, referenceId, idempotencyKey, sandbox, customerEmail, customerName, customerAddress, actorId, actorType, ip } = params;
     const requestedSource = params.inventorySource || 'DCV';
     const exactDenominationId = params.denominationId || null;
+    const variantId = params.variantId || null;
 
     // Validate amount
     if (amount <= 0) {
@@ -112,32 +116,9 @@ export class FulfillmentService {
       });
     }
 
-    // ─── Send order received email (before payment confirmation) ───
-    // Skip for webhook-driven orders (actorType=SYSTEM) — payment is already completed
-    if (customerEmail && actorType !== 'SYSTEM') {
-      const orderDate = new Date().toLocaleString('en-US', {
-        year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', second: '2-digit',
-      });
-      const totalPayment = `$${amount.toFixed(2)} ${currency}`;
-
-      this.emailService.sendOrderReceivedEmail(
-        customerEmail,
-        customerName || customerEmail,
-        referenceId || idempotencyKey.slice(0, 12),
-        orderDate,
-        product.name,
-        totalPayment,
-        ['Bank Transfer', 'EasyPaisa', 'NayaPay', 'JazzCash'],
-        [
-          { bank: 'Bank Alfalah', accountNumber: '03031007274922', iban: 'PK03ALFH0303001007274922' },
-          { bank: 'Meezan Bank', accountNumber: '01370104307608', iban: 'PK48MEZN0001370104307608' },
-        ],
-        { title: 'Ammar Ajaz', number: '0306-7666422' },
-      ).catch((err) => {
-        this.logger.error(`Failed to send order received email: ${(err as Error).message}`);
-      });
-    }
+    // NOTE: The old "Order Received — Awaiting Payment" email was removed.
+    // Customers now receive ONE consolidated digest email (via OrderDigestService)
+    // after fulfillment, containing every item from their session with reveal links.
 
     const allowedIds: string[] = JSON.parse(merchant.allowedProductIds || '[]');
     if (allowedIds.length > 0 && !allowedIds.includes(productId)) {
@@ -259,28 +240,143 @@ export class FulfillmentService {
     const activeStock = useMerchantPool ? merchantStock : dcvStock;
     const activePoolMerchantId = useMerchantPool ? merchantId : null;
 
-    // Find best combination — use exact denomination if mapped, otherwise auto-compute
+    // Find codes to deliver based on product type.
+    // NORMAL: exact denomination mapping only — one matching code allocated from the pool.
+    // ESSENTIALS: a reusable, admin-configured denomination+quantity delivery RULE
+    //             (e.g. "$10 x1 + $20 x1"). The admin never selects individual codes —
+    //             ANY available code matching each required denomination is selected
+    //             automatically at fulfillment time, exactly like NORMAL products.
     let combination: { denominationId: string; faceValue: number; count: number }[] | null = null;
+    // True when the allocation came from an admin-preset variant bundle
+    // (FulfillmentCombination). Preset bundles are fixed sets of pre-selected
+    // codes — the customer pays the variant price, so no face-value sum math.
+    let usedVariantPreset = false;
 
-    if (exactDenominationId) {
-      const exactDenom = activeStock.find((d) => d.denominationId === exactDenominationId);
-      if (exactDenom && exactDenom.availableCount > 0) {
-        // Only use exact denomination if it divides the amount evenly (exact multiple)
-        const remainder = amount % exactDenom.faceValue;
-        if (remainder === 0) {
-          const count = amount / exactDenom.faceValue;
-          if (count <= exactDenom.availableCount) {
-            combination = [{ denominationId: exactDenominationId, faceValue: exactDenom.faceValue, count }];
+    const productType = product.productType || 'NORMAL';
+    this.logger.log(`[Fulfillment] Product "${product.name}" type: ${productType}, amount: ${amount}`);
+
+    // ─── Variant preset bundles (highest priority) ───
+    // If the order targets a specific variant (e.g. "PS Essential 1 Month"), use the
+    // admin-configured FulfillmentCombination presets for that variant — tried in
+    // priority order, each verified against AVAILABLE stock before committing.
+    if (variantId) {
+      const presetCombos = await this.prisma.fulfillmentCombination.findMany({
+        where: { variantId, active: true },
+        include: { items: { include: { denomination: true } } },
+        orderBy: { priority: 'asc' },
+      });
+
+      for (const combo of presetCombos) {
+        let allSufficient = combo.items.length > 0;
+        const items: { denominationId: string; faceValue: number; count: number }[] = [];
+
+        for (const item of combo.items) {
+          const stockEntry = activeStock.find((s) => s.denominationId === item.denominationId);
+          const availableCount = stockEntry ? stockEntry.availableCount : 0;
+          if (availableCount < item.quantity) {
+            allSufficient = false;
+            this.logger.warn(
+              `[Fulfillment] Variant preset "${combo.name}" — denomination $${item.denomination.faceValue} needs ${item.quantity}, has ${availableCount} available.`,
+            );
+            break;
           }
+          items.push({
+            denominationId: item.denominationId,
+            faceValue: Number(item.denomination.faceValue),
+            count: item.quantity,
+          });
+        }
+
+        if (allSufficient) {
+          combination = items;
+          usedVariantPreset = true;
+          this.logger.log(
+            `[Fulfillment] Variant preset "${combo.name}" ready: ${items.map((i) => `$${i.faceValue} x${i.count}`).join(' + ')}`,
+          );
+          break;
         }
       }
-      if (!combination) {
-        this.logger.warn(`Exact denomination ${exactDenominationId} not available or does not evenly divide ${amount}, falling back to auto-combination`);
+
+      if (!combination && presetCombos.length > 0) {
+        this.logger.warn(`[Fulfillment] ${presetCombos.length} preset(s) exist for variant ${variantId} but none are fulfillable right now.`);
       }
     }
 
-    if (!combination) {
-      combination = this.allocationEngine.findBestCombination(activeStock, amount);
+    let essentialsConfigured = false;
+    if (!combination && productType === 'ESSENTIALS') {
+      const deliveryItems = await this.prisma.essentialsDeliveryItem.findMany({
+        where: { productId },
+        include: { denomination: true },
+      });
+
+      if (deliveryItems.length === 0) {
+        // No admin-configured bundle for this product — fall through to amount-based
+        // denomination matching below instead of failing outright.
+        this.logger.warn(`[Fulfillment] No Essentials delivery configuration for product ${productId} — falling back to amount-based denomination matching.`);
+      } else {
+        essentialsConfigured = true;
+        // Verify EVERY required denomination has sufficient AVAILABLE stock before
+        // committing to anything — no partial bundle delivery.
+        let allSufficient = true;
+        const items: { denominationId: string; faceValue: number; count: number }[] = [];
+
+        for (const rule of deliveryItems) {
+          const stockEntry = activeStock.find((s) => s.denominationId === rule.denominationId);
+          const availableCount = stockEntry ? stockEntry.availableCount : 0;
+          if (availableCount < rule.quantity) {
+            allSufficient = false;
+            this.logger.warn(`[Fulfillment] Essentials rule for product ${productId} — denomination $${rule.denomination.faceValue} needs ${rule.quantity}, has ${availableCount} available.`);
+            break;
+          }
+          items.push({
+            denominationId: rule.denominationId,
+            faceValue: Number(rule.denomination.faceValue),
+            count: rule.quantity,
+          });
+        }
+
+        if (allSufficient) {
+          combination = items;
+          this.logger.log(`[Fulfillment] Essentials delivery rule ready for product ${productId}: ${items.map((i) => `$${i.faceValue} x${i.count}`).join(' + ')}`);
+        }
+      }
+    }
+
+    // NORMAL / amount-based allocation — also the fallback for products without an
+    // admin-configured Essentials bundle.
+    if (!combination && !essentialsConfigured) {
+      if (exactDenominationId) {
+        const exactDenom = activeStock.find((d) => d.denominationId === exactDenominationId);
+        if (exactDenom && exactDenom.availableCount > 0) {
+          const remainder = amount % exactDenom.faceValue;
+          if (remainder === 0) {
+            const count = amount / exactDenom.faceValue;
+            if (count <= exactDenom.availableCount) {
+              combination = [{ denominationId: exactDenominationId, faceValue: exactDenom.faceValue, count }];
+            }
+          }
+        }
+        if (!combination) {
+          this.logger.warn(`[Fulfillment] Exact denomination ${exactDenominationId} not available or does not evenly divide ${amount} for NORMAL product. No auto-combination fallback.`);
+        }
+      } else {
+        // No exact denomination mapped — try single denomination that matches exactly
+        const exactMatch = activeStock.find((d) => d.faceValue === amount && d.availableCount > 0);
+        if (exactMatch) {
+          combination = [{ denominationId: exactMatch.denominationId, faceValue: exactMatch.faceValue, count: 1 }];
+        }
+        if (!combination) {
+          // Largest-first subset-sum fallback (e.g. $50 requested, no $50 stock ->
+          // delivers $40+$10 or $25+$25 — whichever combination exists, fewest codes).
+          const fallbackCombo = this.allocationEngine.findBestCombination(activeStock, amount);
+          if (fallbackCombo) {
+            combination = fallbackCombo;
+            this.logger.log(`[Fulfillment] Combination fallback for amount ${amount}: ${fallbackCombo.map((c) => `$${c.faceValue} x${c.count}`).join(' + ')}`);
+          } else {
+            this.logger.warn(`[Fulfillment] No denomination combination sums to ${amount} for NORMAL product.`);
+          }
+        }
+      }
     }
     if (!combination) {
       const failedReq = await this.prisma.fulfillmentRequest.create({
@@ -320,11 +416,17 @@ export class FulfillmentService {
       });
     }
 
-    // Calculate total cost
-    let totalCost = combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
+    // Calculate total cost.
+    // ESSENTIALS / variant presets: the bundle is a fixed set of pre-selected codes — the
+    // customer is charged the purchase amount directly; there is no denomination-sum math
+    // to validate.
+    // NORMAL: total cost must exactly equal the sum of allocated denomination face values.
+    let totalCost = productType === 'ESSENTIALS' || usedVariantPreset
+      ? amount
+      : combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
 
-    // Validate combination total exactly matches the requested amount
-    if (totalCost !== amount) {
+    // Validate combination total exactly matches the requested amount (NORMAL only)
+    if (productType !== 'ESSENTIALS' && !usedVariantPreset && totalCost !== amount) {
       this.logger.error(`[Fulfillment] Combination total ${totalCost} does not match requested amount ${amount}`);
       const failedReq = await this.prisma.fulfillmentRequest.create({
         data: {
@@ -409,35 +511,89 @@ export class FulfillmentService {
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        // Re-fetch stock on retries (combination may have changed)
+        // Re-check availability on retries (a concurrent request may have taken stock)
         if (attempt > 1) {
           this.logger.log(`[Fulfillment] Retry attempt ${attempt}/${MAX_RETRIES} for ${idempotencyKey}`);
-          const retryStock = await this.allocationEngine.getAvailableStock(this.prisma, productId, activePoolMerchantId);
-          const retryDenoms = retryStock.filter((s) => s.availableCount > 0);
-          if (retryDenoms.length === 0) {
-            throw new BadRequestException({
-              error: 'INSUFFICIENT_STOCK',
-              code: 'INSUFFICIENT_STOCK',
-              message: 'No available stock for this product after retry',
+
+          if (productType === 'ESSENTIALS') {
+            // ESSENTIALS: re-verify every required denomination in the delivery rule
+            // still has sufficient AVAILABLE stock. No individual codes are pinned —
+            // just re-check the denomination+quantity rule against current stock.
+            const deliveryItems = await this.prisma.essentialsDeliveryItem.findMany({
+              where: { productId },
+              include: { denomination: true },
             });
-          }
-          const retryCombo = this.allocationEngine.findBestCombination(retryDenoms, amount);
-          if (!retryCombo) {
-            throw new BadRequestException({
-              error: 'INSUFFICIENT_STOCK',
-              code: 'INSUFFICIENT_STOCK',
-              message: `No denomination combination sums to ${amount} after retry`,
-            });
-          }
-          combination.length = 0;
-          combination.push(...retryCombo);
-          totalCost = combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
-          if (totalCost !== amount) {
-            throw new BadRequestException({
-              error: 'INSUFFICIENT_INVENTORY',
-              code: 'AMOUNT_MISMATCH',
-              message: `Combination total ${totalCost} does not match requested amount ${amount} after retry`,
-            });
+            if (deliveryItems.length === 0) {
+              throw new BadRequestException({
+                error: 'INSUFFICIENT_STOCK',
+                code: 'NO_DELIVERY_CONFIG',
+                message: 'Essentials product has no delivery configuration',
+              });
+            }
+            const retryStock = await this.allocationEngine.getAvailableStock(this.prisma, productId, activePoolMerchantId);
+            const retryItems: { denominationId: string; faceValue: number; count: number }[] = [];
+            for (const rule of deliveryItems) {
+              const stockEntry = retryStock.find((s) => s.denominationId === rule.denominationId);
+              const availableCount = stockEntry ? stockEntry.availableCount : 0;
+              if (availableCount < rule.quantity) {
+                throw new BadRequestException({
+                  error: 'INSUFFICIENT_STOCK',
+                  code: 'INSUFFICIENT_STOCK',
+                  message: `Denomination $${rule.denomination.faceValue} needs ${rule.quantity}, only ${availableCount} available after retry`,
+                });
+              }
+              retryItems.push({ denominationId: rule.denominationId, faceValue: Number(rule.denomination.faceValue), count: rule.quantity });
+            }
+            combination.length = 0;
+            combination.push(...retryItems);
+          } else {
+            // NORMAL: exact denomination only — no auto-combination
+            const retryStock = await this.allocationEngine.getAvailableStock(this.prisma, productId, activePoolMerchantId);
+            const retryDenoms = retryStock.filter((s) => s.availableCount > 0);
+            if (retryDenoms.length === 0) {
+              throw new BadRequestException({
+                error: 'INSUFFICIENT_STOCK',
+                code: 'INSUFFICIENT_STOCK',
+                message: 'No available stock for this product after retry',
+              });
+            }
+
+            let retryCombo: { denominationId: string; faceValue: number; count: number }[] | null = null;
+            if (exactDenominationId) {
+              const exactDenom = retryDenoms.find((d) => d.denominationId === exactDenominationId);
+              if (exactDenom && exactDenom.availableCount > 0) {
+                const remainder = amount % exactDenom.faceValue;
+                if (remainder === 0) {
+                  const count = amount / exactDenom.faceValue;
+                  if (count <= exactDenom.availableCount) {
+                    retryCombo = [{ denominationId: exactDenominationId, faceValue: exactDenom.faceValue, count }];
+                  }
+                }
+              }
+            } else {
+              const exactMatch = retryDenoms.find((d) => d.faceValue === amount && d.availableCount > 0);
+              if (exactMatch) {
+                retryCombo = [{ denominationId: exactMatch.denominationId, faceValue: exactMatch.faceValue, count: 1 }];
+              }
+            }
+
+            if (!retryCombo) {
+              throw new BadRequestException({
+                error: 'INSUFFICIENT_STOCK',
+                code: 'INSUFFICIENT_STOCK',
+                message: `No denomination combination sums to ${amount} after retry`,
+              });
+            }
+            combination.length = 0;
+            combination.push(...retryCombo);
+            totalCost = combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
+            if (totalCost !== amount) {
+              throw new BadRequestException({
+                error: 'INSUFFICIENT_INVENTORY',
+                code: 'AMOUNT_MISMATCH',
+                message: `Combination total ${totalCost} does not match requested amount ${amount} after retry`,
+              });
+            }
           }
         }
 
@@ -460,7 +616,10 @@ export class FulfillmentService {
             },
           });
 
-          // 2. Reserve codes with row-level locking
+          // 2. Reserve codes with row-level locking.
+          // Both NORMAL and ESSENTIALS use denomination+count combinations — the admin
+          // never pins individual code IDs. ANY available code matching each required
+          // denomination is atomically selected and reserved here.
           let allocationResults: AllocationResult[];
           try {
             allocationResults = await this.allocationEngine.reserveCodes(
@@ -614,69 +773,31 @@ export class FulfillmentService {
     const deliveryLink = `${baseUrl}/api/v1/reveal/${result.deliveryToken}`;
 
     // Send emails after successful payment/allocation confirmation.
-    // Both emails are sent asynchronously and independently — if one fails,
-    // the other will still be sent.
     const purchaseDate = result.fulfillmentReq.createdAt.toISOString();
 
     if (customerEmail) {
-      // Send reveal code email to customer
-      const recipientName = customerName || customerEmail;
-      this.emailService.sendRevealCodeEmail(
+      // ONE consolidated email per customer session: enqueue this order into the
+      // customer's digest. Everything bought within the digest window arrives in
+      // a single email with a reveal button per item.
+      const codesDelivered = combination.reduce((acc, c) => acc + c.count, 0);
+      this.orderDigestService.enqueue(
         customerEmail,
-        recipientName,
-        product.name,
-        deliveryLink,
-        result.fulfillmentReq.id,
-      ).catch((err) => {
-        this.logger.error(`Failed to send reveal code email to customer: ${(err as Error).message}`);
-      });
-
-      // Send payment confirmation email with PDF invoice to customer
-      const quantity = combination.reduce((acc, c) => acc + c.count, 0);
-      const price = amount / quantity;
-      const subtotal = amount;
-      const tax = 0; // No tax for now
-      const total = amount;
-
-      // Generate PDF invoice
-      this.emailService.generateInvoice({
-        invoiceNumber: result.fulfillmentReq.id,
-        customerName: customerName || customerEmail,
-        customerEmail: customerEmail,
-        merchantName: merchant.name,
-        merchantAddress: merchant.address || undefined,
-        product: product.name,
-        quantity,
-        price,
-        subtotal,
-        tax,
-        total,
-        paymentMethod: 'Bank Transfer',
-        date: new Date().toLocaleDateString(),
-        billingAddress: customerAddress || undefined,
-      }).then((invoiceBuffer) => {
-        // Send payment confirmation email with invoice attached
-        return this.emailService.sendPaymentConfirmationEmail(
-          customerEmail,
-          recipientName,
-          result.fulfillmentReq.id,
-          purchaseDate,
-          product.name,
-          quantity,
-          price,
-          subtotal,
-          tax,
-          total,
-          'Bank Transfer',
-          customerAddress,
-          invoiceBuffer,
+        {
+          productName: product.name,
+          fulfillmentId: result.fulfillmentReq.id,
+          referenceId,
+          amount,
+          currency,
+          codesDelivered,
           deliveryLink,
-        );
-      }).catch((err) => {
-        this.logger.error(`Failed to send payment confirmation email: ${(err as Error).message}`);
-      });
+        },
+        { customerName: customerName || undefined, merchantName: merchant.name },
+      );
+    }
 
-      // Send purchase notification email to merchant
+    // Send purchase notification email to merchant; fall back to a plain delivery-link
+    // email when there is no customer attached to the order.
+    if (customerEmail && merchant && product) {
       this.emailService.sendMerchantPurchaseNotification(
         merchant.email,
         merchant.name,
@@ -691,7 +812,6 @@ export class FulfillmentService {
         this.logger.error(`Failed to send merchant purchase notification: ${(err as Error).message}`);
       });
     } else if (merchant && product) {
-      // Fallback: send delivery link to merchant (backward compatibility)
       this.emailService.sendDeliveryLinkEmail(
         merchant.email,
         merchant.name,

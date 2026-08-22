@@ -13,6 +13,7 @@
     "prisma:migrate:deploy": "node prisma/set-provider.js && npx prisma migrate deploy",
     "prisma:push": "node prisma/set-provider.js && npx prisma db push",
     "seed": "node prisma/set-provider.js && ts-node prisma/seed.ts",
+    "seed:catalog": "node prisma/set-provider.js && ts-node prisma/seed-catalog.ts",
     "lint": "eslint \"{src,prisma}/**/*.ts\" --fix"
   },
   "prisma": {

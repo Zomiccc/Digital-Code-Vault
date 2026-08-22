@@ -45,6 +45,7 @@ model Merchant {
   connectedProducts ConnectedProduct[]
   codeItems       CodeItem[]
   fundingRequests FundingRequest[]
+  supportMessages SupportMessage[]
 }
 
 model MerchantUser {
@@ -94,23 +95,141 @@ model Supplier {
   codeItems CodeItem[]
 }
 
+model Category {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  image       String?
+  sortOrder   Int      @default(0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products Product[]
+}
+
+model Region {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  code      String   @unique
+  currency  String   @default("USD")
+  symbol    String   @default("$")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  productRegions ProductRegion[]
+}
+
+model ProductRegion {
+  id        String   @id @default(uuid())
+  productId String
+  regionId  String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  region    Region  @relation(fields: [regionId], references: [id], onDelete: Cascade)
+  variants  Variant[]
+
+  @@unique([productId, regionId])
+  @@index([productId])
+  @@index([regionId])
+}
+
+model Variant {
+  id             String   @id @default(uuid())
+  productRegionId String
+  name           String
+  slug           String
+  description    String?
+  customerPrice  Decimal
+  currency       String   @default("USD")
+  active         Boolean  @default(true)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  productRegion   ProductRegion          @relation(fields: [productRegionId], references: [id], onDelete: Cascade)
+  combinations    FulfillmentCombination[]
+
+  @@unique([productRegionId, slug])
+  @@index([productRegionId])
+}
+
+model FulfillmentCombination {
+  id          String   @id @default(uuid())
+  variantId   String
+  name        String
+  priority    Int      @default(1)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  variant    Variant                     @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  items      FulfillmentCombinationItem[]
+
+  @@index([variantId, active, priority])
+}
+
+model FulfillmentCombinationItem {
+  id             String   @id @default(uuid())
+  combinationId  String
+  denominationId String
+  quantity       Int      @default(1)
+  createdAt      DateTime @default(now())
+
+  combination  FulfillmentCombination @relation(fields: [combinationId], references: [id], onDelete: Cascade)
+  denomination Denomination @relation(fields: [denominationId], references: [id], onDelete: Cascade)
+
+  @@index([combinationId])
+  @@index([denominationId])
+}
+
 model Product {
   id         String   @id @default(uuid())
   name       String
   region     String
+  productType String  @default("NORMAL") // NORMAL | ESSENTIALS
+  categoryId String?
   supplierId String?
   merchantId String?
   status     String   @default("ACTIVE")
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
+  category       Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   supplier      Supplier?      @relation(fields: [supplierId], references: [id])
   merchant      Merchant?      @relation(fields: [merchantId], references: [id])
   denominations Denomination[]
   fulfillmentReqs FulfillmentRequest[]
   connectedProducts ConnectedProduct[] @relation("ConnectedProductDcvProduct")
+  productRegions ProductRegion[]
+  essentialsDeliveryItems EssentialsDeliveryItem[]
 
   @@index([merchantId])
+  @@index([categoryId])
+}
+
+// Essentials delivery rule: a reusable, denomination-based fulfillment configuration.
+// The admin defines WHICH denominations and HOW MANY of each are required — e.g.
+// "$10 x1 + $20 x1". At purchase time, the system automatically selects ANY available
+// code(s) matching each required denomination — the admin never picks individual codes.
+model EssentialsDeliveryItem {
+  id             String   @id @default(uuid())
+  productId      String
+  denominationId String
+  quantity       Int      @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  product      Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  denomination Denomination @relation(fields: [denominationId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, denominationId])
+  @@index([productId])
 }
 
 model Denomination {
@@ -122,6 +241,8 @@ model Denomination {
 
   product   Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
   codeItems CodeItem[]
+  combinationItems FulfillmentCombinationItem[]
+  essentialsDeliveryItems EssentialsDeliveryItem[]
 
   @@unique([productId, faceValue, currency])
   @@index([productId])
@@ -423,6 +544,7 @@ model FundingRequest {
   amount        Decimal
   currency      String   @default("USD")
   note          String?
+  screenshot    String?  // base64 data-URL of the payment proof (EasyPaisa/bank receipt)
   status        String   @default("PENDING") // PENDING | APPROVED | REJECTED
   adminNote     String?
   reviewedBy    String?
@@ -437,6 +559,24 @@ model FundingRequest {
   @@index([adminWalletId])
   @@index([status])
   @@index([createdAt])
+}
+
+model SupportMessage {
+  id              String   @id @default(uuid())
+  merchantId      String
+  senderRole      String   // MERCHANT | ADMIN
+  senderName      String?
+  body            String?
+  image           String?  // base64 data-URL attachment (payment proof, screenshots)
+  fundingRequestId String? // links a chat thread to a funding request when applicable
+  readByAdmin     Boolean  @default(false)
+  readByMerchant  Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, createdAt])
+  @@index([readByAdmin])
 }
 
 model ConnectedProduct {
@@ -457,6 +597,7 @@ model ConnectedProduct {
   inventorySource String?  @default("DCV")
   dcvProductId    String?
   dcvDenominationId String?
+  dcvVariantId    String?
   lastSyncedAt    DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

@@ -17,7 +17,8 @@ import { AdminModule } from './admin/admin.module';
 import { HealthModule } from './health/health.module';
 import { EmailModule } from './email/email.module';
 import { WalletModule } from './wallet/wallet.module';
-import { StripeModule } from './stripe/stripe.module';
+import { CatalogModule } from './catalog/catalog.module';
+import { EssentialsModule } from './essentials/essentials.module';
 
 @Module({
   imports: [
@@ -41,7 +42,8 @@ import { StripeModule } from './stripe/stripe.module';
     HealthModule,
     EmailModule,
     WalletModule,
-    StripeModule,
+    CatalogModule,
+    EssentialsModule,
   ],
 })
 export class AppModule {}

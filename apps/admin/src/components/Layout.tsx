@@ -3,7 +3,8 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Package, Database, Upload, FileText,
   ScrollText, UserCog, LogOut, Menu, X, Shield, ChevronRight,
-  Wallet, Key, ShoppingCart, Webhook, Store, Gift, Plug,
+  Wallet, Key, ShoppingCart, Webhook, Store, Gift, Plug, Layers, FolderTree,
+  MessagesSquare,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
@@ -13,10 +14,13 @@ const adminNav = [
   { to: '/admin/merchants', label: 'Merchants', icon: Users },
   { to: '/admin/applications', label: 'Applications', icon: Store },
   { to: '/admin/products', label: 'Products', icon: Package },
+  { to: '/admin/catalog', label: 'Catalog', icon: FolderTree },
+  { to: '/admin/presets', label: 'Fulfillment Presets', icon: Layers },
   { to: '/admin/inventory', label: 'Inventory', icon: Database },
   { to: '/admin/upload', label: 'Bulk Upload', icon: Upload },
   { to: '/admin/fulfillment', label: 'Fulfillment', icon: FileText },
   { to: '/admin/finance', label: 'Finance', icon: Wallet },
+  { to: '/admin/support', label: 'Support Inbox', icon: MessagesSquare },
   { to: '/admin/audit', label: 'Audit Logs', icon: ScrollText },
   { to: '/admin/staff', label: 'Staff', icon: UserCog },
 ];

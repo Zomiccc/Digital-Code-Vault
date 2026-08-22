@@ -6,9 +6,12 @@ import { AdminService } from './admin.service';
 import { MerchantsService } from '../merchants/merchants.service';
 import { ProductsService } from '../products/products.service';
 import { CodesService } from '../codes/codes.service';
+import { EssentialsService } from '../essentials/essentials.service';
 import { AuthService } from '../auth/auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
+import { DeliveryService } from '../delivery/delivery.service';
+import { SupportService } from '../merchants/support.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -28,9 +31,12 @@ export class AdminController {
     private merchantsService: MerchantsService,
     private productsService: ProductsService,
     private codesService: CodesService,
+    private essentialsService: EssentialsService,
     private authService: AuthService,
     private prisma: PrismaService,
     private walletService: WalletService,
+    private deliveryService: DeliveryService,
+    private supportService: SupportService,
   ) {}
 
   @Get('stats')
@@ -128,13 +134,53 @@ export class AdminController {
   @Post('products')
   @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
   async createProduct(@Body() body: CreateProductDto) {
-    return this.productsService.createProduct(body);
+    return this.productsService.createProduct({
+      name: body.name,
+      region: body.region,
+      supplierId: body.supplier_id,
+      categoryId: body.category_id,
+      productType: body.product_type,
+    });
+  }
+
+  @Patch('products/:id/type')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async updateProductType(@Param('id') id: string, @Body() body: { product_type: string }) {
+    return this.productsService.updateProductType(id, body.product_type);
+  }
+
+  @Patch('products/:id/category')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async updateProductCategory(@Param('id') id: string, @Body() body: { category_id: string | null }) {
+    return this.productsService.updateProductCategory(id, body.category_id || null);
   }
 
   @Post('products/:id/denominations')
   @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
   async createDenomination(@Param('id') id: string, @Body() body: CreateDenominationDto) {
     return this.productsService.createDenomination(id, body.face_value, body.currency);
+  }
+
+  // ─── Essentials Delivery Config (reusable denomination + quantity rules) ───
+
+  @Get('products/:id/essentials/delivery-config')
+  async getEssentialsDeliveryConfig(@Param('id') id: string) {
+    return this.essentialsService.getDeliveryConfig(id);
+  }
+
+  @Post('products/:id/essentials/delivery-config')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async saveEssentialsDeliveryConfig(
+    @Param('id') id: string,
+    @Body() body: { items: { denominationId: string; quantity: number }[] },
+    @CurrentUser() user: any,
+  ) {
+    return this.essentialsService.saveDeliveryConfig(id, body.items || [], user?.id);
+  }
+
+  @Get('products/:id/essentials/availability')
+  async getEssentialsAvailability(@Param('id') id: string) {
+    return this.essentialsService.getAvailability(id);
   }
 
   // ─── Suppliers ───
@@ -216,6 +262,36 @@ export class AdminController {
   @Roles('SUPER_ADMIN')
   async reverseFulfillment(@Param('id') id: string, @CurrentUser() user: any, @Req() req: any) {
     return this.adminService.reverseFulfillment(id, user.id, req.ip);
+  }
+
+  @Post('fulfillment/:id/delivery-link/regenerate')
+  @Roles('SUPER_ADMIN', 'SUPPORT', 'INVENTORY_MANAGER', 'FINANCE')
+  async regenerateDeliveryLink(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.deliveryService.regenerateDeliveryLink(id, user.id);
+  }
+
+  // ─── Support Inbox ───
+
+  @Get('support/threads')
+  @Roles('SUPER_ADMIN', 'SUPPORT', 'FINANCE')
+  async listSupportThreads() {
+    return this.supportService.adminListThreads();
+  }
+
+  @Get('support/threads/:merchantId')
+  @Roles('SUPER_ADMIN', 'SUPPORT', 'FINANCE')
+  async getSupportThread(@Param('merchantId') merchantId: string) {
+    return this.supportService.adminGetThread(merchantId);
+  }
+
+  @Post('support/threads/:merchantId/messages')
+  @Roles('SUPER_ADMIN', 'SUPPORT', 'FINANCE')
+  async replySupportThread(
+    @Param('merchantId') merchantId: string,
+    @Body() body: { body?: string },
+    @CurrentUser() user: any,
+  ) {
+    return this.supportService.adminSendMessage(merchantId, user.name || user.email, body.body);
   }
 
   @Get('fulfillment/pending-supplier')

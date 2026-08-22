@@ -8,6 +8,10 @@ import { ProductsPage } from '@/pages/ProductsPage';
 import { InventoryPage } from '@/pages/InventoryPage';
 import { BulkUploadPage } from '@/pages/BulkUploadPage';
 import { FulfillmentPage } from '@/pages/FulfillmentPage';
+import { CatalogPage } from '@/pages/CatalogPage';
+import { FulfillmentPresetsPage } from '@/pages/FulfillmentPresetsPage';
+import { SupportInboxPage } from '@/pages/SupportInboxPage';
+import { MerchantChatWidget } from '@/components/MerchantChatWidget';
 import { FinancePage } from '@/pages/FinancePage';
 import { MerchantWalletPage } from '@/pages/MerchantWalletPage';
 import { AuditLogsPage } from '@/pages/AuditLogsPage';
@@ -30,7 +34,6 @@ import {
   CustomerCreateOrderPage,
   CustomerOrdersPage,
   CustomerBecomeMerchantPage,
-  CustomerPurchaseSuccessPage,
 } from '@/pages/CustomerPages';
 
 function ProtectedRoutes() {
@@ -57,6 +60,9 @@ function ProtectedRoutes() {
             <Route path="/admin/dashboard" element={<DashboardPage />} />
             <Route path="/admin/merchants" element={<MerchantsPage />} />
             <Route path="/admin/products" element={<ProductsPage />} />
+            <Route path="/admin/catalog" element={<CatalogPage />} />
+            <Route path="/admin/presets" element={<FulfillmentPresetsPage />} />
+            <Route path="/admin/support" element={<SupportInboxPage />} />
             <Route path="/admin/inventory" element={<InventoryPage />} />
             <Route path="/admin/upload" element={<BulkUploadPage />} />
             <Route path="/admin/fulfillment" element={<FulfillmentPage />} />
@@ -80,6 +86,7 @@ function ProtectedRoutes() {
             <Route path="/merchant/connected-products" element={<ConnectedProductsPage />} />
             <Route path="/merchant/integrations" element={<MerchantIntegrationsPage />} />
             <Route path="/" element={<Navigate to="/merchant/dashboard" replace />} />
+            <Route path="*" element={<><MerchantChatWidget /><Navigate to="/merchant/dashboard" replace /></>} />
           </>
         ) : (
           <>
@@ -87,7 +94,6 @@ function ProtectedRoutes() {
             <Route path="/customer/dashboard" element={<CustomerDashboardPage />} />
             <Route path="/customer/browse" element={<CustomerProductsPage />} />
             <Route path="/customer/order" element={<CustomerCreateOrderPage />} />
-            <Route path="/customer/purchase-success" element={<CustomerPurchaseSuccessPage />} />
             <Route path="/customer/my-orders" element={<CustomerOrdersPage />} />
             <Route path="/customer/become-merchant" element={<CustomerBecomeMerchantPage />} />
             <Route path="/" element={<Navigate to="/customer/dashboard" replace />} />

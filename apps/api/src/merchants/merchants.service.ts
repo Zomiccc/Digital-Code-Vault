@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { EncryptionService } from '../encryption/encryption.service';
@@ -13,7 +14,41 @@ export class MerchantsService {
     private authService: AuthService,
     private encryptionService: EncryptionService,
     private walletService: WalletService,
+    private configService: ConfigService,
   ) {}
+
+  /**
+   * Admin EasyPaisa / bank accounts shown to merchants when adding funds.
+   * All values are env-configurable so the admin can change them anytime.
+   */
+  getAdminPaymentDetails() {
+    return {
+      easypaisa: {
+        accountName: this.configService.get<string>('EASYPAISA_ACCOUNT_NAME', ''),
+        accountNumber: this.configService.get<string>('EASYPAISA_ACCOUNT_NUMBER', ''),
+      },
+      bankAccounts: [
+        {
+          bank: 'Bank Alfalah',
+          accountTitle: this.configService.get<string>('BANK_ALFALAH_TITLE', 'Ammar Ajaz'),
+          accountNumber: this.configService.get<string>('BANK_ALFALAH_ACCOUNT', '03031007274922'),
+          iban: this.configService.get<string>('BANK_ALFALAH_IBAN', 'PK03ALFH0303001007274922'),
+        },
+        {
+          bank: 'Meezan Bank',
+          accountTitle: this.configService.get<string>('BANK_MEEZAN_TITLE', 'Ammar Ajaz'),
+          accountNumber: this.configService.get<string>('BANK_MEEZAN_ACCOUNT', '01370104307608'),
+          iban: this.configService.get<string>('BANK_MEEZAN_IBAN', 'PK48MEZN0001370104307608'),
+        },
+      ],
+      supportContact: {
+        name: this.configService.get<string>('SUPPORT_CONTACT_NAME', 'Support Team'),
+        number: this.configService.get<string>('SUPPORT_CONTACT_NUMBER', ''),
+      },
+      instructions:
+        'Send the exact USD amount to any account above, then upload the payment screenshot here. Admin verifies and approves — your wallet updates automatically.',
+    };
+  }
 
   async createMerchant(data: {
     name: string;

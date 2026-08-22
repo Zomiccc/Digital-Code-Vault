@@ -149,26 +149,68 @@ export class DeliveryService {
 
     const ids: string[] = JSON.parse(allocation.codeItemIds || '[]');
 
-    // Get the code items
+    if (ids.length === 0) {
+      throw new NotFoundException({
+        error: 'NO_ALLOCATION',
+        code: 'EMPTY_ALLOCATION',
+        message: 'No codes allocated to this fulfillment',
+      });
+    }
+
+    // Get the code items (with denomination in one query — avoids N+1 and any
+    // window where a denomination lookup could silently fail per-item)
     const codeItems = await this.prisma.codeItem.findMany({
       where: { id: { in: ids } },
+      include: { denomination: true },
     });
 
-    // Decrypt each code
+    // ROOT CAUSE FIX: previously, a decrypt failure for any single code was silently
+    // swallowed (logged and skipped), so a 1-code allocation could resolve to an EMPTY
+    // codes array while still being marked DELIVERED — the customer would see nothing.
+    // Now: every allocated code MUST decrypt to a non-empty plaintext value BEFORE we
+    // proceed. If any code fails, we fail loudly and do NOT mark anything as delivered,
+    // so the customer can safely retry and support can be alerted.
+    if (codeItems.length !== ids.length) {
+      this.logger.error(
+        `[DELIVERY] Allocation ${allocation.id} references ${ids.length} code item(s) but only ${codeItems.length} were found in the database. fulfillmentId=${deliveryToken.fulfillmentId}`
+      );
+      throw new NotFoundException({
+        error: 'ALLOCATION_CORRUPT',
+        code: 'MISSING_CODE_ITEMS',
+        message: 'Some allocated codes could not be found. Please contact support.',
+      });
+    }
+
     const codes: { denomination: string; code: string }[] = [];
+    const decryptFailures: string[] = [];
+
     for (const item of codeItems) {
       try {
         const plaintext = this.encryptionService.decrypt(item.encryptedCode);
-        const denomination = await this.prisma.denomination.findUnique({
-          where: { id: item.denominationId },
-        });
+        if (!plaintext || plaintext.trim().length === 0) {
+          decryptFailures.push(item.id);
+          continue;
+        }
         codes.push({
-          denomination: `$${denomination?.faceValue || '??'}`,
+          denomination: `$${item.denomination?.faceValue ?? '??'}`,
           code: plaintext,
         });
       } catch (err) {
-        this.logger.error(`Failed to decrypt code ${item.id}: ${(err as Error).message}`);
+        // Never log the plaintext or encrypted payload — identifiers only.
+        this.logger.error(`[DELIVERY] Failed to decrypt code item ${item.id} for fulfillment ${deliveryToken.fulfillmentId}: ${(err as Error).message}`);
+        decryptFailures.push(item.id);
       }
+    }
+
+    if (decryptFailures.length > 0 || codes.length !== ids.length) {
+      this.logger.error(
+        `[DELIVERY] CRITICAL: ${decryptFailures.length}/${ids.length} code(s) failed to decrypt for fulfillment ${deliveryToken.fulfillmentId}. Refusing to reveal a partial/empty result.`
+      );
+      throw new NotFoundException({
+        error: 'DECRYPTION_FAILED',
+        code: 'CODE_DECRYPT_FAILED',
+        message: 'Unable to retrieve one or more of your codes right now. Please contact support — your codes have NOT been lost.',
+      });
     }
 
     // Mark as delivered and update reveal tracking (only on first reveal)
@@ -240,6 +282,48 @@ export class DeliveryService {
       customer_email: deliveryToken.fulfillment.customerEmail,
       customer_name: deliveryToken.fulfillment.customerName,
       codes,
+    };
+  }
+
+  /**
+   * Regenerates the permanent delivery link for a fulfillment (e.g. APP_URL changed,
+   * customer lost the email). The old token is replaced — previous links stop working.
+   * Returns the raw token exactly once; only its hash is stored.
+   */
+  async regenerateDeliveryLink(fulfillmentId: string, actorId?: string) {
+    const fulfillment = await this.prisma.fulfillmentRequest.findUnique({
+      where: { id: fulfillmentId },
+      include: { allocations: true },
+    });
+    if (!fulfillment) throw new NotFoundException('Fulfillment not found');
+    if (!['ALLOCATED', 'DELIVERED'].includes(fulfillment.status)) {
+      throw new NotFoundException('Fulfillment has not been allocated yet');
+    }
+
+    const rawToken = this.encryptionService.generateToken(32);
+    const tokenHash = this.encryptionService.hashToken(rawToken);
+
+    await this.prisma.deliveryToken.upsert({
+      where: { fulfillmentId },
+      create: { fulfillmentId, tokenHash },
+      update: { tokenHash, revealedAt: null, revealedIp: null },
+    });
+
+    if (actorId) {
+      await this.auditService.log({
+        actorType: 'ADMIN',
+        actorId,
+        action: 'delivery.link.regenerated',
+        entity: 'FulfillmentRequest',
+        entityId: fulfillmentId,
+      }).catch(() => {});
+    }
+
+    const baseUrl = (this.configService.get<string>('APP_URL', 'http://localhost:3000') || '').replace(/\/+$/, '');
+    return {
+      fulfillment_id: fulfillmentId,
+      delivery_link: `${baseUrl}/api/v1/reveal/${rawToken}`,
+      portal_link: `${baseUrl}/d/${rawToken}`,
     };
   }
 }

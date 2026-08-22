@@ -188,6 +188,132 @@ async function main() {
     console.log('✓ Admin wallet already exists — balance:', existingWallet.balance);
   }
 
+  // ─── Catalog Seed Data ───
+
+  // Helper to slugify
+  function slugify(s: string) { return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
+
+  // Create categories (idempotent)
+  async function getOrCreateCategory(name: string, description: string) {
+    const slug = slugify(name);
+    return (
+      (await prisma.category.findUnique({ where: { slug } })) ||
+      (await prisma.category.create({ data: { name, slug, description } }))
+    );
+  }
+
+  const catGaming = await getOrCreateCategory('Gaming', 'Game store gift cards and codes');
+  const catStreaming = await getOrCreateCategory('Streaming', 'Streaming service gift cards');
+  const catShopping = await getOrCreateCategory('Shopping', 'General shopping gift cards');
+
+  // Assign products to categories
+  await prisma.product.update({ where: { id: psn.id }, data: { categoryId: catGaming.id } });
+  await prisma.product.update({ where: { id: xbox.id }, data: { categoryId: catGaming.id } });
+  await prisma.product.update({ where: { id: steam.id }, data: { categoryId: catGaming.id } });
+  await prisma.product.update({ where: { id: roblox.id }, data: { categoryId: catGaming.id } });
+
+  // Create regions (idempotent)
+  async function getOrCreateRegion(name: string, code: string, currency: string, symbol: string) {
+    return (
+      (await prisma.region.findUnique({ where: { code } })) ||
+      (await prisma.region.create({ data: { name, code, currency, symbol } }))
+    );
+  }
+
+  const regionUS = await getOrCreateRegion('United States', 'USA', 'USD', '$');
+  const regionEU = await getOrCreateRegion('Europe', 'EUR', 'EUR', '€');
+  const regionGlobal = await getOrCreateRegion('Global', 'GLOBAL', 'USD', '$');
+
+  // Create product-region mappings (idempotent)
+  async function getOrCreateProductRegion(productId: string, regionId: string) {
+    const existing = await prisma.productRegion.findUnique({
+      where: { productId_regionId: { productId, regionId } },
+    });
+    return existing || (await prisma.productRegion.create({ data: { productId, regionId } }));
+  }
+
+  const prPsnUS = await getOrCreateProductRegion(psn.id, regionUS.id);
+  const prXboxUS = await getOrCreateProductRegion(xbox.id, regionUS.id);
+  const prSteamGlobal = await getOrCreateProductRegion(steam.id, regionGlobal.id);
+  const prRobloxGlobal = await getOrCreateProductRegion(roblox.id, regionGlobal.id);
+
+  // Create variants (idempotent)
+  async function getOrCreateVariant(productRegionId: string, name: string, customerPrice: number) {
+    const slug = slugify(name);
+    const existing = await prisma.variant.findUnique({
+      where: { productRegionId_slug: { productRegionId, slug } },
+    });
+    return existing || (await prisma.variant.create({ data: { productRegionId, name, slug, customerPrice, currency: 'USD' } }));
+  }
+
+  const vPsn10 = await getOrCreateVariant(prPsnUS.id, '$10 Card', 10);
+  const vPsn25 = await getOrCreateVariant(prPsnUS.id, '$25 Card', 25);
+  const vPsn50 = await getOrCreateVariant(prPsnUS.id, '$50 Card', 50);
+  const vPsn100 = await getOrCreateVariant(prPsnUS.id, '$100 Card', 100);
+
+  const vXbox10 = await getOrCreateVariant(prXboxUS.id, '$10 Card', 10);
+  const vXbox50 = await getOrCreateVariant(prXboxUS.id, '$50 Card', 50);
+
+  const vSteam20 = await getOrCreateVariant(prSteamGlobal.id, '$20 Card', 20);
+  const vSteam50 = await getOrCreateVariant(prSteamGlobal.id, '$50 Card', 50);
+
+  const vRoblox10 = await getOrCreateVariant(prRobloxGlobal.id, '$10 Card', 10);
+  const vRoblox25 = await getOrCreateVariant(prRobloxGlobal.id, '$25 Card', 25);
+
+  // Create fulfillment combinations (idempotent)
+  async function getOrCreateCombination(variantId: string, name: string, priority: number, items: { denominationId: string; quantity: number }[]) {
+    const existing = await prisma.fulfillmentCombination.findFirst({
+      where: { variantId, name },
+      include: { items: true },
+    });
+    if (existing) return existing;
+    return prisma.fulfillmentCombination.create({
+      data: { variantId, name, priority, items: { create: items } },
+      include: { items: true },
+    });
+  }
+
+  // PSN $50: Primary = 1×$50, Fallback = 2×$25, Fallback2 = 5×$10
+  await getOrCreateCombination(vPsn50.id, '1×$50', 1, [{ denominationId: denominations['PSN-50'], quantity: 1 }]);
+  await getOrCreateCombination(vPsn50.id, '2×$25', 2, [{ denominationId: denominations['PSN-25'], quantity: 2 }]);
+  await getOrCreateCombination(vPsn50.id, '5×$10', 3, [{ denominationId: denominations['PSN-10'], quantity: 5 }]);
+
+  // PSN $100: Primary = 1×$100, Fallback = 2×$50, Fallback2 = 4×$25
+  await getOrCreateCombination(vPsn100.id, '1×$100', 1, [{ denominationId: denominations['PSN-100'], quantity: 1 }]);
+  await getOrCreateCombination(vPsn100.id, '2×$50', 2, [{ denominationId: denominations['PSN-50'], quantity: 2 }]);
+  await getOrCreateCombination(vPsn100.id, '4×$25', 3, [{ denominationId: denominations['PSN-25'], quantity: 4 }]);
+
+  // PSN $25: Primary = 1×$25, Fallback = 2×$10 + 1×$5 (but no $5, so only 1×$25)
+  await getOrCreateCombination(vPsn25.id, '1×$25', 1, [{ denominationId: denominations['PSN-25'], quantity: 1 }]);
+
+  // PSN $10: Primary = 1×$10
+  await getOrCreateCombination(vPsn10.id, '1×$10', 1, [{ denominationId: denominations['PSN-10'], quantity: 1 }]);
+
+  // Xbox $50: Primary = 1×$50, Fallback = 2×$25
+  await getOrCreateCombination(vXbox50.id, '1×$50', 1, [{ denominationId: denominations['Xbox-50'], quantity: 1 }]);
+  await getOrCreateCombination(vXbox50.id, '2×$25', 2, [{ denominationId: denominations['Xbox-25'], quantity: 2 }]);
+
+  // Xbox $10: Primary = 1×$10
+  await getOrCreateCombination(vXbox10.id, '1×$10', 1, [{ denominationId: denominations['Xbox-10'], quantity: 1 }]);
+
+  // Steam $20: Primary = 1×$20
+  await getOrCreateCombination(vSteam20.id, '1×$20', 1, [{ denominationId: denominations['Steam-20'], quantity: 1 }]);
+
+  // Steam $50: Primary = 1×$50, Fallback = 2×$20 + 1×$10
+  await getOrCreateCombination(vSteam50.id, '1×$50', 1, [{ denominationId: denominations['Steam-50'], quantity: 1 }]);
+  await getOrCreateCombination(vSteam50.id, '2×$20+1×$10', 2, [
+    { denominationId: denominations['Steam-20'], quantity: 2 },
+    { denominationId: denominations['Steam-10'], quantity: 1 },
+  ]);
+
+  // Roblox $10: Primary = 1×$10
+  await getOrCreateCombination(vRoblox10.id, '1×$10', 1, [{ denominationId: denominations['Roblox-10'], quantity: 1 }]);
+
+  // Roblox $25: Primary = 1×$25, Fallback = 2×$10 + 1×$5 (no $5, so fallback won't work)
+  await getOrCreateCombination(vRoblox25.id, '1×$25', 1, [{ denominationId: denominations['Roblox-25'], quantity: 1 }]);
+
+  console.log('✓ Catalog seed data created (categories, regions, variants, combinations)');
+
   console.log('Seed complete!');
   console.log('Admin login: admin@digitalcode.local / Admin123!@#');
   console.log('Merchant login: merchant@test.com / Merchant123!@#');

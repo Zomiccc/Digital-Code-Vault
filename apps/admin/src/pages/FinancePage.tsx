@@ -13,7 +13,7 @@ export function FinancePage() {
   const [approveModal, setApproveModal] = useState<any>(null);
   const [rejectModal, setRejectModal] = useState<any>(null);
   const [adminNote, setAdminNote] = useState('');
-  const [tab, setTab] = useState<'overview' | 'funding' | 'reconciliation' | 'transactions' | 'stripe'>('overview');
+  const [tab, setTab] = useState<'overview' | 'funding' | 'reconciliation' | 'transactions'>('overview');
   const [fundModal, setFundModal] = useState(false);
   const [fundAmount, setFundAmount] = useState('');
   const [fundDesc, setFundDesc] = useState('');
@@ -27,12 +27,6 @@ export function FinancePage() {
     queryKey: ['reconciliation'],
     queryFn: () => api.getReconciliationReport(100, 0),
     enabled: tab === 'reconciliation',
-  });
-
-  const { data: stripePayments } = useQuery({
-    queryKey: ['stripe-payments'],
-    queryFn: () => api.listStripePayments({ limit: 100 }),
-    enabled: tab === 'stripe',
   });
 
   const approveMutation = useMutation({
@@ -86,7 +80,7 @@ export function FinancePage() {
 
       {/* Tabs */}
       <div className="flex gap-1 rounded-lg border border-border bg-card p-1">
-        {(['overview', 'funding', 'reconciliation', 'transactions', 'stripe'] as const).map((t) => (
+        {(['overview', 'funding', 'reconciliation', 'transactions'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -94,7 +88,7 @@ export function FinancePage() {
               tab === t ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
             }`}
           >
-            {t === 'funding' ? `Funding Requests${pendingRequests.length > 0 ? ` (${pendingRequests.length})` : ''}` : t === 'stripe' ? 'Stripe Payments' : t}
+            {t === 'funding' ? `Funding Requests${pendingRequests.length > 0 ? ` (${pendingRequests.length})` : ''}` : t}
           </button>
         ))}
       </div>
@@ -168,6 +162,7 @@ export function FinancePage() {
                 <tr>
                   <Th>Merchant</Th>
                   <Th>Amount</Th>
+                  <Th>Proof</Th>
                   <Th>Note</Th>
                   <Th>Status</Th>
                   <Th>Admin Note</Th>
@@ -183,6 +178,11 @@ export function FinancePage() {
                       <div className="text-xs text-muted-foreground">{r.merchant?.email}</div>
                     </Td>
                     <Td className="font-semibold">{formatCurrency(r.amount)}</Td>
+                    <Td>
+                      {r.screenshot ? (
+                        <a href={r.screenshot} target="_blank" rel="noreferrer" className="text-primary hover:underline text-sm">View proof</a>
+                      ) : <span className="text-muted-foreground text-sm">—</span>}
+                    </Td>
                     <Td className="text-sm text-muted-foreground">{r.note || '—'}</Td>
                     <Td><Badge className={statusColor(r.status)}>{r.status}</Badge></Td>
                     <Td className="text-sm text-muted-foreground">{r.admin_note || '—'}</Td>
@@ -265,44 +265,6 @@ export function FinancePage() {
         </Card>
       )}
 
-      {tab === 'stripe' && (
-        <Card>
-          <h2 className="mb-4 text-lg font-semibold tracking-tight">Stripe Payment Records</h2>
-          {stripePayments?.items?.length > 0 ? (
-            <Table>
-              <thead>
-                <tr>
-                  <Th>Type</Th>
-                  <Th>Amount</Th>
-                  <Th>Status</Th>
-                  <Th>Merchant ID</Th>
-                  <Th>Customer Order</Th>
-                  <Th>Stripe Session</Th>
-                  <Th>Paid At</Th>
-                  <Th>Created</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {stripePayments.items.map((p: any) => (
-                  <tr key={p.id}>
-                    <Td><Badge className={p.payment_type === 'MERCHANT_WALLET_FUNDING' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}>{p.payment_type}</Badge></Td>
-                    <Td className="font-semibold">{formatCurrency(p.amount)}</Td>
-                    <Td><Badge className={p.status === 'SUCCEEDED' ? 'bg-emerald-500/20 text-emerald-400' : p.status === 'FAILED' ? 'bg-red-500/20 text-red-400' : p.status === 'REFUNDED' ? 'bg-amber-500/20 text-amber-400' : 'bg-muted text-muted-foreground'}>{p.status}</Badge></Td>
-                    <Td className="font-mono text-xs text-muted-foreground">{p.merchant_id?.substring(0, 8) || '—'}</Td>
-                    <Td className="font-mono text-xs text-muted-foreground">{p.customer_order_id?.substring(0, 8) || '—'}</Td>
-                    <Td className="font-mono text-xs text-muted-foreground">{p.stripe_checkout_session_id?.substring(0, 16) || '—'}</Td>
-                    <Td className="text-muted-foreground">{p.paid_at ? formatDate(p.paid_at) : '—'}</Td>
-                    <Td className="text-muted-foreground">{formatDate(p.created_at)}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          ) : (
-            <p className="text-sm text-muted-foreground">No Stripe payments yet</p>
-          )}
-        </Card>
-      )}
-
       {/* Approve Modal */}
       <Modal open={!!approveModal} onClose={() => setApproveModal(null)} title="Approve Funding Request">
         <div className="space-y-4">
@@ -310,6 +272,12 @@ export function FinancePage() {
             <p className="text-sm"><span className="text-muted-foreground">Merchant:</span> {approveModal?.merchant?.name}</p>
             <p className="text-sm"><span className="text-muted-foreground">Amount:</span> <span className="font-semibold">{formatCurrency(approveModal?.amount)}</span></p>
             <p className="text-sm"><span className="text-muted-foreground">Note:</span> {approveModal?.note || '—'}</p>
+            {approveModal?.screenshot && (
+              <a href={approveModal.screenshot} target="_blank" rel="noreferrer">
+                <img src={approveModal.screenshot} alt="payment proof" className="mt-2 max-h-56 rounded-lg border border-border object-contain" />
+                <p className="mt-1 text-xs text-primary">Open full size ↗</p>
+              </a>
+            )}
           </div>
           <Input label="Admin Note (optional)" value={adminNote} onChange={(e: any) => setAdminNote(e.target.value)} placeholder="Approval note..." />
           <div className="flex justify-end gap-2">

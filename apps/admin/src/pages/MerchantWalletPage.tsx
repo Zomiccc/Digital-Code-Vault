@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Wallet, Plus, Zap, TrendingUp, TrendingDown, Clock, Check, X, CreditCard, Loader2,
+  Wallet, Plus, Zap, TrendingUp, TrendingDown, Clock, Check, X,
+  Copy, Image as ImageIcon, Smartphone, Landmark, ArrowRight, ArrowLeft, Send, Loader2,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Badge, Button, Table, Th, Td, Modal, Input } from '@/components/ui';
@@ -9,41 +10,62 @@ import { formatCurrency, formatDate, statusColor } from '@/lib/utils';
 
 export function MerchantWalletPage() {
   const queryClient = useQueryClient();
-  const [showFundingModal, setShowFundingModal] = useState(false);
-  const [showStripeModal, setShowStripeModal] = useState(false);
+  const [showAddFunds, setShowAddFunds] = useState(false);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
-  const [stripeAmount, setStripeAmount] = useState('');
-  const [stripeError, setStripeError] = useState('');
-
-  // Check for Stripe redirect status
-  const stripeStatus = new URLSearchParams(window.location.search).get('stripe_status');
-
-  const stripeFundingMutation = useMutation({
-    mutationFn: () => api.createMerchantFundingSession(parseFloat(stripeAmount)),
-    onSuccess: (data) => {
-      if (data.checkout_url) {
-        window.location.href = data.checkout_url;
-      }
-    },
-    onError: (err: any) => {
-      setStripeError(err.message || 'Failed to create Stripe session');
-    },
-  });
+  const [screenshot, setScreenshot] = useState<string | null>(null);
+  const [screenshotName, setScreenshotName] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: wallet, isLoading } = useQuery({ queryKey: ['wallet'], queryFn: api.getWallet });
   const { data: fundingRequests } = useQuery({ queryKey: ['my-funding-requests'], queryFn: api.listMyFundingRequests });
+  const { data: paymentDetails } = useQuery({
+    queryKey: ['payment-details'],
+    queryFn: api.getPaymentDetails,
+    enabled: showAddFunds && step >= 2,
+  });
+
+  const resetWizard = () => {
+    setShowAddFunds(false);
+    setStep(1);
+    setAmount('');
+    setNote('');
+    setScreenshot(null);
+    setScreenshotName('');
+  };
 
   const fundingMutation = useMutation({
-    mutationFn: () => api.createFundingRequest(parseFloat(amount), note || undefined),
+    mutationFn: () =>
+      api.createFundingRequest({
+        amount: parseFloat(amount),
+        note: note || undefined,
+        screenshot: screenshot!,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['my-funding-requests'] });
-      queryClient.invalidateQueries({ queryKey: ['wallet'] });
-      setShowFundingModal(false);
-      setAmount('');
-      setNote('');
+      queryClient.invalidateQueries({ queryKey: ['support-thread'] });
+      setStep(3);
     },
   });
+
+  const pickFile = (file: File | undefined) => {
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      alert('Image too large — please upload a screenshot under 2 MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setScreenshot(reader.result as string);
+      setScreenshotName(file.name);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const copyText = (text: string) => {
+    navigator.clipboard.writeText(text).catch(() => {});
+  };
 
   if (isLoading) {
     return (
@@ -68,14 +90,9 @@ export function MerchantWalletPage() {
           <h1 className="text-3xl font-semibold tracking-tight">Wallet</h1>
           <p className="text-sm text-muted-foreground">Balance, transactions, and funding requests</p>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={() => setShowStripeModal(true)}>
-            <CreditCard className="h-4 w-4" /> Add Funds via Stripe
-          </Button>
-          <Button variant="outline" onClick={() => setShowFundingModal(true)}>
-            <Plus className="h-4 w-4" /> Request Funds
-          </Button>
-        </div>
+        <Button onClick={() => setShowAddFunds(true)}>
+          <Plus className="h-4 w-4" /> Add Funds
+        </Button>
       </div>
 
       {/* Balance cards */}
@@ -109,17 +126,24 @@ export function MerchantWalletPage() {
             <thead>
               <tr>
                 <Th>Amount</Th>
+                <Th>Proof</Th>
                 <Th>Note</Th>
                 <Th>Status</Th>
                 <Th>Admin Note</Th>
                 <Th>Created</Th>
-                <Th>Reviewed</Th>
               </tr>
             </thead>
             <tbody>
               {fundingRequests.map((r: any) => (
                 <tr key={r.id}>
                   <Td className="font-semibold">{formatCurrency(r.amount)}</Td>
+                  <Td>
+                    {r.screenshot ? (
+                      <a href={r.screenshot} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-primary hover:underline">
+                        <ImageIcon className="h-4 w-4" /> View
+                      </a>
+                    ) : '—'}
+                  </Td>
                   <Td className="text-sm text-muted-foreground">{r.note || '—'}</Td>
                   <Td>
                     <Badge className={statusColor(r.status)}>
@@ -131,13 +155,12 @@ export function MerchantWalletPage() {
                   </Td>
                   <Td className="text-sm text-muted-foreground">{r.admin_note || '—'}</Td>
                   <Td className="text-muted-foreground">{formatDate(r.created_at)}</Td>
-                  <Td className="text-muted-foreground">{formatDate(r.reviewed_at)}</Td>
                 </tr>
               ))}
             </tbody>
           </Table>
         ) : (
-          <p className="text-sm text-muted-foreground">No funding requests yet. Click "Request Funds" to add balance.</p>
+          <p className="text-sm text-muted-foreground">No funding requests yet. Click "Add Funds" to top up your wallet.</p>
         )}
       </Card>
 
@@ -176,90 +199,180 @@ export function MerchantWalletPage() {
         )}
       </Card>
 
-      {/* Stripe Funding Success/Cancel Banner */}
-      {stripeStatus === 'success' && (
-        <Card className="border-emerald-500/30 bg-emerald-500/5">
-          <div className="flex items-center gap-3">
-            <Check className="h-5 w-5 text-emerald-500" />
-            <div>
-              <p className="font-semibold text-emerald-400">Payment Successful!</p>
-              <p className="text-sm text-muted-foreground">Your wallet has been credited. It may take a moment to reflect.</p>
+      {/* ─── Add Funds wizard ─── */}
+      <Modal open={showAddFunds} onClose={resetWizard} title="Add Funds to Wallet">
+        {/* Step indicator */}
+        <div className="mb-5 flex items-center gap-2 text-xs">
+          {[['1', 'Amount'], ['2', 'Send & Upload Proof'], ['3', 'Done']].map(([n, label], i) => (
+            <div key={n} className="flex items-center gap-2">
+              {i > 0 && <ArrowRight className="h-3 w-3 text-muted-foreground/50" />}
+              <span
+                className={`flex h-6 w-6 items-center justify-center rounded-full font-semibold ${
+                  step >= Number(n) ? 'bg-primary text-white' : 'bg-secondary text-muted-foreground'
+                }`}
+              >
+                {step > Number(n) ? <Check className="h-3.5 w-3.5" /> : n}
+              </span>
+              <span className={step >= Number(n) ? 'font-medium' : 'text-muted-foreground'}>{label}</span>
             </div>
-          </div>
-        </Card>
-      )}
-      {stripeStatus === 'canceled' && (
-        <Card className="border-amber-500/30 bg-amber-500/5">
-          <div className="flex items-center gap-3">
-            <X className="h-5 w-5 text-amber-500" />
-            <div>
-              <p className="font-semibold text-amber-500">Payment Canceled</p>
-              <p className="text-sm text-muted-foreground">Your Stripe payment was canceled. No charges were made.</p>
-            </div>
-          </div>
-        </Card>
-      )}
+          ))}
+        </div>
 
-      {/* Stripe Funding Modal */}
-      <Modal open={showStripeModal} onClose={() => setShowStripeModal(false)} title="Add Funds via Stripe">
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Add funds to your wallet instantly via Stripe. Your wallet will be credited automatically after payment confirmation.
-          </p>
-          <Input
-            label="Amount (USD)"
-            type="number"
-            value={stripeAmount}
-            onChange={(e: any) => { setStripeAmount(e.target.value); setStripeError(''); }}
-            placeholder="100.00"
-            required
-          />
-          {stripeError && <p className="text-sm text-destructive">{stripeError}</p>}
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setShowStripeModal(false)}>Cancel</Button>
-            <Button
-              onClick={() => stripeFundingMutation.mutate()}
-              disabled={!stripeAmount || parseFloat(stripeAmount) <= 0 || stripeFundingMutation.isPending}
-            >
-              {stripeFundingMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Redirecting...</> : <><CreditCard className="mr-2 h-4 w-4" /> Pay with Stripe</>}
+        {step === 1 && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">How much do you want to add to your wallet?</p>
+            <Input
+              label="Amount (USD)"
+              type="number"
+              value={amount}
+              onChange={(e: any) => setAmount(e.target.value)}
+              placeholder="100"
+              required
+            />
+            <div className="flex flex-wrap gap-2">
+              {[50, 100, 250, 500].map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setAmount(String(v))}
+                  className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+                    amount === String(v) ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:border-primary/50'
+                  }`}
+                >
+                  ${v}
+                </button>
+              ))}
+            </div>
+            <Button className="w-full" disabled={!amount || parseFloat(amount) <= 0} onClick={() => setStep(2)}>
+              Continue <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
           </div>
-        </div>
-      </Modal>
+        )}
 
-      {/* Funding Request Modal */}
-      <Modal open={showFundingModal} onClose={() => setShowFundingModal(false)} title="Request Funds">
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Submit a funding request. An admin will review and approve it. Your wallet will be credited once approved.
-          </p>
-          <Input
-            label="Amount (USD)"
-            type="number"
-            value={amount}
-            onChange={(e: any) => setAmount(e.target.value)}
-            placeholder="100.00"
-            required
-          />
-          <Input
-            label="Note (optional)"
-            value={note}
-            onChange={(e: any) => setNote(e.target.value)}
-            placeholder="Reason for funding request..."
-          />
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setShowFundingModal(false)}>Cancel</Button>
-            <Button
-              onClick={() => fundingMutation.mutate()}
-              disabled={!amount || parseFloat(amount) <= 0 || fundingMutation.isPending}
-            >
-              {fundingMutation.isPending ? 'Submitting...' : 'Submit Request'}
-            </Button>
+        {step === 2 && (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-sm">
+              Send exactly <strong className="text-primary">${parseFloat(amount || '0').toFixed(2)} USD</strong> to any account below.
+            </div>
+
+            {/* EasyPaisa */}
+            {paymentDetails?.easypaisa?.accountNumber && (
+              <Card className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <Smartphone className="h-4 w-4 text-emerald-400" /> EasyPaisa
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => copyText(paymentDetails.easypaisa.accountNumber)}>
+                    <Copy className="mr-1 h-3 w-3" /> Copy
+                  </Button>
+                </div>
+                <div className="mt-2 space-y-0.5 text-sm">
+                  <p><span className="text-muted-foreground">Account Title:</span> {paymentDetails.easypaisa.accountName || '—'}</p>
+                  <p className="font-mono text-base font-semibold tracking-wide">{paymentDetails.easypaisa.accountNumber}</p>
+                </div>
+              </Card>
+            )}
+
+            {/* Banks */}
+            {(paymentDetails?.bankAccounts || []).map((b: any) => (
+              <Card key={b.bank} className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <Landmark className="h-4 w-4 text-sky-400" /> {b.bank}
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => copyText(b.accountNumber)}>
+                    <Copy className="mr-1 h-3 w-3" /> Copy
+                  </Button>
+                </div>
+                <div className="mt-2 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
+                  <p><span className="text-muted-foreground">Title:</span> {b.accountTitle}</p>
+                  <p className="font-mono"><span className="text-muted-foreground">A/C:</span> {b.accountNumber}</p>
+                  {b.iban && <p className="font-mono sm:col-span-2 break-all"><span className="text-muted-foreground">IBAN:</span> {b.iban}</p>}
+                </div>
+              </Card>
+            ))}
+
+            {paymentDetails?.instructions && (
+              <p className="text-xs text-muted-foreground">{paymentDetails.instructions}</p>
+            )}
+
+            {/* Screenshot upload */}
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Payment Screenshot *
+              </label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => pickFile(e.target.files?.[0])}
+              />
+              {screenshot ? (
+                <div className="flex items-center gap-3 rounded-lg border border-border p-3">
+                  <img src={screenshot} alt="proof" className="h-14 w-14 rounded object-cover" />
+                  <div className="min-w-0 flex-1 text-sm">
+                    <p className="truncate font-medium">{screenshotName}</p>
+                    <button className="text-xs text-red-500 hover:underline" onClick={() => { setScreenshot(null); setScreenshotName(''); }}>
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex w-full flex-col items-center gap-2 rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+                >
+                  <ImageIcon className="h-6 w-6" />
+                  Click to upload payment screenshot (required)
+                </button>
+              )}
+            </div>
+
+            <Input
+              label="Message to admin (optional)"
+              value={note}
+              onChange={(e: any) => setNote(e.target.value)}
+              placeholder="e.g. Sent from my EasyPaisa — please approve"
+            />
+
+            {fundingMutation.isError && (
+              <p className="text-sm text-destructive">{(fundingMutation.error as Error).message}</p>
+            )}
+
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setStep(1)}>
+                <ArrowLeft className="mr-2 h-4 w-4" /> Back
+              </Button>
+              <Button
+                className="flex-1"
+                disabled={!screenshot || fundingMutation.isPending}
+                onClick={() => fundingMutation.mutate()}
+              >
+                {fundingMutation.isPending ? (
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Submitting...</>
+                ) : (
+                  <><Send className="mr-2 h-4 w-4" /> Submit for Approval</>
+                )}
+              </Button>
+            </div>
           </div>
-          {fundingMutation.isError && (
-            <p className="text-sm text-destructive">{(fundingMutation.error as Error).message}</p>
-          )}
-        </div>
+        )}
+
+        {step === 3 && (
+          <div className="space-y-4 py-2 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/15">
+              <Check className="h-7 w-7 text-emerald-500" />
+            </div>
+            <div>
+              <p className="text-lg font-semibold">Request submitted!</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Admin has been notified with your proof of ${parseFloat(amount).toFixed(2)}.
+                Your wallet will be credited once approved — track it under Funding Requests below or in the Help chat.
+              </p>
+            </div>
+            <Button className="w-full" onClick={resetWizard}>Done</Button>
+          </div>
+        )}
       </Modal>
     </div>
   );

@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsOptional, IsNotEmpty, IsArray, Min, IsIn, MinLength } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsNotEmpty, IsArray, Min, IsIn, MinLength, IsBoolean, IsInt } from 'class-validator';
 
 export class CreateFulfillmentDto {
   @IsString()
@@ -32,6 +32,10 @@ export class CreateFulfillmentDto {
   @IsOptional()
   @IsString()
   inventory_source?: string; // 'DCV' | 'MERCHANT' | 'AUTO'
+
+  @IsOptional()
+  @IsString()
+  variant_id?: string; // target a specific variant — uses its admin-preset code bundle
 }
 
 export class CreateMerchantDto {
@@ -89,6 +93,14 @@ export class CreateProductDto {
   @IsOptional()
   @IsString()
   supplier_id?: string;
+
+  @IsOptional()
+  @IsIn(['NORMAL', 'ESSENTIALS'])
+  product_type?: string;
+
+  @IsOptional()
+  @IsString()
+  category_id?: string;
 }
 
 export class CreateDenominationDto {
@@ -167,10 +179,228 @@ export class CreateFundingRequestDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @IsString()
+  @MinLength(10)
+  screenshot!: string; // base64 data-URL of the payment proof
+}
+
+export class CreateSupportMessageDto {
+  @IsOptional()
+  @IsString()
+  body?: string;
+
+  @IsOptional()
+  @IsString()
+  image?: string; // base64 data-URL attachment
+
+  @IsOptional()
+  @IsString()
+  fundingRequestId?: string;
 }
 
 export class FundingRequestActionDto {
   @IsOptional()
   @IsString()
   note?: string;
+}
+
+// ─── Catalog DTOs ───
+
+export class CreateCategoryDto {
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  slug?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  image?: string;
+
+  @IsOptional()
+  @IsInt()
+  sortOrder?: number;
+}
+
+export class UpdateCategoryDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  slug?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  image?: string;
+
+  @IsOptional()
+  @IsInt()
+  sortOrder?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+}
+
+export class CreateRegionDto {
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  code!: string;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
+
+  @IsOptional()
+  @IsString()
+  symbol?: string;
+}
+
+export class UpdateRegionDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  code?: string;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
+
+  @IsOptional()
+  @IsString()
+  symbol?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+}
+
+export class CreateProductRegionDto {
+  @IsString()
+  @IsNotEmpty()
+  productId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  regionId!: string;
+}
+
+export class CreateVariantDto {
+  @IsString()
+  @IsNotEmpty()
+  productRegionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  slug?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsNumber()
+  @Min(0)
+  customerPrice!: number;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
+
+  @IsOptional()
+  @IsInt()
+  sortOrder?: number;
+}
+
+export class UpdateVariantDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  slug?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  customerPrice?: number;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
+
+  @IsOptional()
+  @IsInt()
+  sortOrder?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+}
+
+export class CreateCombinationDto {
+  @IsString()
+  @IsNotEmpty()
+  variantId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsOptional()
+  @IsInt()
+  priority?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+
+  @IsArray()
+  items!: { denominationId: string; quantity: number }[];
+}
+
+export class UpdateCombinationDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsInt()
+  priority?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  items?: { denominationId: string; quantity: number }[];
 }

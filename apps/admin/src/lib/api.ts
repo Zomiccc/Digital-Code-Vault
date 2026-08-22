@@ -134,6 +134,10 @@ export const api = {
   listProducts: () => apiFetch('/admin/products'),
   createProduct: (data: any) =>
     apiFetch('/admin/products', { method: 'POST', body: JSON.stringify(data) }),
+  updateProductType: (productId: string, productType: string) =>
+    apiFetch(`/admin/products/${productId}/type`, { method: 'PATCH', body: JSON.stringify({ product_type: productType }) }),
+  updateProductCategory: (productId: string, categoryId: string | null) =>
+    apiFetch(`/admin/products/${productId}/category`, { method: 'PATCH', body: JSON.stringify({ category_id: categoryId }) }),
   createDenomination: (productId: string, faceValue: number, currency?: string) =>
     apiFetch(`/admin/products/${productId}/denominations`, {
       method: 'POST',
@@ -185,8 +189,9 @@ export const api = {
   // Merchant endpoints
   getWallet: () => apiFetch('/merchant/dashboard/wallet'),
   listMyFundingRequests: () => apiFetch('/merchant/dashboard/funding-requests'),
-  createFundingRequest: (amount: number, note?: string) =>
-    apiFetch('/merchant/dashboard/funding-requests', { method: 'POST', body: JSON.stringify({ amount, note }) }),
+  createFundingRequest: (data: { amount: number; note?: string; screenshot: string }) =>
+    apiFetch('/merchant/dashboard/funding-requests', { method: 'POST', body: JSON.stringify(data) }),
+  getPaymentDetails: () => apiFetch('/merchant/dashboard/payment-details'),
   listOrders: (limit = 50, offset = 0) =>
     apiFetch(`/merchant/dashboard/orders?limit=${limit}&offset=${offset}`),
   listMerchantProducts: () => apiFetch('/products'),
@@ -261,27 +266,75 @@ export const api = {
   initializeAdminWallet: (amount: number, description?: string) =>
     apiFetch('/admin/wallet/initialize', { method: 'POST', body: JSON.stringify({ amount, description }) }),
 
-  // Stripe endpoints
-  createMerchantFundingSession: (amount: number, currency?: string) =>
-    apiFetch('/stripe/merchant-funding/create-session', {
+  // Support chat
+  getSupportThread: () =>
+    apiFetch('/merchant/support/messages'),
+  sendSupportMessage: (data: { body?: string; image?: string; fundingRequestId?: string }) =>
+    apiFetch('/merchant/support/messages', { method: 'POST', body: JSON.stringify(data) }),
+  listSupportThreads: () =>
+    apiFetch('/admin/support/threads'),
+  getSupportThreadByMerchant: (merchantId: string) =>
+    apiFetch(`/admin/support/threads/${merchantId}`),
+  replySupportThread: (merchantId: string, bodyText: string) =>
+    apiFetch(`/admin/support/threads/${merchantId}/messages`, { method: 'POST', body: JSON.stringify({ body: bodyText }) }),
+
+  // Catalog endpoints
+  listCategories: (activeOnly = false) =>
+    apiFetch(`/admin/catalog/categories${activeOnly ? '?active=true' : ''}`),
+  createCategory: (data: any) =>
+    apiFetch('/admin/catalog/categories', { method: 'POST', body: JSON.stringify(data) }),
+  updateCategory: (id: string, data: any) =>
+    apiFetch(`/admin/catalog/categories/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteCategory: (id: string) =>
+    apiFetch(`/admin/catalog/categories/${id}`, { method: 'DELETE' }),
+
+  listRegions: (activeOnly = false) =>
+    apiFetch(`/admin/catalog/regions${activeOnly ? '?active=true' : ''}`),
+  createRegion: (data: any) =>
+    apiFetch('/admin/catalog/regions', { method: 'POST', body: JSON.stringify(data) }),
+  updateRegion: (id: string, data: any) =>
+    apiFetch(`/admin/catalog/regions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteRegion: (id: string) =>
+    apiFetch(`/admin/catalog/regions/${id}`, { method: 'DELETE' }),
+
+  listProductRegions: (productId?: string) =>
+    apiFetch(`/admin/catalog/product-regions${productId ? `?productId=${productId}` : ''}`),
+  createProductRegion: (data: any) =>
+    apiFetch('/admin/catalog/product-regions', { method: 'POST', body: JSON.stringify(data) }),
+  deleteProductRegion: (id: string) =>
+    apiFetch(`/admin/catalog/product-regions/${id}`, { method: 'DELETE' }),
+
+  getCatalogHierarchy: () => apiFetch('/admin/catalog/hierarchy'),
+  getCatalogStats: () => apiFetch('/admin/catalog/stats'),
+
+  // Variants & fulfillment combinations (presets)
+  listVariantsByProduct: (productId: string) =>
+    apiFetch(`/admin/catalog/products/${productId}/variants`),
+  createVariantForProduct: (productId: string, data: { name: string; customerPrice: number; currency?: string; description?: string }) =>
+    apiFetch(`/admin/catalog/products/${productId}/variants`, { method: 'POST', body: JSON.stringify(data) }),
+  updateVariant: (id: string, data: any) =>
+    apiFetch(`/admin/catalog/variants/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteVariant: (id: string) =>
+    apiFetch(`/admin/catalog/variants/${id}`, { method: 'DELETE' }),
+  listCombinations: (variantId?: string) =>
+    apiFetch(`/admin/catalog/combinations${variantId ? `?variantId=${variantId}` : ''}`),
+  createCombination: (data: { variantId: string; name: string; priority?: number; active?: boolean; items: { denominationId: string; quantity: number }[] }) =>
+    apiFetch('/admin/catalog/combinations', { method: 'POST', body: JSON.stringify(data) }),
+  updateCombination: (id: string, data: any) =>
+    apiFetch(`/admin/catalog/combinations/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteCombination: (id: string) =>
+    apiFetch(`/admin/catalog/combinations/${id}`, { method: 'DELETE' }),
+  getCombinationAvailability: (id: string) =>
+    apiFetch(`/admin/catalog/combinations/${id}/availability`),
+
+  // Essentials delivery config — reusable denomination + quantity rules
+  getEssentialsDeliveryConfig: (productId: string) =>
+    apiFetch(`/admin/products/${productId}/essentials/delivery-config`),
+  saveEssentialsDeliveryConfig: (productId: string, items: { denominationId: string; quantity: number }[]) =>
+    apiFetch(`/admin/products/${productId}/essentials/delivery-config`, {
       method: 'POST',
-      body: JSON.stringify({ amount, currency }),
+      body: JSON.stringify({ items }),
     }),
-  createCustomerPurchaseSession: (data: { product_id: string; amount: number; customer_email: string; customer_name?: string; denomination_id?: string; currency?: string }) =>
-    apiFetch('/stripe/customer-purchase/create-session', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-  createAuthenticatedPurchaseSession: (data: { product_id: string; amount: number; denomination_id?: string; currency?: string }) =>
-    apiFetch('/stripe/customer-purchase/authenticated/create-session', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-  getStripePublishableKey: () => apiFetch('/stripe/publishable-key'),
-  getStripePayment: (id: string) => apiFetch(`/stripe/payment/${id}`),
-  getStripeOrder: (id: string) => apiFetch(`/stripe/order/${id}`),
-  listStripePayments: (params?: { paymentType?: string; status?: string; limit?: number; offset?: number }) => {
-    const qs = params ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]) as any)}` : '';
-    return apiFetch(`/stripe/payments${qs}`);
-  },
+  getEssentialsAvailability: (productId: string) =>
+    apiFetch(`/admin/products/${productId}/essentials/availability`),
 };

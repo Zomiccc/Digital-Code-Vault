@@ -172,9 +172,12 @@ export class WalletService {
 
   // ─── Funding Requests ───
 
-  async createFundingRequest(merchantId: string, amount: number, note?: string) {
+  async createFundingRequest(merchantId: string, amount: number, note?: string, screenshot?: string) {
     if (amount <= 0) {
       throw new BadRequestException('Amount must be greater than 0');
+    }
+    if (!screenshot) {
+      throw new BadRequestException('A payment screenshot/proof is required');
     }
 
     const adminWalletId = await this.getOrCreateAdminWallet();
@@ -186,6 +189,7 @@ export class WalletService {
         amount,
         currency: 'USD',
         note,
+        screenshot,
         status: 'PENDING',
       },
     });
@@ -221,6 +225,8 @@ export class WalletService {
       amount: r.amount,
       currency: r.currency,
       note: r.note,
+      has_screenshot: !!r.screenshot,
+      screenshot: r.screenshot,
       status: r.status,
       admin_note: r.adminNote,
       reviewed_by: r.reviewedBy,

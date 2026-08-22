@@ -64,7 +64,7 @@ export class WebhooksController {
   @UseGuards(JwtAuthGuard)
   async updateConnectedProduct(
     @Param('id') id: string,
-    @Body() body: { dcv_product_id?: string; dcv_denomination_id?: string | null; inventory_source?: string },
+    @Body() body: { dcv_product_id?: string; dcv_denomination_id?: string | null; dcv_variant_id?: string | null; inventory_source?: string },
     @Req() req: any,
   ) {
     return this.webhookService.updateConnectedProductMapping(
@@ -73,6 +73,7 @@ export class WebhooksController {
       body.dcv_product_id,
       body.dcv_denomination_id,
       body.inventory_source,
+      body.dcv_variant_id,
     );
   }
 

@@ -56,6 +56,7 @@ export class FulfillmentController {
       actorType: 'MERCHANT',
       ip: req.ip,
       inventorySource: body.inventory_source,
+      variantId: body.variant_id,
     });
   }
 
@@ -135,6 +136,7 @@ export class PaymentNotificationController {
       actorType: 'MERCHANT',
       ip: req.ip,
       inventorySource: body.inventory_source,
+      variantId: body.variant_id,
     });
   }
 }
