@@ -1,31 +1,97 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Plus, Trash2, Globe, FolderTree, Tags } from 'lucide-react';
+import { Plus, Trash2, Globe, FolderTree, Tags, Layers } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Input, Select, Modal, Badge } from '@/components/ui';
 
-type Tab = 'categories' | 'regions' | 'productRegions';
+type Tab = 'brands' | 'categories' | 'regions' | 'productRegions';
 
 export function CatalogPage() {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<Tab>('categories');
+  const [tab, setTab] = useState<Tab>('brands');
 
   return (
     <div className="space-y-6 animate-slide-up">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Catalog Management</h1>
-        <p className="text-sm text-muted-foreground">Manage categories, regions, product-region mappings, and variants</p>
+        <p className="text-sm text-muted-foreground">Manage brands, categories, regions, product-region mappings, and variants (Brand → Category → Product → Variant)</p>
       </div>
 
       <div className="flex gap-2 border-b border-border">
+        <TabButton active={tab === 'brands'} onClick={() => setTab('brands')} icon={Layers} label="Brands" />
         <TabButton active={tab === 'categories'} onClick={() => setTab('categories')} icon={FolderTree} label="Categories" />
         <TabButton active={tab === 'regions'} onClick={() => setTab('regions')} icon={Globe} label="Regions" />
         <TabButton active={tab === 'productRegions'} onClick={() => setTab('productRegions')} icon={Tags} label="Product-Regions" />
       </div>
 
+      {tab === 'brands' && <BrandsTab />}
       {tab === 'categories' && <CategoriesTab />}
       {tab === 'regions' && <RegionsTab />}
       {tab === 'productRegions' && <ProductRegionsTab />}
+    </div>
+  );
+}
+
+function BrandsTab() {
+  const queryClient = useQueryClient();
+  const { data: brands, isLoading } = useQuery({ queryKey: ['brands'], queryFn: () => api.listBrands() });
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ name: '', description: '', sortOrder: 0 });
+
+  const createMutation = useMutation({
+    mutationFn: () => api.createBrand(form),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['brands'] });
+      setShowCreate(false);
+      setForm({ name: '', description: '', sortOrder: 0 });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deleteBrand(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['brands'] }),
+  });
+
+  if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button onClick={() => setShowCreate(true)}><Plus className="mr-2 h-4 w-4" /> Add Brand</Button>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {brands?.map((brand: any) => (
+          <Card key={brand.id} hover>
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-semibold">{brand.name}</h3>
+                <p className="text-xs text-muted-foreground">/{brand.slug}</p>
+                {brand.description && <p className="mt-2 text-sm text-muted-foreground">{brand.description}</p>}
+                <div className="mt-3 flex items-center gap-2">
+                  <Badge className={brand.active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}>
+                    {brand.active ? 'ACTIVE' : 'INACTIVE'}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">{brand._count?.categories || 0} categories</span>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => deleteMutation.mutate(brand.id)}>
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create Brand">
+        <div className="space-y-4">
+          <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. PlayStation" />
+          <Input label="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Optional" />
+          <Input label="Sort Order" type="number" value={String(form.sortOrder)} onChange={(e) => setForm({ ...form, sortOrder: parseInt(e.target.value) || 0 })} />
+          <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending || !form.name} className="w-full">
+            {createMutation.isPending ? 'Creating...' : 'Create'}
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -47,15 +113,16 @@ function TabButton({ active, onClick, icon: Icon, label }: any) {
 function CategoriesTab() {
   const queryClient = useQueryClient();
   const { data: categories, isLoading } = useQuery({ queryKey: ['categories'], queryFn: () => api.listCategories() });
+  const { data: brands } = useQuery({ queryKey: ['brands'], queryFn: () => api.listBrands() });
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ name: '', description: '', sortOrder: 0 });
+  const [form, setForm] = useState({ name: '', description: '', sortOrder: 0, brandId: '' });
 
   const createMutation = useMutation({
     mutationFn: () => api.createCategory(form),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['categories'] });
       setShowCreate(false);
-      setForm({ name: '', description: '', sortOrder: 0 });
+      setForm({ name: '', description: '', sortOrder: 0, brandId: '' });
     },
   });
 
@@ -77,7 +144,7 @@ function CategoriesTab() {
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-lg font-semibold">{cat.name}</h3>
-                <p className="text-xs text-muted-foreground">/{cat.slug}</p>
+                <p className="text-xs text-muted-foreground">/{cat.slug}{cat.brand ? ` · ${cat.brand.name}` : ''}</p>
                 {cat.description && <p className="mt-2 text-sm text-muted-foreground">{cat.description}</p>}
                 <div className="mt-3 flex items-center gap-2">
                   <Badge className={cat.active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}>
@@ -96,7 +163,16 @@ function CategoriesTab() {
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create Category">
         <div className="space-y-4">
-          <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. PlayStation" />
+          <Select
+            label="Brand (optional)"
+            value={form.brandId}
+            onChange={(e) => setForm({ ...form, brandId: e.target.value })}
+            options={[
+              { value: '', label: 'No brand' },
+              ...(brands?.map((b: any) => ({ value: b.id, label: b.name })) || []),
+            ]}
+          />
+          <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. PSN Gift Card" />
           <Input label="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Optional" />
           <Input label="Sort Order" type="number" value={String(form.sortOrder)} onChange={(e) => setForm({ ...form, sortOrder: parseInt(e.target.value) || 0 })} />
           <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending || !form.name} className="w-full">

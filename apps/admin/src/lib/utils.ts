@@ -10,6 +10,37 @@ export function formatCurrency(value: number | string): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(num);
 }
 
+// Currency symbols for known ISO codes used across the catalog (Region.currency /
+// Variant.currency). Falls back to the raw currency code + a trailing space when unknown,
+// so we NEVER silently mislabel a price with the wrong symbol (e.g. always showing ₨/PKR).
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$',
+  PKR: '₨',
+  SAR: '﷼',
+  TRY: '₺',
+  AED: 'د.إ',
+  GBP: '£',
+  EUR: '€',
+  CAD: '$',
+  AUD: '$',
+  INR: '₹',
+  QAR: 'ر.ق',
+  HKD: 'HK$',
+};
+
+export function getCurrencySymbol(currency?: string | null): string {
+  if (!currency) return '$';
+  return CURRENCY_SYMBOLS[currency.toUpperCase()] || `${currency.toUpperCase()} `;
+}
+
+// Formats a price using the correct symbol for its own currency — e.g. a SAR variant
+// always renders with ﷼, never a hardcoded ₨/PKR symbol regardless of admin locale.
+export function formatPrice(value: number | string, currency?: string | null): string {
+  const num = typeof value === 'string' ? parseFloat(value) : value;
+  const symbol = getCurrencySymbol(currency);
+  return `${symbol}${num.toLocaleString()}`;
+}
+
 export function formatDate(date: string | Date | null): string {
   if (!date) return '—';
   const d = typeof date === 'string' ? new Date(date) : date;

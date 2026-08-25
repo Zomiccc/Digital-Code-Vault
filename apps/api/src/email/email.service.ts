@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import PDFDocument from 'pdfkit';
 const PDFKit = require('pdfkit');
+import * as nodemailer from 'nodemailer';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -11,6 +12,7 @@ export class EmailService {
   private readonly fromEmail: string;
   private readonly fromName: string;
   private readonly provider: string;
+  private smtpTransport: nodemailer.Transporter | null = null;
 
   constructor(
     private configService: ConfigService,
@@ -22,6 +24,25 @@ export class EmailService {
       this.apiKey = this.configService.get<string>('SENDGRID_API_KEY') || '';
       this.fromEmail = this.configService.get<string>('SENDGRID_FROM_EMAIL') || 'noreply@digitalcode.local';
       this.fromName = this.configService.get<string>('SENDGRID_FROM_NAME') || 'CodeHub';
+    } else if (this.provider === 'smtp') {
+      this.apiKey = '';
+      const smtpHost = this.configService.get<string>('SMTP_HOST') || '';
+      const smtpPort = this.configService.get<number>('SMTP_PORT', 587);
+      const smtpUser = this.configService.get<string>('SMTP_USER') || '';
+      const smtpPassword = this.configService.get<string>('SMTP_PASSWORD') || '';
+      this.fromEmail = this.configService.get<string>('SMTP_FROM') || smtpUser || 'noreply@digitalcode.local';
+      this.fromName = 'CodeHub';
+
+      if (smtpHost && smtpUser && smtpPassword) {
+        this.smtpTransport = nodemailer.createTransport({
+          host: smtpHost,
+          port: Number(smtpPort),
+          secure: Number(smtpPort) === 465,
+          auth: { user: smtpUser, pass: smtpPassword },
+        });
+      } else {
+        this.logger.error('EMAIL_PROVIDER=smtp but SMTP_HOST/SMTP_USER/SMTP_PASSWORD are not fully configured. Email sending will fail.');
+      }
     } else {
       this.apiKey = this.configService.get<string>('RESEND_API_KEY') || '';
       this.fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL') || 'onboarding@resend.dev';
@@ -59,6 +80,41 @@ export class EmailService {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
+        if (this.provider === 'smtp') {
+          if (!this.smtpTransport) {
+            this.logger.error('SMTP transport not configured (missing SMTP_HOST/SMTP_USER/SMTP_PASSWORD). Refusing to fake a successful send.');
+            if (emailLog) {
+              await this.prisma.emailLog.update({
+                where: { id: emailLog.id },
+                data: { status: 'FAILED', errorMessage: 'SMTP transport not configured', retryCount: attempt },
+              }).catch(() => {});
+            }
+            return false;
+          }
+
+          const info = await this.smtpTransport.sendMail({
+            from: `${this.fromName} <${this.fromEmail}>`,
+            to,
+            subject,
+            html,
+            text: options?.text,
+            attachments: options?.attachments?.map((att) => ({
+              filename: att.filename,
+              content: att.content,
+              contentType: att.contentType,
+            })),
+          });
+
+          this.logger.log(`Email sent to ${to} via smtp (id: ${info.messageId})`);
+          if (emailLog) {
+            await this.prisma.emailLog.update({
+              where: { id: emailLog.id },
+              data: { status: 'SENT', providerResponse: info.messageId, sentAt: new Date() },
+            }).catch(() => {});
+          }
+          return true;
+        }
+
         let response: Response;
 
         if (this.provider === 'sendgrid') {

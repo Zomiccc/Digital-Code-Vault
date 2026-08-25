@@ -5,6 +5,16 @@ import * as crypto from 'crypto';
 const prisma = new PrismaClient();
 
 async function main() {
+  // Hard safety guard: this script creates fake demo products, codes, and
+  // hardcoded credentials (admin@digitalcode.local / merchant@test.com).
+  // It must never run against a production database.
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_SEED_IN_PRODUCTION !== 'true') {
+    console.error('Refusing to run demo seed script in production (NODE_ENV=production).');
+    console.error('This script creates fake demo data and hardcoded credentials.');
+    console.error('If you really intend to seed a non-production database, set ALLOW_SEED_IN_PRODUCTION=true.');
+    process.exit(1);
+  }
+
   console.log('Seeding database...');
 
   // Use the encryption key from environment or generate one

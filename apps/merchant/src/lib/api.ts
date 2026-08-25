@@ -1,4 +1,7 @@
-const API_BASE = import.meta.env.DEV ? 'http://localhost:3000/api/v1' : '/api/v1';
+// API base URL is fully configurable via VITE_API_URL (set at build time).
+// Falls back to relative path in production (same-origin / reverse-proxied),
+// and localhost in dev only.
+const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3000/api/v1' : '/api/v1');
 
 function getToken(): string | null {
   return localStorage.getItem('merchant_access_token');

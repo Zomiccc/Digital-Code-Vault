@@ -51,6 +51,19 @@ export class FulfillmentService {
     variantId?: string; // variant to use for FulfillmentCombination lookup
   }) {
     const { merchantId, productId, amount, currency, referenceId, idempotencyKey, sandbox, customerEmail, customerName, customerAddress, actorId, actorType, ip } = params;
+
+    // ─── Emergency stop: pause ALL code delivery platform-wide ───
+    if (actorType !== 'ADMIN') {
+      const stop = await this.prisma.platformSetting.findUnique({ where: { key: 'EMERGENCY_STOP' } });
+      if (stop?.value === 'true') {
+        throw new BadRequestException({
+          error: 'SERVICE_PAUSED',
+          code: 'EMERGENCY_STOP',
+          message: 'Code delivery is temporarily paused by the platform. Please try again later.',
+        });
+      }
+    }
+
     const requestedSource = params.inventorySource || 'DCV';
     const exactDenominationId = params.denominationId || null;
     const variantId = params.variantId || null;
@@ -460,7 +473,9 @@ export class FulfillmentService {
     }
 
     // Skip wallet check for merchant-owned inventory or sandbox mode
-    const skipWallet = sandbox || useMerchantPool;
+    // Admin-created orders are the platform's own responsibility — no wallet is
+    // checked or charged; stock is fulfilled straight from the vault.
+    const skipWallet = sandbox || useMerchantPool || actorType === 'ADMIN';
     if (!skipWallet) {
       // Check wallet balance
       if (Number(merchant.walletBalance) < totalCost) {
@@ -796,8 +811,9 @@ export class FulfillmentService {
     }
 
     // Send purchase notification email to merchant; fall back to a plain delivery-link
-    // email when there is no customer attached to the order.
-    if (customerEmail && merchant && product) {
+    // email when there is no customer attached to the order. Admin-created orders
+    // belong to the internal platform merchant — skip merchant emails for those.
+    if (actorType !== 'ADMIN' && customerEmail && merchant && product) {
       this.emailService.sendMerchantPurchaseNotification(
         merchant.email,
         merchant.name,
@@ -811,7 +827,7 @@ export class FulfillmentService {
       ).catch((err) => {
         this.logger.error(`Failed to send merchant purchase notification: ${(err as Error).message}`);
       });
-    } else if (merchant && product) {
+    } else if (actorType !== 'ADMIN' && merchant && product) {
       this.emailService.sendDeliveryLinkEmail(
         merchant.email,
         merchant.name,

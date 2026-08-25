@@ -1,13 +1,35 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { RotateCcw } from 'lucide-react';
+import { RotateCcw, Plus } from 'lucide-react';
+import { Input, Select } from '@/components/ui';
 import { api } from '@/lib/api';
 import { Card, Button, Table, Th, Td, Badge, Modal, AddressWithMapsLink } from '@/components/ui';
-import { formatCurrency, formatDate, statusColor } from '@/lib/utils';
+import { formatCurrency, formatDate, statusColor, formatPrice } from '@/lib/utils';
 
 export function FulfillmentPage() {
   const queryClient = useQueryClient();
   const [reverseItem, setReverseItem] = useState<any>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [orderForm, setOrderForm] = useState({ productId: '', variantId: '', amount: '', customerEmail: '', customerName: '' });
+
+  const { data: hierarchyForOrder } = useQuery({ queryKey: ['catalog-hierarchy'], queryFn: api.getCatalogHierarchy, enabled: showCreate });
+  const orderProducts = (hierarchyForOrder || []).flatMap((c: any) => c.products);
+  const selectedProductVariants = orderProducts.find((p: any) => p.id === orderForm.productId)?.productRegions?.flatMap((pr: any) => pr.variants) || [];
+
+  const createOrderMutation = useMutation({
+    mutationFn: () => api.createManualOrder({
+      productId: orderForm.productId,
+      amount: parseFloat(orderForm.amount),
+      variantId: orderForm.variantId || undefined,
+      customerEmail: orderForm.customerEmail || undefined,
+      customerName: orderForm.customerName || undefined,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['fulfillment'] });
+      setShowCreate(false);
+      setOrderForm({ productId: '', variantId: '', amount: '', customerEmail: '', customerName: '' });
+    },
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ['fulfillment'],
@@ -29,9 +51,62 @@ export function FulfillmentPage() {
   return (
     <div className="space-y-6 animate-slide-up">
       <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Fulfillment Requests</h1>
-        <p className="text-sm text-muted-foreground">Monitor and manage all fulfillment requests</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight">Fulfillment Requests</h1>
+            <p className="text-sm text-muted-foreground">Monitor and manage all fulfillment requests</p>
+          </div>
+          <Button onClick={() => setShowCreate(true)}>
+            <Plus className="mr-2 h-4 w-4" /> Create Order
+          </Button>
+        </div>
       </div>
+
+      {/* Manual order modal */}
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create Order Manually (admin-managed)">
+        <div className="space-y-4">
+          <p className="rounded-lg bg-primary/5 border border-primary/20 px-4 py-2.5 text-xs text-muted-foreground">
+            Admin orders are fulfilled from vault stock at the platform's own responsibility — no merchant wallet is charged.
+          </p>
+          <Select
+            label="Product"
+            value={orderForm.productId}
+            onChange={(e) => setOrderForm({ ...orderForm, productId: e.target.value, variantId: '', amount: '' })}
+            options={[
+              { value: '', label: '— Select product —' },
+              ...orderProducts.map((p: any) => ({ value: p.id, label: `${p.name} (${p.region})` })),
+            ]}
+          />
+          {(selectedProductVariants.length > 0) && (
+            <Select
+              label="Variant / Plan (optional)"
+              value={orderForm.variantId}
+              onChange={(e) => {
+                const v = selectedProductVariants.find((x: any) => x.id === e.target.value);
+                setOrderForm({ ...orderForm, variantId: e.target.value, amount: v ? String(Number(v.customerPrice)) : orderForm.amount });
+              }}
+              options={[
+                { value: '', label: '— None (amount-based) —' },
+                ...selectedProductVariants.map((v: any) => ({ value: v.id, label: `${v.name} — ${formatPrice(v.customerPrice, v.currency)}` })),
+              ]}
+            />
+          )}
+          <Input label="Amount (USD charged to wallet)" type="number" value={orderForm.amount} onChange={(e) => setOrderForm({ ...orderForm, amount: e.target.value })} placeholder="30.00" />
+          <Input label="Customer email (sends delivery link)" type="email" value={orderForm.customerEmail} onChange={(e) => setOrderForm({ ...orderForm, customerEmail: e.target.value })} placeholder="customer@example.com" />
+          <Input label="Customer name (optional)" value={orderForm.customerName} onChange={(e) => setOrderForm({ ...orderForm, customerName: e.target.value })} placeholder="John Doe" />
+          {createOrderMutation.isError && (
+            <p className="text-sm text-destructive">{(createOrderMutation.error as Error).message}</p>
+          )}
+          {createOrderMutation.isSuccess && !showCreate ? null : null}
+          <Button
+            className="w-full"
+            disabled={!orderForm.productId || !orderForm.amount || parseFloat(orderForm.amount) <= 0 || createOrderMutation.isPending}
+            onClick={() => createOrderMutation.mutate()}
+          >
+            {createOrderMutation.isPending ? 'Creating...' : 'Create & Deliver'}
+          </Button>
+        </div>
+      </Modal>
 
       <Card className="p-0">
         <Table>

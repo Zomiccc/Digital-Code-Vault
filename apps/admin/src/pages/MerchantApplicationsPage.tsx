@@ -79,6 +79,35 @@ export function MerchantApplicationsPage() {
                     <p>Submitted: {formatDate(app.createdAt)}</p>
                     {app.adminNote && <p className="text-destructive">Admin Note: {app.adminNote}</p>}
                   </div>
+
+                  {/* KYC details */}
+                  {(app.firstName || app.businessNtn) && (
+                    <div className="mt-4 rounded-lg border border-border bg-muted/30 p-3 text-sm">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">KYC Details</p>
+                      <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                        <p><span className="text-muted-foreground">Name:</span> {app.firstName} {app.lastName}</p>
+                        <p><span className="text-muted-foreground">Phone:</span> {app.phone || '—'}</p>
+                        <p><span className="text-muted-foreground">ID Type:</span> {app.idDocType || '—'}</p>
+                        <p><span className="text-muted-foreground">Business NTN:</span> {app.businessNtn || '—'}</p>
+                      </div>
+                      {(app.idFrontImage || app.idBackImage) && (
+                        <div className="mt-3 flex flex-wrap gap-3">
+                          {app.idFrontImage && (
+                            <a href={app.idFrontImage} target="_blank" rel="noreferrer" className="group relative">
+                              <img src={app.idFrontImage} alt="ID front" className="h-24 w-36 rounded-lg border border-border object-cover transition-opacity group-hover:opacity-80" />
+                              <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">Front</span>
+                            </a>
+                          )}
+                          {app.idBackImage && (
+                            <a href={app.idBackImage} target="_blank" rel="noreferrer" className="group relative">
+                              <img src={app.idBackImage} alt="ID back" className="h-24 w-36 rounded-lg border border-border object-cover transition-opacity group-hover:opacity-80" />
+                              <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">Back</span>
+                            </a>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {app.status === 'PENDING' && (
                   <div className="flex flex-col gap-2">

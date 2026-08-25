@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Upload, CheckCircle, AlertCircle, Shield, FileDigit } from 'lucide-react';
 import { api } from '@/lib/api';
-import { Card, Button, Select, Badge } from '@/components/ui';
+import { Card, Button, Select, Input, Badge } from '@/components/ui';
 
 export function BulkUploadPage() {
   const queryClient = useQueryClient();
@@ -10,6 +10,9 @@ export function BulkUploadPage() {
   const [denomId, setDenomId] = useState('');
   const [supplierId, setSupplierId] = useState('');
   const [codesText, setCodesText] = useState('');
+  const [costPerCode, setCostPerCode] = useState('');
+  const [costCurrency, setCostCurrency] = useState('USD');
+  const [costNote, setCostNote] = useState('');
   const [result, setResult] = useState<any>(null);
 
   const { data: products, isLoading: productsLoading } = useQuery({ queryKey: ['products'], queryFn: api.listProducts });
@@ -23,7 +26,11 @@ export function BulkUploadPage() {
   const uploadMutation = useMutation({
     mutationFn: () => {
       const codes = codesText.split('\n').map((c) => c.trim()).filter(Boolean);
-      return api.bulkUpload(denomId, codes, supplierId || undefined);
+      return api.bulkUpload(denomId, codes, supplierId || undefined, {
+        cost_per_code: costPerCode ? parseFloat(costPerCode) : undefined,
+        currency: costCurrency,
+        note: costNote || undefined,
+      });
     },
     onSuccess: (data) => {
       setResult(data);
@@ -38,6 +45,9 @@ export function BulkUploadPage() {
     setDenomId('');
     setSupplierId('');
     setCodesText('');
+    setCostPerCode('');
+    setCostCurrency('USD');
+    setCostNote('');
     setResult(null);
   };
 
@@ -92,6 +102,43 @@ export function BulkUploadPage() {
               ...(suppliers?.map((s: any) => ({ value: s.id, label: s.name })) || []),
             ]}
           />
+
+          {/* Cost bookkeeping — remember what this batch cost */}
+          <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Batch cost & supplier record (for your books)
+            </p>
+            <div className="grid gap-4 sm:grid-cols-[1fr_120px]">
+              <Input
+                label="Cost per code"
+                type="number"
+                value={costPerCode}
+                onChange={(e: any) => setCostPerCode(e.target.value)}
+                placeholder="e.g. 2.50"
+              />
+              <Select
+                label="Currency"
+                value={costCurrency}
+                onChange={(e: any) => setCostCurrency(e.target.value)}
+                options={[
+                  { value: 'USD', label: 'USD' },
+                  { value: 'PKR', label: 'PKR' },
+                  { value: 'EUR', label: 'EUR' },
+                ]}
+              />
+            </div>
+            <Input
+              label="Note (optional)"
+              value={costNote}
+              onChange={(e: any) => setCostNote(e.target.value)}
+              placeholder="e.g. Paid via bank transfer, invoice #123"
+            />
+            {costPerCode && codeCount > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Total batch cost: <strong>{(parseFloat(costPerCode || '0') * codeCount).toFixed(2)} {costCurrency}</strong> ({codeCount} codes)
+              </p>
+            )}
+          </div>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">

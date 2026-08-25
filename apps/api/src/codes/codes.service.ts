@@ -26,6 +26,7 @@ export class CodesService {
     adminId: string,
     supplierId?: string,
     ip?: string,
+    costInfo?: { costPerCode?: number; currency?: string; note?: string },
   ) {
     // Verify denomination exists
     const denomination = await this.prisma.denomination.findUnique({
@@ -100,9 +101,26 @@ export class CodesService {
         inserted: results.inserted,
         duplicates: results.duplicates,
         errors: results.errors.length,
+        supplierId: supplierId || null,
+        costPerCode: costInfo?.costPerCode ?? null,
+        currency: costInfo?.currency ?? null,
       },
       ip,
     });
+
+    // Record batch cost/supplier info for bookkeeping (even if 0 inserted, keep record)
+    await this.prisma.codeBatch.create({
+      data: {
+        id: batchId,
+        denominationId,
+        quantity: codes.length,
+        supplierId: supplierId || null,
+        costPerCode: costInfo?.costPerCode ?? null,
+        currency: costInfo?.currency || 'USD',
+        note: costInfo?.note || null,
+        createdBy: adminId,
+      },
+    }).catch(() => {});
 
     this.logger.log(
       `Bulk upload: ${results.inserted} inserted, ${results.duplicates} duplicates, ${results.errors.length} errors (batch ${batchId})`,

@@ -19,6 +19,7 @@
     "build:portal": "cd apps/portal && npm run build",
     "build": "npm run build:shared && npm run build:api && npm run build:admin && npm run build:merchant && npm run build:portal",
     "db:migrate": "cd apps/api && npm run prisma:migrate",
+    "db:migrate:deploy": "cd apps/api && npm run prisma:migrate:deploy",
     "db:generate": "cd apps/api && npm run prisma:generate",
     "db:seed": "cd apps/api && npm run seed",
     "db:studio": "cd apps/api && npm run prisma:set-provider && npx prisma studio"

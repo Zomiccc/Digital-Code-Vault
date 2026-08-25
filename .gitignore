@@ -28,6 +28,9 @@ apps/api/prisma/*.db-journal
 # Logs
 *.log
 apps/api/prisma-push.log
+apps/api/server-out.txt
+apps/api/server-err.txt
+apps/api/build_output.txt
 
 # Archives
 redis.zip

@@ -18,27 +18,34 @@ export class MerchantsService {
   ) {}
 
   /**
-   * Admin EasyPaisa / bank accounts shown to merchants when adding funds.
+   * Admin payment accounts shown to merchants when adding funds.
    * All values are env-configurable so the admin can change them anytime.
    */
   getAdminPaymentDetails() {
     return {
-      easypaisa: {
-        accountName: this.configService.get<string>('EASYPAISA_ACCOUNT_NAME', ''),
-        accountNumber: this.configService.get<string>('EASYPAISA_ACCOUNT_NUMBER', ''),
-      },
-      bankAccounts: [
+      accounts: [
         {
-          bank: 'Bank Alfalah',
-          accountTitle: this.configService.get<string>('BANK_ALFALAH_TITLE', 'Ammar Ajaz'),
-          accountNumber: this.configService.get<string>('BANK_ALFALAH_ACCOUNT', '03031007274922'),
-          iban: this.configService.get<string>('BANK_ALFALAH_IBAN', 'PK03ALFH0303001007274922'),
+          kind: 'RAAST ID',
+          accountTitle: this.configService.get<string>('PAY_RAAST_TITLE', 'DICE GAMES'),
+          accountNumber: this.configService.get<string>('PAY_RAAST_NUMBER', '03247666222'),
+          iban: this.configService.get<string>('PAY_RAAST_IBAN', 'PK03ALFH0303001007274922'),
         },
         {
-          bank: 'Meezan Bank',
-          accountTitle: this.configService.get<string>('BANK_MEEZAN_TITLE', 'Ammar Ajaz'),
-          accountNumber: this.configService.get<string>('BANK_MEEZAN_ACCOUNT', '01370104307608'),
-          iban: this.configService.get<string>('BANK_MEEZAN_IBAN', 'PK48MEZN0001370104307608'),
+          kind: 'Meezan Bank',
+          accountTitle: this.configService.get<string>('PAY_MEEZAN_TITLE', 'DICE GAMES'),
+          accountNumber: this.configService.get<string>('PAY_MEEZAN_NUMBER', '01370104307608'),
+          iban: this.configService.get<string>('PAY_MEEZAN_IBAN', 'PK48MEZN0001370104307608'),
+        },
+        {
+          kind: 'Faysal Bank',
+          accountTitle: this.configService.get<string>('PAY_FAYSAL_TITLE', 'DICE GAMES'),
+          accountNumber: this.configService.get<string>('PAY_FAYSAL_NUMBER', '0441007000002234'),
+          iban: this.configService.get<string>('PAY_FAYSAL_IBAN', 'PK27FAYS0441007000002234'),
+        },
+        {
+          kind: 'NayaPay',
+          merchantTitle: this.configService.get<string>('PAY_NAYAPAY_TITLE', 'CodesDukaan'),
+          note: 'Search for "CodesDukaan" or DICE GAMES in the Merchants section of the NayaPay app.',
         },
       ],
       supportContact: {

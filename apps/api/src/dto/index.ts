@@ -135,6 +135,18 @@ export class BulkUploadCodesDto {
   @IsOptional()
   @IsString()
   supplier_id?: string;
+
+  @IsOptional()
+  @IsNumber()
+  cost_per_code?: number;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
+
+  @IsOptional()
+  @IsString()
+  note?: string;
 }
 
 export class CreateAdminUserDto {

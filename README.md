@@ -167,14 +167,13 @@ cd apps/merchant && npm install && npm run dev
 cd apps/portal && npm install && npm run dev
 ```
 
-## Default Seed Credentials
+## Initial Admin Account
 
-After running the seed script:
-
-| Role    | Email                    | Password     |
-|---------|--------------------------|--------------|
-| Admin   | admin@digitalcode.local  | (from .env)  |
-| Merchant| merchant@test.com       | Test1234!    |
+There are no hardcoded seed credentials. On first boot, `AdminBootstrapService`
+creates exactly one admin account **only if no admin exists yet**, using
+`ADMIN_BOOTSTRAP_EMAIL` and `ADMIN_BOOTSTRAP_PASSWORD` from your `.env`. If an
+admin already exists, bootstrap is skipped and the existing password is never
+touched. See `DEPLOYMENT.md` for the full production setup.
 
 ## API Overview
 

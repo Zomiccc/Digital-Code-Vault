@@ -20,6 +20,36 @@ import {
 export class CatalogController {
   constructor(private catalogService: CatalogService) {}
 
+  // ─── Brands ───
+
+  @Get('brands')
+  async listBrands(@Query('active') active?: string) {
+    return this.catalogService.listBrands(active === 'true');
+  }
+
+  @Get('brands/:id')
+  async getBrand(@Param('id') id: string) {
+    return this.catalogService.getBrand(id);
+  }
+
+  @Post('brands')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async createBrand(@Body() body: { name: string; slug?: string; description?: string; image?: string; sortOrder?: number }, @CurrentUser() user: any) {
+    return this.catalogService.createBrand(body, user.id);
+  }
+
+  @Patch('brands/:id')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async updateBrand(@Param('id') id: string, @Body() body: any, @CurrentUser() user: any) {
+    return this.catalogService.updateBrand(id, body, user.id);
+  }
+
+  @Delete('brands/:id')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async deleteBrand(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.catalogService.deleteBrand(id, user.id);
+  }
+
   // ─── Categories ───
 
   @Get('categories')

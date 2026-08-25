@@ -1,6 +1,8 @@
-const API_BASE = import.meta.env.PROD
-  ? 'https://digitalvaul.onrender.com/api/v1'
-  : '/api/v1';
+// API base URL is fully configurable via VITE_API_URL (set at build time).
+// Falls back to a relative path, which works when the frontend is served
+// from the same origin as the API (or behind a reverse proxy that forwards
+// /api/* to the backend). No hardcoded production domain.
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
 
 function getToken(): string | null {
   return localStorage.getItem('vault_access_token');
@@ -105,10 +107,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
-  merchantRegister: (name: string, email: string, password: string) =>
+  merchantRegister: (data: {
+    name: string; email: string; password: string;
+    firstName: string; lastName: string; phone: string;
+    idDocType: string; idFrontImage: string; idBackImage: string; businessNtn: string;
+  }) =>
     apiFetch('/auth/merchant/register', {
       method: 'POST',
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify(data),
     }),
   customerLogin: (email: string, password: string) =>
     apiFetch('/auth/customer/login', {
@@ -150,11 +156,16 @@ export const api = {
     const qs = params ? `?${new URLSearchParams(params)}` : '';
     return apiFetch(`/admin/codes${qs}`);
   },
-  bulkUpload: (denominationId: string, codes: string[], supplierId?: string) =>
+  bulkUpload: (denominationId: string, codes: string[], supplierId?: string, costInfo?: { cost_per_code?: number; currency?: string; note?: string }) =>
     apiFetch('/admin/codes/bulk-upload', {
       method: 'POST',
-      body: JSON.stringify({ denomination_id: denominationId, codes, supplier_id: supplierId }),
+      body: JSON.stringify({ denomination_id: denominationId, codes, supplier_id: supplierId, ...costInfo }),
     }),
+  createManualOrder: (data: { productId: string; amount: number; currency?: string; variantId?: string; customerEmail?: string; customerName?: string }) =>
+    apiFetch('/admin/orders/create', { method: 'POST', body: JSON.stringify(data) }),
+  getEmergencyStop: () => apiFetch('/admin/system/emergency'),
+  setEmergencyStop: (enabled: boolean) =>
+    apiFetch('/admin/system/emergency', { method: 'POST', body: JSON.stringify({ enabled }) }),
   revealCode: (id: string) =>
     apiFetch(`/admin/codes/${id}/reveal`, { method: 'POST' }),
   voidCode: (id: string) =>
@@ -248,7 +259,11 @@ export const api = {
       body: JSON.stringify({ product_id: productId, amount, reference_id: referenceId }),
     }),
   customerProfile: () => apiFetch('/customer/profile'),
-  customerBecomeMerchant: (data: { storeName: string; storeEmail: string; currency?: string }) =>
+  customerBecomeMerchant: (data: {
+    storeName: string; storeEmail: string; currency?: string;
+    firstName: string; lastName: string; phone: string;
+    idDocType: string; idFrontImage: string; idBackImage: string; businessNtn: string;
+  }) =>
     apiFetch('/customer/become-merchant', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -279,6 +294,15 @@ export const api = {
     apiFetch(`/admin/support/threads/${merchantId}/messages`, { method: 'POST', body: JSON.stringify({ body: bodyText }) }),
 
   // Catalog endpoints
+  listBrands: (activeOnly = false) =>
+    apiFetch(`/admin/catalog/brands${activeOnly ? '?active=true' : ''}`),
+  createBrand: (data: any) =>
+    apiFetch('/admin/catalog/brands', { method: 'POST', body: JSON.stringify(data) }),
+  updateBrand: (id: string, data: any) =>
+    apiFetch(`/admin/catalog/brands/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteBrand: (id: string) =>
+    apiFetch(`/admin/catalog/brands/${id}`, { method: 'DELETE' }),
+
   listCategories: (activeOnly = false) =>
     apiFetch(`/admin/catalog/categories${activeOnly ? '?active=true' : ''}`),
   createCategory: (data: any) =>
@@ -337,4 +361,23 @@ export const api = {
     }),
   getEssentialsAvailability: (productId: string) =>
     apiFetch(`/admin/products/${productId}/essentials/availability`),
+
+  // SKU Mapping (Connected Products) — ADMIN-WIDE view across ALL merchants' synced
+  // storefront products (WooCommerce, etc.), mapping each SKU to an internal
+  // Product / Denomination / Variant so incoming webhook orders fulfill correctly.
+  // NOTE: distinct from the merchant-scoped `listConnectedProducts`/`updateConnectedProduct`
+  // above (which hit /webhooks/connected-products for the logged-in merchant only).
+  adminListConnectedProducts: (params?: { merchantId?: string; unmapped?: boolean }) => {
+    const qs = new URLSearchParams();
+    if (params?.merchantId) qs.set('merchantId', params.merchantId);
+    if (params?.unmapped) qs.set('unmapped', 'true');
+    const s = qs.toString();
+    return apiFetch(`/admin/connected-products${s ? `?${s}` : ''}`);
+  },
+  adminCreateConnectedProduct: (data: { merchant_id: string; platform: string; platform_sku: string; name: string; dcv_product_id?: string; dcv_denomination_id?: string; dcv_variant_id?: string }) =>
+    apiFetch('/admin/connected-products', { method: 'POST', body: JSON.stringify(data) }),
+  adminUpdateConnectedProduct: (id: string, data: { dcv_product_id?: string | null; dcv_denomination_id?: string | null; dcv_variant_id?: string | null; sku?: string; inventory_source?: string }) =>
+    apiFetch(`/admin/connected-products/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  adminDeleteConnectedProduct: (id: string) =>
+    apiFetch(`/admin/connected-products/${id}`, { method: 'DELETE' }),
 };

@@ -4,7 +4,7 @@ import { AdminAuthGuard } from './guards/admin-auth.guard';
 import { MerchantAuthGuard } from './guards/merchant-auth.guard';
 import { LoginRateLimitGuard } from './guards/login-rate-limit.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
-import { AdminLoginDto, MerchantLoginDto, MerchantRegisterDto, CustomerRegisterDto, CustomerLoginDto, RefreshTokenDto } from '../dto/auth.dto';
+import { AdminLoginDto, MerchantLoginDto, CustomerRegisterDto, CustomerLoginDto, RefreshTokenDto } from '../dto/auth.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -28,13 +28,6 @@ export class AuthController {
   @UseGuards(LoginRateLimitGuard)
   async merchantLogin(@Body() body: MerchantLoginDto, @Req() req: any) {
     return this.authService.merchantLogin(body.email, body.password, req.ip);
-  }
-
-  @Post('merchant/register')
-  @HttpCode(HttpStatus.CREATED)
-  @UseGuards(LoginRateLimitGuard)
-  async merchantRegister(@Body() body: MerchantRegisterDto, @Req() req: any) {
-    return this.authService.merchantRegister(body, req.ip);
   }
 
   @Post('merchant/refresh')

@@ -1,0 +1,75 @@
+[2m2:59:07 AM[22m [33m[1m[vite][22m[39m [33mwarning: [33mDuplicate key "listConnectedProducts" in object literal[33m
+354|    // SKU Mapping (Connected Products) — maps storefront (WooCommerce, etc.) SKUs to
+355|    // internal Product / Denomination / Variant so incoming webhook orders fulfill correctly.
+356|    listConnectedProducts: (params?: { merchantId?: string; unmapped?: boolean }) => {
+   |    ^
+357|      const qs = new URLSearchParams();
+358|      if (params?.merchantId) qs.set('merchantId', params.merchantId);
+[39m
+  Plugin: [35mvite:esbuild[39m
+  File: [36mC:/Users/lenovo/Desktop/codevault-main/apps/admin/src/lib/api.ts[39m
+[2m2:59:07 AM[22m [33m[1m[vite][22m[39m [33mwarning: [33mDuplicate key "updateConnectedProduct" in object literal[33m
+363|    createConnectedProduct: (data: { merchant_id: string; platform: string; platform_sku: string; name: string; dcv_product_id?: string; dcv_denomination_id?: string; dcv_variant_id?: string }) =>
+364|      apiFetch('/admin/connected-products', { method: 'POST', body: JSON.stringify(data) }),
+365|    updateConnectedProduct: (id: string, data: { dcv_product_id?: string | null; dcv_denomination_id?: string | null; dcv_variant_id?: string | null; sku?: string; inventory_source?: string }) =>
+   |    ^
+366|      apiFetch(`/admin/connected-products/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+367|    deleteConnectedProduct: (id: string) =>
+[39m
+  Plugin: [35mvite:esbuild[39m
+  File: [36mC:/Users/lenovo/Desktop/codevault-main/apps/admin/src/lib/api.ts[39m
+[2m3:53:47 AM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/admin/merchant-applications?status=PENDING[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1194:18)
+    at afterConnectMultiple (node:net:1784:7)
+[2m3:53:48 AM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/admin/fulfillment?limit=50&offset=0[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1194:18)
+    at afterConnectMultiple (node:net:1784:7)
+[2m4:43:07 AM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/admin/fulfillment?limit=50&offset=0[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1194:18)
+    at afterConnectMultiple (node:net:1784:7)
+[2m4:43:12 AM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/admin/merchant-applications?status=PENDING[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1194:18)
+    at afterConnectMultiple (node:net:1784:7)
+[2m4:44:02 AM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/admin/fulfillment?limit=50&offset=0[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1194:18)
+    at afterConnectMultiple (node:net:1784:7)
+[2m4:44:03 AM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/admin/merchant-applications?status=PENDING[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1194:18)
+    at afterConnectMultiple (node:net:1784:7)
+X [ERROR] Expected ";" but found ")"
+
+    vite.config.ts:32:1:
+      32 │ });
+         │  ^
+         ╵  ;
+
+[31mfailed to load config from C:\Users\lenovo\Desktop\codevault-main\apps\admin\vite.config.ts[39m
+[2m5:27:06 AM[22m [31m[1m[vite][22m[39m Build failed with 1 error:
+vite.config.ts:32:1: ERROR: Expected ";" but found ")"
+[2m5:27:06 AM[22m [31m[1m[vite][22m[39m server restart failed
+[2m5:28:47 AM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/admin/merchant-applications?status=PENDING[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1194:18)
+    at afterConnectMultiple (node:net:1784:7)
+[2m5:28:48 AM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/admin/fulfillment?limit=50&offset=0[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1194:18)
+    at afterConnectMultiple (node:net:1784:7)
+[2m6:17:09 AM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/admin/fulfillment?limit=50&offset=0[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1194:18)
+    at afterConnectMultiple (node:net:1784:7)
+[2m6:17:26 AM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/admin/fulfillment?limit=50&offset=0[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1194:18)
+    at afterConnectMultiple (node:net:1784:7)
+[2m6:17:26 AM[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/v1/admin/merchant-applications?status=PENDING[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1194:18)
+    at afterConnectMultiple (node:net:1784:7)

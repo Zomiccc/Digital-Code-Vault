@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Shield, Loader2, Lock, Mail, User, Store, Gift } from 'lucide-react';
+import { Shield, Loader2, Lock, Mail, User } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { Button, Input } from '@/components/ui';
 
@@ -49,7 +49,7 @@ export function LoginPage() {
           </div>
           <h1 className="text-3xl font-semibold tracking-tight">Digital Code Vault</h1>
           <p className="text-sm text-muted-foreground">
-            {mode === 'login' ? 'Sign in to your account' : 'Create a customer account'}
+            {mode === 'login' ? 'Sign in to your account' : 'Create your account'}
           </p>
         </div>
 
@@ -65,7 +65,7 @@ export function LoginPage() {
             onClick={() => { setMode('register'); setError(''); }}
             className={`flex-1 rounded-lg py-2 text-sm font-medium transition-all ${mode === 'register' ? 'bg-primary text-primary-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
           >
-            Register as Customer
+            Create Account
           </button>
         </div>
 
@@ -117,14 +117,9 @@ export function LoginPage() {
             {loading ? 'Please wait...' : mode === 'login' ? 'Sign In' : 'Create Account'}
           </Button>
 
-          {mode === 'login' && (
-            <p className="text-center text-xs text-muted-foreground">
-              Admin, merchant, or customer credentials — we'll detect your role automatically
-            </p>
-          )}
           {mode === 'register' && (
             <p className="text-center text-xs text-muted-foreground">
-              Register as a customer to browse and purchase digital codes. You can upgrade to merchant later.
+              Want to sell codes? Create an account first — you can apply as a merchant from your dashboard.
             </p>
           )}
         </form>

@@ -10,6 +10,7 @@ import { BulkUploadPage } from '@/pages/BulkUploadPage';
 import { FulfillmentPage } from '@/pages/FulfillmentPage';
 import { CatalogPage } from '@/pages/CatalogPage';
 import { FulfillmentPresetsPage } from '@/pages/FulfillmentPresetsPage';
+import { SkuMappingPage } from '@/pages/SkuMappingPage';
 import { SupportInboxPage } from '@/pages/SupportInboxPage';
 import { MerchantChatWidget } from '@/components/MerchantChatWidget';
 import { FinancePage } from '@/pages/FinancePage';
@@ -62,6 +63,7 @@ function ProtectedRoutes() {
             <Route path="/admin/products" element={<ProductsPage />} />
             <Route path="/admin/catalog" element={<CatalogPage />} />
             <Route path="/admin/presets" element={<FulfillmentPresetsPage />} />
+            <Route path="/admin/sku-mapping" element={<SkuMappingPage />} />
             <Route path="/admin/support" element={<SupportInboxPage />} />
             <Route path="/admin/inventory" element={<InventoryPage />} />
             <Route path="/admin/upload" element={<BulkUploadPage />} />

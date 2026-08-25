@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Card, Button, Input, Badge, AddressWithMapsLink } from '@/components/ui';
-import { Gift, ShoppingBag, Copy, Check, Store, ArrowRight, Package, Loader2 } from 'lucide-react';
+import { Gift, ShoppingBag, Copy, Check, Store, ArrowRight, Package, Loader2, Clock, ImageIcon } from 'lucide-react';
 
 export function CustomerDashboardPage() {
   const { data: profile } = useQuery({ queryKey: ['customer-profile'], queryFn: api.customerProfile });
@@ -18,6 +18,21 @@ export function CustomerDashboardPage() {
         <p className="text-sm text-muted-foreground">Welcome back, {profile?.name || 'Customer'}</p>
       </div>
 
+      {!profile?.isMerchant && profile?.merchantAppStatus !== 'PENDING' && (
+        <Card className="border-primary/30 bg-primary/5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-semibold">Want to sell digital codes?</p>
+              <p className="text-sm text-muted-foreground">Register as a merchant — submit your details and start selling after approval.</p>
+            </div>
+            <a href="/customer/become-merchant">
+              <Button>
+                <Store className="mr-2 h-4 w-4" /> Register as Merchant
+              </Button>
+            </a>
+          </div>
+        </Card>
+      )}
       {profile?.isMerchant && (
         <Card className="border-primary/30 bg-primary/5">
           <div className="flex items-center gap-3">
@@ -234,11 +249,41 @@ export function CustomerBecomeMerchantPage() {
   const { data: profile } = useQuery({ queryKey: ['customer-profile'], queryFn: api.customerProfile });
   const [storeName, setStoreName] = useState('');
   const [storeEmail, setStoreEmail] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [idDocType, setIdDocType] = useState('CNIC');
+  const [businessNtn, setBusinessNtn] = useState('');
+  const [idFrontImage, setIdFrontImage] = useState<string | null>(null);
+  const [idBackImage, setIdBackImage] = useState<string | null>(null);
+  const frontRef = useRef<HTMLInputElement>(null);
+  const backRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
+  const pickImage = (file: File | undefined, setter: (v: string) => void) => {
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setError('ID image too large — please upload under 2 MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setter(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
   const mutation = useMutation({
-    mutationFn: () => api.customerBecomeMerchant({ storeName, storeEmail }),
+    mutationFn: () => api.customerBecomeMerchant({
+      storeName,
+      storeEmail,
+      firstName,
+      lastName,
+      phone,
+      idDocType,
+      idFrontImage: idFrontImage!,
+      idBackImage: idBackImage!,
+      businessNtn,
+    }),
     onSuccess: () => {
       setSuccess(true);
       setError('');
@@ -246,14 +291,17 @@ export function CustomerBecomeMerchantPage() {
     onError: (err: any) => setError(err.message || 'Failed to submit application'),
   });
 
-  if (success || profile?.merchantAppStatus === 'PENDING') {
+  if ((success || profile?.merchantAppStatus === 'PENDING') && !profile?.isMerchant) {
     return (
-      <div className="space-y-8">
+      <div className="space-y-8 animate-slide-up">
         <Card className="border-amber-500/30 bg-amber-500/5">
-          <div className="text-center py-8 space-y-3">
-            <Store className="h-12 w-12 text-amber-500 mx-auto" />
-            <h2 className="text-xl font-bold text-amber-500">Application Submitted</h2>
-            <p className="text-muted-foreground">Your merchant application is pending admin review. You'll be able to access the merchant dashboard once approved.</p>
+          <div className="text-center py-10 space-y-3">
+            <Clock className="h-12 w-12 text-amber-500 mx-auto" />
+            <h2 className="text-xl font-bold text-amber-500">Waiting for Admin Approval</h2>
+            <p className="max-w-md mx-auto text-sm text-muted-foreground">
+              Your merchant application and KYC documents have been submitted.
+              An admin will verify your details — you'll be able to access the merchant dashboard once approved.
+            </p>
           </div>
         </Card>
       </div>
@@ -275,39 +323,100 @@ export function CustomerBecomeMerchantPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 animate-slide-up">
       <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Become a Merchant</h1>
-        <p className="text-sm text-muted-foreground">Submit an application to start selling digital codes</p>
+        <h1 className="text-3xl font-semibold tracking-tight">Register as Merchant</h1>
+        <p className="text-sm text-muted-foreground">Submit your details and documents — an admin will review and approve your store</p>
       </div>
 
-      <Card>
-        <div className="space-y-4">
-          <div className="rounded-lg bg-primary/5 border border-primary/20 px-4 py-3 text-sm">
-            <p className="font-semibold text-primary mb-1">What you get as a merchant:</p>
-            <ul className="space-y-1 text-muted-foreground">
-              <li>• Wallet-based payment system</li>
-              <li>• API keys for programmatic access</li>
-              <li>• Webhook notifications for events</li>
-              <li>• Order management dashboard</li>
-              <li>• Access to all products and denominations</li>
-            </ul>
-          </div>
-
-          <Input label="Store Name" value={storeName} onChange={(e) => setStoreName(e.target.value)} placeholder="My Digital Store" required />
-          <Input label="Store Email" type="email" value={storeEmail} onChange={(e) => setStoreEmail(e.target.value)} placeholder="store@example.com" required />
-
-          {error && <div className="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
-
-          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !storeName || !storeEmail}>
-            {mutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Store className="mr-2 h-4 w-4" />}
-            {mutation.isPending ? 'Submitting...' : 'Submit Application'}
-            {!mutation.isPending && <ArrowRight className="ml-2 h-4 w-4" />}
-          </Button>
-          <p className="text-xs text-muted-foreground">Your application will be reviewed by an admin. You'll use your existing login credentials once approved.</p>
+      <Card className="space-y-5">
+        <div className="rounded-lg bg-primary/5 border border-primary/20 px-4 py-3 text-sm">
+          <p className="font-semibold text-primary mb-1">Merchant benefits:</p>
+          <p className="text-muted-foreground">Prepaid wallet · API keys · Webhook notifications · Order dashboard · Full catalog access</p>
         </div>
+
+        {/* Business details */}
+        <div>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Business details</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input label="Store Name *" value={storeName} onChange={(e: any) => setStoreName(e.target.value)} placeholder="My Digital Store" required />
+            <Input label="Store Email *" type="email" value={storeEmail} onChange={(e: any) => setStoreEmail(e.target.value)} placeholder="store@example.com" required />
+          </div>
+        </div>
+
+        {/* Personal details */}
+        <div>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Personal details</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input label="First Name *" value={firstName} onChange={(e: any) => setFirstName(e.target.value)} placeholder="John" required />
+            <Input label="Last Name *" value={lastName} onChange={(e: any) => setLastName(e.target.value)} placeholder="Doe" required />
+          </div>
+          <div className="mt-4">
+            <Input label="Phone Number *" type="tel" value={phone} onChange={(e: any) => setPhone(e.target.value)} placeholder="+92 3XX XXXXXXX" required />
+          </div>
+        </div>
+
+        {/* ID document */}
+        <div>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Identity document</p>
+          <div className="mb-4 flex gap-2">
+            {['CNIC', 'Passport', 'License'].map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setIdDocType(t.toUpperCase())}
+                className={`flex-1 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                  idDocType === t.toUpperCase() ? 'border-primary bg-primary/10 text-primary font-medium' : 'border-border hover:border-primary/40'
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <input ref={frontRef} type="file" accept="image/*" className="hidden" onChange={(e) => pickImage(e.target.files?.[0], setIdFrontImage)} />
+          <input ref={backRef} type="file" accept="image/*" className="hidden" onChange={(e) => pickImage(e.target.files?.[0], setIdBackImage)} />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <button type="button" onClick={() => frontRef.current?.click()} className={`flex flex-col items-center gap-2 rounded-xl border border-dashed p-5 text-center text-xs transition-colors ${idFrontImage ? 'border-emerald-500/60 text-emerald-500' : 'border-border text-muted-foreground hover:border-primary/50'}`}>
+              {idFrontImage ? (
+                <>
+                  <img src={idFrontImage} alt="front" className="h-24 w-full rounded-lg object-cover" />
+                  <span>Front picture ✓ (tap to change)</span>
+                </>
+              ) : (
+                <><ImageIcon className="h-5 w-5" /> Front Picture *</>
+              )}
+            </button>
+            <button type="button" onClick={() => backRef.current?.click()} className={`flex flex-col items-center gap-2 rounded-xl border border-dashed p-5 text-center text-xs transition-colors ${idBackImage ? 'border-emerald-500/60 text-emerald-500' : 'border-border text-muted-foreground hover:border-primary/50'}`}>
+              {idBackImage ? (
+                <>
+                  <img src={idBackImage} alt="back" className="h-24 w-full rounded-lg object-cover" />
+                  <span>Back picture ✓ (tap to change)</span>
+                </>
+              ) : (
+                <><ImageIcon className="h-5 w-5" /> Back Picture *</>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* NTN */}
+        <Input label="Business NTN Number *" value={businessNtn} onChange={(e: any) => setBusinessNtn(e.target.value)} placeholder="e.g. 1234567-8" required />
+
+        {error && <div className="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
+
+        <Button
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending || !storeName || !storeEmail || !firstName || !lastName || !phone || !businessNtn || !idFrontImage || !idBackImage}
+          size="lg"
+          className="w-full"
+        >
+          {mutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Store className="mr-2 h-4 w-4" />}
+          {mutation.isPending ? 'Submitting...' : 'Submit for Admin Approval'}
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          Your documents are stored encrypted. Once approved, you'll sign in with the same credentials and get the merchant dashboard.
+        </p>
       </Card>
     </div>
   );
 }
-

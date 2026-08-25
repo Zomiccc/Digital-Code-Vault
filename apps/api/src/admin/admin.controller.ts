@@ -12,6 +12,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WalletService } from '../wallet/wallet.service';
 import { DeliveryService } from '../delivery/delivery.service';
 import { SupportService } from '../merchants/support.service';
+import { FulfillmentService } from '../fulfillment/fulfillment.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -37,6 +38,7 @@ export class AdminController {
     private walletService: WalletService,
     private deliveryService: DeliveryService,
     private supportService: SupportService,
+    private fulfillmentService: FulfillmentService,
   ) {}
 
   @Get('stats')
@@ -228,7 +230,73 @@ export class AdminController {
       user.id,
       body.supplier_id,
       req.ip,
+      { costPerCode: body.cost_per_code, currency: body.currency, note: body.note },
     );
+  }
+
+  // ─── Manual order creation (admin) ───
+
+  @Post('orders/create')
+  @Roles('SUPER_ADMIN', 'SUPPORT', 'FINANCE')
+  async createManualOrder(@Body() body: {
+    merchantId?: string; productId: string; amount: number; currency?: string;
+    variantId?: string; customerEmail?: string; customerName?: string;
+  }, @CurrentUser() user: any, @Req() req: any) {
+    if (!body.productId || !body.amount) {
+      throw new BadRequestException('productId and amount are required');
+    }
+
+    // Admin manual orders are the platform's own responsibility — they are attached
+    // to an internal platform merchant and NO merchant wallet is charged.
+    let platformMerchant = await this.prisma.merchant.findUnique({
+      where: { email: 'admin-orders@platform.internal' },
+    });
+    if (!platformMerchant) {
+      platformMerchant = await this.prisma.merchant.create({
+        data: {
+          name: 'Admin Manual Orders',
+          email: 'admin-orders@platform.internal',
+          status: 'ACTIVE',
+          currency: 'USD',
+          allowedProductIds: JSON.stringify([]),
+        },
+      });
+    }
+
+    const result = await this.fulfillmentService.createFulfillment({
+      merchantId: platformMerchant.id,
+      productId: body.productId,
+      amount: Number(body.amount),
+      currency: body.currency || 'USD',
+      referenceId: `admin-${user.id.slice(0, 8)}-${Date.now()}`,
+      idempotencyKey: `admin-manual-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      customerEmail: body.customerEmail,
+      customerName: body.customerName,
+      actorType: 'ADMIN',
+      actorId: user.id,
+      ip: req.ip,
+      variantId: body.variantId || undefined,
+    });
+    return result;
+  }
+
+  // ─── Emergency stop ───
+
+  @Get('system/emergency')
+  async getEmergencyStop() {
+    const setting = await this.prisma.platformSetting.findUnique({ where: { key: 'EMERGENCY_STOP' } });
+    return { active: setting?.value === 'true', updatedAt: setting?.updatedAt || null };
+  }
+
+  @Post('system/emergency')
+  @Roles('SUPER_ADMIN')
+  async setEmergencyStop(@Body() body: { enabled: boolean }, @CurrentUser() user: any) {
+    await this.prisma.platformSetting.upsert({
+      where: { key: 'EMERGENCY_STOP' },
+      create: { key: 'EMERGENCY_STOP', value: body.enabled ? 'true' : 'false' },
+      update: { value: body.enabled ? 'true' : 'false' },
+    });
+    return { active: body.enabled };
   }
 
   @Post('codes/:id/reveal')
@@ -378,5 +446,87 @@ export class AdminController {
   @Post('wallet/initialize')
   async initializeWallet(@Body() body: { amount: number; description?: string }, @CurrentUser() user: any, @Req() req: any) {
     return this.walletService.initializeAdminWallet(body.amount, body.description || 'Manual funding', user.id, req.ip);
+  }
+
+  // ─── SKU Mapping (Connected Products) ───
+  // Admin-wide view across ALL merchants' synced storefront products (WooCommerce, etc.)
+  // so the platform's product/denomination/variant can be mapped to each incoming SKU.
+
+  @Post('connected-products')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async createConnectedProductAdmin(@Body() body: {
+    merchant_id: string; platform: string; platform_sku: string; name: string;
+    dcv_product_id?: string; dcv_denomination_id?: string; dcv_variant_id?: string;
+  }) {
+    if (!body.merchant_id || !body.platform || !body.platform_sku || !body.name) {
+      throw new BadRequestException('merchant_id, platform, platform_sku and name are required');
+    }
+    return this.prisma.connectedProduct.create({
+      data: {
+        merchantId: body.merchant_id,
+        platform: body.platform,
+        platformSku: body.platform_sku,
+        sku: body.platform_sku,
+        name: body.name,
+        dcvProductId: body.dcv_product_id || null,
+        dcvDenominationId: body.dcv_denomination_id || null,
+        dcvVariantId: body.dcv_variant_id || null,
+        inventorySource: 'DCV',
+        status: 'ACTIVE',
+      },
+      include: {
+        merchant: { select: { id: true, name: true, email: true } },
+        dcvProduct: { select: { id: true, name: true, region: true } },
+      },
+    });
+  }
+
+  @Get('connected-products')
+  async listConnectedProductsAdmin(@Query('merchantId') merchantId?: string, @Query('unmapped') unmapped?: string) {
+    return this.prisma.connectedProduct.findMany({
+      where: {
+        ...(merchantId ? { merchantId } : {}),
+        ...(unmapped === 'true' ? { dcvProductId: null } : {}),
+      },
+      include: {
+        merchant: { select: { id: true, name: true, email: true } },
+        dcvProduct: { select: { id: true, name: true, region: true } },
+      },
+      orderBy: { lastSyncedAt: 'desc' },
+      take: 500,
+    });
+  }
+
+  @Patch('connected-products/:id')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async updateConnectedProductAdmin(
+    @Param('id') id: string,
+    @Body() body: { dcv_product_id?: string | null; dcv_denomination_id?: string | null; dcv_variant_id?: string | null; sku?: string; inventory_source?: string },
+  ) {
+    const cp = await this.prisma.connectedProduct.findUnique({ where: { id } });
+    if (!cp) throw new NotFoundException('Connected product not found');
+
+    const data: any = {};
+    if (body.dcv_product_id !== undefined) data.dcvProductId = body.dcv_product_id || null;
+    if (body.dcv_denomination_id !== undefined) data.dcvDenominationId = body.dcv_denomination_id || null;
+    if (body.dcv_variant_id !== undefined) data.dcvVariantId = body.dcv_variant_id || null;
+    if (body.sku !== undefined) data.platformSku = body.sku || null;
+    if (body.inventory_source !== undefined) data.inventorySource = body.inventory_source;
+
+    return this.prisma.connectedProduct.update({
+      where: { id },
+      data,
+      include: {
+        merchant: { select: { id: true, name: true, email: true } },
+        dcvProduct: { select: { id: true, name: true, region: true } },
+      },
+    });
+  }
+
+  @Delete('connected-products/:id')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async deleteConnectedProductAdmin(@Param('id') id: string) {
+    await this.prisma.connectedProduct.delete({ where: { id } });
+    return { id, deleted: true };
   }
 }

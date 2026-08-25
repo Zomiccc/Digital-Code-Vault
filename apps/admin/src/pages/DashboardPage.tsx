@@ -1,16 +1,33 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import {
   Users, Package, Database, FileText, TrendingUp, AlertCircle,
-  ShieldCheck, Zap, Lock,
+  ShieldCheck, Zap, Lock, PowerOff, Power,
 } from 'lucide-react';
 import { api } from '@/lib/api';
-import { Card, StatCard, Badge } from '@/components/ui';
+import { Card, StatCard, Badge, Button } from '@/components/ui';
 import { statusColor } from '@/lib/utils';
 
 export function DashboardPage() {
+  const queryClient = useQueryClient();
+  const [confirmEmergency, setConfirmEmergency] = useState(false);
   const { data: stats, isLoading } = useQuery({
     queryKey: ['stats'],
     queryFn: api.getStats,
+  });
+  const { data: emergency } = useQuery({
+    queryKey: ['emergency-stop'],
+    queryFn: api.getEmergencyStop,
+    refetchInterval: 20000,
+  });
+  const emergencyActive = !!emergency?.active;
+
+  const emergencyMutation = useMutation({
+    mutationFn: (enabled: boolean) => api.setEmergencyStop(enabled),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['emergency-stop'] });
+      setConfirmEmergency(false);
+    },
   });
   const { data: inventory } = useQuery({
     queryKey: ['inventory-stats'],
@@ -38,6 +55,46 @@ export function DashboardPage() {
         <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
         <p className="text-sm text-muted-foreground">Real-time platform overview and security posture</p>
       </div>
+
+      {/* ─── Emergency Stop ─── */}
+      <Card className={emergencyActive ? 'border-red-500/60 bg-red-500/10' : 'border-border'}>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${emergencyActive ? 'bg-red-500/20 text-red-500' : 'bg-secondary text-secondary-foreground'}`}>
+              <PowerOff className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="font-semibold">Emergency Switch</p>
+              <p className="text-xs text-muted-foreground">
+                {emergencyActive
+                  ? 'ACTIVE — all merchant logins blocked and code delivery paused platform-wide.'
+                  : 'Instantly pause every merchant account and stop all code delivery.'}
+              </p>
+            </div>
+          </div>
+          <Button
+            variant={emergencyActive ? 'outline' : 'destructive'}
+            onClick={() => (emergencyActive ? emergencyMutation.mutate(false) : setConfirmEmergency(true))}
+            disabled={emergencyMutation.isPending}
+          >
+            {emergencyActive ? <><Power className="mr-2 h-4 w-4" /> Resume Platform</> : <><PowerOff className="mr-2 h-4 w-4" /> Emergency Stop All</>}
+          </Button>
+        </div>
+        {confirmEmergency && (
+          <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/5 p-4">
+            <p className="text-sm font-medium text-red-400">Stop everything?</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Merchants cannot log in and no codes will be delivered until you resume. Admin access stays open.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button onClick={() => emergencyMutation.mutate(true)} disabled={emergencyMutation.isPending} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700">
+                Yes, STOP EVERYTHING
+              </button>
+              <button onClick={() => setConfirmEmergency(false)} className="rounded-lg border border-border px-4 py-2 text-sm">Cancel</button>
+            </div>
+          </div>
+        )}
+      </Card>
 
       {/* Trust badges */}
       <div className="flex flex-wrap gap-3">

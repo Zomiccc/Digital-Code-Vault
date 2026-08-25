@@ -18,23 +18,6 @@ export class MerchantLoginDto {
   password!: string;
 }
 
-export class MerchantRegisterDto {
-  @IsString()
-  @IsNotEmpty()
-  name!: string;
-
-  @IsEmail()
-  email!: string;
-
-  @IsString()
-  @MinLength(8)
-  password!: string;
-
-  @IsOptional()
-  @IsString()
-  currency?: string;
-}
-
 export class RefreshTokenDto {
   @IsString()
   @IsNotEmpty()

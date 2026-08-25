@@ -254,39 +254,25 @@ export function MerchantWalletPage() {
               Send exactly <strong className="text-primary">${parseFloat(amount || '0').toFixed(2)} USD</strong> to any account below.
             </div>
 
-            {/* EasyPaisa */}
-            {paymentDetails?.easypaisa?.accountNumber && (
-              <Card className="p-4">
+            {(paymentDetails?.accounts || []).map((acc: any) => (
+              <Card key={acc.kind} className="p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 font-semibold">
-                    <Smartphone className="h-4 w-4 text-emerald-400" /> EasyPaisa
+                    {acc.kind === 'NayaPay' ? <Smartphone className="h-4 w-4 text-emerald-400" /> : <Landmark className="h-4 w-4 text-sky-400" />}
+                    {acc.kind}
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => copyText(paymentDetails.easypaisa.accountNumber)}>
-                    <Copy className="mr-1 h-3 w-3" /> Copy
-                  </Button>
-                </div>
-                <div className="mt-2 space-y-0.5 text-sm">
-                  <p><span className="text-muted-foreground">Account Title:</span> {paymentDetails.easypaisa.accountName || '—'}</p>
-                  <p className="font-mono text-base font-semibold tracking-wide">{paymentDetails.easypaisa.accountNumber}</p>
-                </div>
-              </Card>
-            )}
-
-            {/* Banks */}
-            {(paymentDetails?.bankAccounts || []).map((b: any) => (
-              <Card key={b.bank} className="p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 font-semibold">
-                    <Landmark className="h-4 w-4 text-sky-400" /> {b.bank}
-                  </div>
-                  <Button variant="outline" size="sm" onClick={() => copyText(b.accountNumber)}>
-                    <Copy className="mr-1 h-3 w-3" /> Copy
-                  </Button>
+                  {acc.accountNumber && (
+                    <Button variant="outline" size="sm" onClick={() => copyText(acc.accountNumber)}>
+                      <Copy className="mr-1 h-3 w-3" /> Copy
+                    </Button>
+                  )}
                 </div>
                 <div className="mt-2 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
-                  <p><span className="text-muted-foreground">Title:</span> {b.accountTitle}</p>
-                  <p className="font-mono"><span className="text-muted-foreground">A/C:</span> {b.accountNumber}</p>
-                  {b.iban && <p className="font-mono sm:col-span-2 break-all"><span className="text-muted-foreground">IBAN:</span> {b.iban}</p>}
+                  {acc.accountTitle && <p><span className="text-muted-foreground">A/C Title:</span> {acc.accountTitle}</p>}
+                  {acc.merchantTitle && <p><span className="text-muted-foreground">Merchant:</span> <strong>{acc.merchantTitle}</strong></p>}
+                  {acc.accountNumber && <p className="font-mono"><span className="text-muted-foreground">A/C #:</span> {acc.accountNumber}</p>}
+                  {acc.iban && <p className="font-mono sm:col-span-2 break-all"><span className="text-muted-foreground">IBAN:</span> {acc.iban}</p>}
+                  {acc.note && <p className="sm:col-span-2 text-xs text-muted-foreground">{acc.note}</p>}
                 </div>
               </Card>
             ))}

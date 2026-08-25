@@ -15,6 +15,11 @@ interface AuthContextType {
   loading: boolean;
   login: (email: string, password: string) => Promise<UnifiedUser>;
   register: (name: string, email: string, password: string) => Promise<UnifiedUser>;
+  registerMerchant: (data: {
+    name: string; email: string; password: string;
+    firstName: string; lastName: string; phone: string;
+    idDocType: string; idFrontImage: string; idBackImage: string; businessNtn: string;
+  }) => Promise<UnifiedUser>;
   logout: () => void;
 }
 
@@ -103,6 +108,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return u;
   };
 
+  const registerMerchant = async (data: {
+    name: string; email: string; password: string;
+    firstName: string; lastName: string; phone: string;
+    idDocType: string; idFrontImage: string; idBackImage: string; businessNtn: string;
+  }): Promise<UnifiedUser> => {
+    const result = await api.merchantRegister(data);
+    const u: UnifiedUser = {
+      id: result.user.id,
+      email: result.user.email,
+      name: result.user.name,
+      role: 'merchant',
+      merchantId: result.user.merchantId,
+      merchantName: result.user.merchantName,
+    };
+    setTokens(result.access_token, result.refresh_token, 'merchant');
+    setUser(u);
+    localStorage.setItem('vault_user', JSON.stringify(u));
+    return u;
+  };
+
   const logout = () => {
     clearTokens();
     localStorage.removeItem('vault_user');
@@ -111,7 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, registerMerchant, logout }}>
       {children}
     </AuthContext.Provider>
   );

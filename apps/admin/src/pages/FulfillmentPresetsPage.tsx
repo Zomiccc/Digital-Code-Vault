@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Plus, Trash2, Pencil, CheckCircle2, XCircle, Layers, Save } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Input, Select, Modal, Badge } from '@/components/ui';
+import { formatPrice, getCurrencySymbol } from '@/lib/utils';
 
 /**
  * Fulfillment Presets
@@ -112,7 +113,7 @@ function PresetsExplorer() {
               { value: '', label: productId ? '— Select Variant —' : 'Select product first' },
               ...(variants || []).map((v: any) => ({
                 value: v.id,
-                label: `${v.name} — ₨${Number(v.customerPrice).toLocaleString()}${v.active ? '' : ' ⚠ inactive'}`,
+                label: `${v.name} — ${formatPrice(v.customerPrice, v.currency)}${v.active ? '' : ' ⚠ inactive'}`,
               })),
             ]}
           />
@@ -258,6 +259,7 @@ function PresetsExplorer() {
       {showVariantModal && productId && (
         <VariantModal
           productId={productId}
+          regionCurrency={selectedProduct?.productRegions?.[0]?.region?.currency || 'USD'}
           existingCount={(variants || []).length}
           onClose={() => setShowVariantModal(false)}
         />
@@ -393,17 +395,18 @@ function PresetModal({
   );
 }
 
-function VariantModal({ productId, existingCount, onClose }: { productId: string; existingCount: number; onClose: () => void }) {
+function VariantModal({ productId, regionCurrency, existingCount, onClose }: { productId: string; regionCurrency: string; existingCount: number; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
+  const [currency, setCurrency] = useState(regionCurrency);
 
   const createMutation = useMutation({
     mutationFn: () =>
       api.createVariantForProduct(productId, {
         name,
         customerPrice: parseFloat(price),
-        currency: 'PKR',
+        currency,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['preset-variants', productId] });
@@ -417,7 +420,13 @@ function VariantModal({ productId, existingCount, onClose }: { productId: string
       <div className="space-y-4">
         <Input label="Variant name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. PS Essential: 1 Month" />
         <Input
-          label="Customer price (PKR)"
+          label="Currency (auto-detected from product region — override if needed)"
+          value={currency}
+          onChange={(e) => setCurrency(e.target.value.toUpperCase())}
+          placeholder="e.g. SAR"
+        />
+        <Input
+          label={`Customer price (${currency} ${getCurrencySymbol(currency)})`}
           type="number"
           value={price}
           onChange={(e) => setPrice(e.target.value)}

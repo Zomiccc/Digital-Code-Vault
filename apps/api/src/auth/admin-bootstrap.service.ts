@@ -30,13 +30,19 @@ export class AdminBootstrapService implements OnModuleInit {
 
     const existing = await this.prisma.adminUser.findUnique({ where: { email } });
     if (existing) {
-      // In dev mode, update the password to match the configured one
-      const passwordHash = await argon2.hash(password);
-      await this.prisma.adminUser.update({
-        where: { email },
-        data: { passwordHash, isActive: true },
-      });
-      this.logger.log(`Admin user ${email} already exists, password updated to match config`);
+      // Never overwrite an existing admin's password on boot — this would let anyone
+      // with read access to the .env file silently take over an already-configured
+      // production admin account every time the server restarts.
+      this.logger.log(`Admin user ${email} already exists — skipping bootstrap (password left unchanged)`);
+      return;
+    }
+
+    // Also guard against the case where ANY admin already exists but not with this
+    // exact bootstrap email (e.g. email was rotated) — only auto-create when the
+    // platform has zero admins, to avoid silently creating a duplicate superadmin.
+    const anyAdmin = await this.prisma.adminUser.count();
+    if (anyAdmin > 0) {
+      this.logger.log('Admin users already exist — skipping bootstrap admin creation');
       return;
     }
 

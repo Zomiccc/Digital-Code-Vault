@@ -1,3 +1,24 @@
+import * as dotenv from 'dotenv';
+import * as fs from 'fs';
+import * as path from 'path';
+
+// Load .env files (same candidates as ConfigModule.forRoot in app.module.ts)
+// and validate production config BEFORE NestFactory.create() runs. Nest calls
+// every provider's onModuleInit (DB connections, Redis, admin bootstrap, etc.)
+// as part of building the application context inside NestFactory.create() —
+// so validation must happen before that call, not after it, or a misconfigured
+// production environment could already connect/run bootstrap logic with bad
+// config before validation gets a chance to fail loudly.
+for (const candidate of ['.env', '.env.dev', '../../.env', '../../.env.dev']) {
+  const resolved = path.resolve(process.cwd(), candidate);
+  if (fs.existsSync(resolved)) {
+    dotenv.config({ path: resolved });
+  }
+}
+
+import { validateProductionEnv } from './common/production-config.validator';
+validateProductionEnv(process.env);
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -8,7 +29,6 @@ import { AppModule } from './app.module';
 import { PrismaService } from './prisma/prisma.service';
 import { SecurityHeadersMiddleware } from './common/middleware/security-headers.middleware';
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware';
-import { ProductionConfigValidator } from './common/production-config.validator';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -18,10 +38,6 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT', 3000);
-
-  // Production config validation — fails startup if critical env vars are missing
-  const configValidator = new ProductionConfigValidator(configService);
-  configValidator.validate();
 
   // CORS — must be before helmet/security headers so preflight requests are handled
   const isDev = configService.get<string>('NODE_ENV') === 'development';
@@ -109,7 +125,8 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
   await app.listen(port);
   logger.log(`Digital Code Vault API running on port ${port}`);
-  logger.log(`API base: http://localhost:${port}/api/v1`);
+  const loggedBaseUrl = appUrl || `http://localhost:${port}`;
+  logger.log(`API base: ${loggedBaseUrl}/api/v1`);
 }
 
 bootstrap();

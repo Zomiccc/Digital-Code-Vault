@@ -349,6 +349,12 @@ async function ensureVariant(productRegionId: string, v: VariantSeed, sortOrder:
 }
 
 async function main() {
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_SEED_IN_PRODUCTION !== 'true') {
+    console.error('Refusing to run demo catalog seed script in production (NODE_ENV=production).');
+    console.error('If you really intend to seed a non-production database, set ALLOW_SEED_IN_PRODUCTION=true.');
+    process.exit(1);
+  }
+
   console.log('Seeding catalog (categories, products, regions, variants)...');
 
   let productCount = 0;

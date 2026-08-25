@@ -15,12 +15,76 @@ export class CatalogService {
     private auditService: AuditService,
   ) {}
 
+  // ─── Brands (top of hierarchy: BRAND → CATEGORY → PRODUCT → VARIANT) ───
+
+  async listBrands(activeOnly = false) {
+    return this.prisma.brand.findMany({
+      where: activeOnly ? { active: true } : undefined,
+      include: { _count: { select: { categories: true } } },
+      orderBy: { sortOrder: 'asc' },
+    });
+  }
+
+  async getBrand(id: string) {
+    const brand = await this.prisma.brand.findUnique({
+      where: { id },
+      include: { categories: { orderBy: { name: 'asc' } } },
+    });
+    if (!brand) throw new NotFoundException('Brand not found');
+    return brand;
+  }
+
+  async createBrand(data: { name: string; slug?: string; description?: string; image?: string; sortOrder?: number }, actorId?: string) {
+    const slug = data.slug || slugify(data.name);
+    const existing = await this.prisma.brand.findUnique({ where: { slug } });
+    if (existing) throw new BadRequestException('Slug already exists');
+
+    const brand = await this.prisma.brand.create({
+      data: { name: data.name, slug, description: data.description, image: data.image, sortOrder: data.sortOrder || 0 },
+    });
+
+    if (actorId) {
+      await this.auditService.log({ actorType: 'ADMIN', actorId, action: 'brand.create', entity: 'Brand', entityId: brand.id, metadata: { name: brand.name } });
+    }
+    return brand;
+  }
+
+  async updateBrand(id: string, data: any, actorId?: string) {
+    const brand = await this.prisma.brand.findUnique({ where: { id } });
+    if (!brand) throw new NotFoundException('Brand not found');
+
+    const updateData: any = {};
+    if (data.name !== undefined) updateData.name = data.name;
+    if (data.slug !== undefined) updateData.slug = data.slug;
+    if (data.description !== undefined) updateData.description = data.description;
+    if (data.image !== undefined) updateData.image = data.image;
+    if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
+    if (data.active !== undefined) updateData.active = data.active;
+
+    const updated = await this.prisma.brand.update({ where: { id }, data: updateData });
+    if (actorId) {
+      await this.auditService.log({ actorType: 'ADMIN', actorId, action: 'brand.update', entity: 'Brand', entityId: id, metadata: updateData });
+    }
+    return updated;
+  }
+
+  async deleteBrand(id: string, actorId?: string) {
+    const brand = await this.prisma.brand.findUnique({ where: { id } });
+    if (!brand) throw new NotFoundException('Brand not found');
+
+    await this.prisma.brand.update({ where: { id }, data: { active: false } });
+    if (actorId) {
+      await this.auditService.log({ actorType: 'ADMIN', actorId, action: 'brand.deactivate', entity: 'Brand', entityId: id });
+    }
+    return { id, deactivated: true };
+  }
+
   // ─── Categories ───
 
   async listCategories(activeOnly = false) {
     return this.prisma.category.findMany({
       where: activeOnly ? { active: true } : undefined,
-      include: { _count: { select: { products: true } } },
+      include: { _count: { select: { products: true } }, brand: true },
       orderBy: { sortOrder: 'asc' },
     });
   }
@@ -34,13 +98,13 @@ export class CatalogService {
     return cat;
   }
 
-  async createCategory(data: { name: string; slug?: string; description?: string; image?: string; sortOrder?: number }, actorId?: string) {
+  async createCategory(data: { name: string; slug?: string; description?: string; image?: string; sortOrder?: number; brandId?: string | null }, actorId?: string) {
     const slug = data.slug || slugify(data.name);
     const existing = await this.prisma.category.findUnique({ where: { slug } });
     if (existing) throw new BadRequestException('Slug already exists');
 
     const cat = await this.prisma.category.create({
-      data: { name: data.name, slug, description: data.description, image: data.image, sortOrder: data.sortOrder || 0 },
+      data: { name: data.name, slug, description: data.description, image: data.image, sortOrder: data.sortOrder || 0, brandId: data.brandId || null },
     });
 
     if (actorId) {
@@ -60,6 +124,7 @@ export class CatalogService {
     if (data.image !== undefined) updateData.image = data.image;
     if (data.sortOrder !== undefined) updateData.sortOrder = data.sortOrder;
     if (data.active !== undefined) updateData.active = data.active;
+    if (data.brandId !== undefined) updateData.brandId = data.brandId || null;
 
     const updated = await this.prisma.category.update({ where: { id }, data: updateData });
     if (actorId) {
@@ -228,6 +293,8 @@ export class CatalogService {
     });
     if (existing) throw new BadRequestException('A variant with this name already exists for this product');
 
+    // Currency is NEVER hardcoded: default to the product's own region currency
+    // (e.g. KSA → SAR, Turkey → TRY) unless the caller explicitly overrides it.
     const variant = await this.prisma.variant.create({
       data: {
         productRegionId: productRegion.id,
@@ -235,7 +302,7 @@ export class CatalogService {
         slug,
         description: data.description,
         customerPrice: data.customerPrice,
-        currency: data.currency || 'USD',
+        currency: data.currency || region.currency,
       },
       include: { productRegion: { include: { product: true, region: true } } },
     });
@@ -253,6 +320,12 @@ export class CatalogService {
     });
     if (existing) throw new BadRequestException('Variant slug already exists for this product-region');
 
+    const productRegionForCurrency = await this.prisma.productRegion.findUnique({
+      where: { id: data.productRegionId },
+      include: { region: true },
+    });
+    if (!productRegionForCurrency) throw new NotFoundException('Product-Region not found');
+
     const variant = await this.prisma.variant.create({
       data: {
         productRegionId: data.productRegionId,
@@ -260,7 +333,7 @@ export class CatalogService {
         slug,
         description: data.description,
         customerPrice: data.customerPrice,
-        currency: data.currency || 'USD',
+        currency: data.currency || productRegionForCurrency.region.currency,
         sortOrder: data.sortOrder || 0,
       },
       include: { productRegion: { include: { product: true, region: true } } },
@@ -456,6 +529,7 @@ export class CatalogService {
     const categories = await this.prisma.category.findMany({
       where: { active: true },
       include: {
+        brand: true,
         products: {
           where: { status: 'ACTIVE' },
           include: {

@@ -188,17 +188,30 @@ export class CustomerDashboardController {
   @Post('become-merchant')
   @UseGuards(CustomerAuthGuard)
   async becomeMerchant(@Body() body: any, @Req() req: any) {
-    if (!body.storeName || !body.storeEmail) {
+    const required = ['storeName', 'storeEmail', 'firstName', 'lastName', 'phone', 'idDocType', 'idFrontImage', 'idBackImage', 'businessNtn'];
+    const missing = required.filter((f) => !body[f]);
+    if (missing.length > 0) {
       throw new BadRequestException({
         error: 'INVALID_REQUEST',
         code: 'MISSING_FIELDS',
-        message: 'storeName and storeEmail are required',
+        message: `Missing required fields: ${missing.join(', ')}`,
       });
     }
 
     return this.authService.customerBecomeMerchant(
       req.user.id,
-      { storeName: body.storeName, storeEmail: body.storeEmail, currency: body.currency },
+      {
+        storeName: body.storeName,
+        storeEmail: body.storeEmail,
+        currency: body.currency,
+        firstName: body.firstName,
+        lastName: body.lastName,
+        phone: body.phone,
+        idDocType: body.idDocType,
+        idFrontImage: body.idFrontImage,
+        idBackImage: body.idBackImage,
+        businessNtn: body.businessNtn,
+      },
       req.ip,
     );
   }

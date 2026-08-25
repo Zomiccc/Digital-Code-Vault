@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Package, Database, Upload, FileText,
   ScrollText, UserCog, LogOut, Menu, X, Shield, ChevronRight,
   Wallet, Key, ShoppingCart, Webhook, Store, Gift, Plug, Layers, FolderTree,
-  MessagesSquare,
+  MessagesSquare, Tags,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
@@ -16,6 +16,7 @@ const adminNav = [
   { to: '/admin/products', label: 'Products', icon: Package },
   { to: '/admin/catalog', label: 'Catalog', icon: FolderTree },
   { to: '/admin/presets', label: 'Fulfillment Presets', icon: Layers },
+  { to: '/admin/sku-mapping', label: 'SKU Mapping', icon: Tags },
   { to: '/admin/inventory', label: 'Inventory', icon: Database },
   { to: '/admin/upload', label: 'Bulk Upload', icon: Upload },
   { to: '/admin/fulfillment', label: 'Fulfillment', icon: FileText },

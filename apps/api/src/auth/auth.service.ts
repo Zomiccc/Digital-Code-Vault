@@ -93,54 +93,26 @@ export class AuthService {
     };
   }
 
-  // ─── Merchant Auth ───
+  // ─── Emergency Stop ───
 
-  async merchantRegister(data: { name: string; email: string; password: string; currency?: string }, ip?: string) {
-    const existing = await this.prisma.merchant.findUnique({ where: { email: data.email } });
-    if (existing) {
-      throw new ConflictException('An account with this email already exists');
-    }
-
-    const passwordHash = await argon2.hash(data.password);
-
-    const merchant = await this.prisma.merchant.create({
-      data: {
-        name: data.name,
-        email: data.email,
-        walletBalance: 0,
-        currency: data.currency || 'USD',
-        status: 'ACTIVE',
-        allowedProductIds: JSON.stringify([]),
-        users: {
-          create: {
-            email: data.email,
-            name: data.name,
-            passwordHash,
-          },
-        },
-      },
-      include: { users: true },
-    });
-
-    await this.auditService.log({
-      actorType: 'MERCHANT',
-      actorId: merchant.users[0].id,
-      action: 'merchant.register',
-      entity: 'Merchant',
-      entityId: merchant.id,
-      ip,
-    });
-
-    const user = merchant.users[0];
-    const tokens = await this.generateMerchantTokens(user.id, user.email, merchant.id);
-
-    return {
-      user: { id: user.id, email: user.email, name: user.name, merchantId: merchant.id, merchantName: merchant.name },
-      ...tokens,
-    };
+  /** True when the admin has flipped the platform-wide emergency switch. */
+  async isEmergencyStopActive(): Promise<boolean> {
+    const setting = await this.prisma.platformSetting.findUnique({ where: { key: 'EMERGENCY_STOP' } });
+    return setting?.value === 'true';
   }
 
+  // ─── Merchant Auth ───
+
+  // NOTE: Direct merchant registration was removed.
+  // Merchants are created ONLY via customer application + admin approval,
+  // or manually by an admin.
+
   async merchantLogin(email: string, password: string, ip?: string) {
+    // Emergency stop: pause ALL merchant accounts platform-wide
+    if (await this.isEmergencyStopActive()) {
+      throw new UnauthorizedException('Platform is temporarily paused for maintenance. Please try again later.');
+    }
+
     const user = await this.prisma.merchantUser.findUnique({
       where: { email },
       include: { merchant: true },
@@ -327,7 +299,11 @@ export class AuthService {
     };
   }
 
-  async customerBecomeMerchant(customerId: string, data: { storeName: string; storeEmail: string; currency?: string }, ip?: string) {
+  async customerBecomeMerchant(customerId: string, data: {
+    storeName: string; storeEmail: string; currency?: string;
+    firstName: string; lastName: string; phone: string;
+    idDocType: string; idFrontImage: string; idBackImage: string; businessNtn: string;
+  }, ip?: string) {
     const customer = await this.prisma.customer.findUnique({ where: { id: customerId } });
     if (!customer) {
       throw new UnauthorizedException('Customer not found');
@@ -353,6 +329,14 @@ export class AuthService {
         storeName: data.storeName,
         storeEmail: data.storeEmail,
         currency: data.currency || 'USD',
+        // KYC details
+        firstName: data.firstName,
+        lastName: data.lastName,
+        phone: data.phone,
+        idDocType: data.idDocType,
+        idFrontImage: data.idFrontImage,
+        idBackImage: data.idBackImage,
+        businessNtn: data.businessNtn,
         status: 'PENDING',
       },
     });
@@ -404,6 +388,14 @@ export class AuthService {
           currency: application.currency,
           status: 'ACTIVE',
           allowedProductIds: JSON.stringify([]),
+          // Carry over the KYC details submitted with the application
+          firstName: application.firstName,
+          lastName: application.lastName,
+          phone: application.phone,
+          idDocType: application.idDocType,
+          idFrontImage: application.idFrontImage,
+          idBackImage: application.idBackImage,
+          businessNtn: application.businessNtn,
           users: {
             create: {
               email: application.customer.email,
