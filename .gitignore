@@ -13,10 +13,14 @@ connectors/webhook-sdk/node_modules/
 apps/api/.env.dev
 
 # Build output
+/dist/
 apps/api/dist/
 apps/admin/dist/
+apps/merchant/dist/
+apps/portal/dist/
 apps/api/gen.log
 connectors/webhook-sdk/dist/
+packages/shared/dist/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
