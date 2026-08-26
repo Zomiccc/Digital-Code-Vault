@@ -135,8 +135,11 @@ async function bootstrap() {
   const parentDir = path.resolve(__dirname, '..');
   const resolveFrontendDir = (name: string): string | null => {
     const candidates = [
-      path.resolve(parentDir, name, 'dist'),         // layout 1: apps/api/../<name>/dist
-      path.resolve(parentDir, 'apps', name, 'dist'),  // layout 2: dist/../apps/<name>/dist
+      // Hostinger: the build nests the frontends inside the output directory
+      // (dist/public/<name>) because only the output directory is deployed.
+      path.resolve(__dirname, 'public', name),
+      path.resolve(parentDir, name, 'dist'),          // local: apps/api/../<name>/dist
+      path.resolve(parentDir, 'apps', name, 'dist'),  // root dist/../apps/<name>/dist
     ];
     for (const candidate of candidates) {
       if (fs.existsSync(candidate)) return candidate;

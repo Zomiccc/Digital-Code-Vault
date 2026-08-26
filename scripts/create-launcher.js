@@ -43,6 +43,20 @@ if (fs.existsSync(apiNodeModules)) {
   console.log('Copied apps/api/node_modules/* to dist/node_modules/');
 }
 
+// 2c. Copy the built React frontends into dist/public/<name>.
+// Hostinger only deploys the output directory, so apps/<name>/dist is not
+// available at runtime. Nesting the frontend builds inside dist/ keeps the
+// output directory self-contained and lets main.ts serve them.
+for (const name of ['admin', 'merchant', 'portal']) {
+  const src = path.resolve(rootDir, 'apps', name, 'dist');
+  if (!fs.existsSync(src)) {
+    console.warn(`WARNING: ${name} frontend build not found at apps/${name}/dist`);
+    continue;
+  }
+  copyDir(src, path.join(distDir, 'public', name));
+  console.log(`Copied apps/${name}/dist to dist/public/${name}/`);
+}
+
 // 3. Create launcher as dist/main.js
 const launcher = [
   '// Hostinger launcher — sets NODE_PATH so the app can find all deps',
