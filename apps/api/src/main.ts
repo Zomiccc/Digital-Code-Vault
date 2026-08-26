@@ -197,4 +197,8 @@ async function bootstrap() {
   logger.log(`API base: ${loggedBaseUrl}/api/v1`);
 }
 
-bootstrap();
+bootstrap().catch((err) => {
+  console.error('=== FATAL: Application failed to start ===');
+  console.error(err);
+  process.exit(1);
+});
