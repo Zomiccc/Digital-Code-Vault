@@ -127,19 +127,32 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
   // ─── Static frontend serving (single-process Hostinger deployment) ───
-  // Resolve frontend dist directories relative to apps/api/dist/main.js.
-  // In production (Hostinger), the app is started from apps/api/dist/main.js,
-  // so __dirname = apps/api/dist. Frontend builds are at apps/<name>/dist.
-  const distRoot = path.resolve(__dirname, '..');
+  // Resolve frontend dist directories. We support two layouts:
+  // 1. Running from apps/api/dist/main.js (local dev / direct start):
+  //    __dirname = apps/api/dist → frontends at ../<name>/dist
+  // 2. Running from dist/main.js (Hostinger — copied to root dist/):
+  //    __dirname = dist → frontends at ../apps/<name>/dist
+  const parentDir = path.resolve(__dirname, '..');
+  const resolveFrontendDir = (name: string): string | null => {
+    const candidates = [
+      path.resolve(parentDir, name, 'dist'),         // layout 1: apps/api/../<name>/dist
+      path.resolve(parentDir, 'apps', name, 'dist'),  // layout 2: dist/../apps/<name>/dist
+    ];
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+    return null;
+  };
   const frontends = [
-    { mount: '/merchant', dir: path.resolve(distRoot, 'merchant', 'dist') },
-    { mount: '/d',        dir: path.resolve(distRoot, 'portal', 'dist') },
-    { mount: '',          dir: path.resolve(distRoot, 'admin', 'dist') },  // root — must be last
+    { mount: '/merchant', name: 'merchant' },
+    { mount: '/d',        name: 'portal' },
+    { mount: '',          name: 'admin' },  // root — must be last
   ];
 
-  for (const { mount, dir } of frontends) {
-    if (!fs.existsSync(dir)) {
-      logger.warn(`Frontend dist not found at ${dir} — skipping ${mount || '/'}`);
+  for (const { mount, name } of frontends) {
+    const dir = resolveFrontendDir(name);
+    if (!dir) {
+      logger.warn(`Frontend dist for "${name}" not found — skipping ${mount || '/'}`);
       continue;
     }
 
