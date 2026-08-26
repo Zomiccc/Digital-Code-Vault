@@ -110,13 +110,11 @@ export const api = {
     apiFetch(`/merchant/dashboard/inventory/${id}/void`, { method: 'POST' }),
   listMerchantProducts: () => apiFetch('/merchant/dashboard/products'),
 
-  // Connected product mapping (SKU → DCV product/denomination)
+  // Connected product mapping (SKU â†’ DCV product/denomination)
   listConnectedProducts: () => apiFetch('/webhooks/connected-products'),
   updateConnectedProduct: (id: string, data: { dcv_product_id?: string; dcv_denomination_id?: string | null; inventory_source?: string }) =>
     apiFetch(`/webhooks/connected-products/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
-  getDenominations: (productId: string) =>
-    apiFetch(`/products/${productId}/denominations`),
 };
