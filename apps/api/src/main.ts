@@ -38,6 +38,15 @@ async function bootstrap() {
     rawBody: true,
   });
 
+  // Raise the body size limit above Express's 100kb default. Merchant
+  // registration and /customer/become-merchant submit ID document photos as
+  // base64 data-URLs; the UI caps each image at 2MB and base64 adds ~33%
+  // overhead, so two images can approach ~5.5MB. useBodyParser (rather than a
+  // raw express.json middleware) keeps the `rawBody: true` option above working,
+  // which webhook signature verification depends on.
+  app.useBodyParser('json', { limit: '10mb' });
+  app.useBodyParser('urlencoded', { limit: '10mb', extended: true });
+
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT', 3000);
 
