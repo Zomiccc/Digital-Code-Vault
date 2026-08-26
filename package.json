@@ -16,7 +16,7 @@
     "build:admin": "cd apps/admin && npm run build",
     "build:merchant": "cd apps/merchant && npm run build",
     "build:portal": "cd apps/portal && npm run build",
-    "build": "npm run build:shared && npm run build:api && npm run build:admin && npm run build:merchant && npm run build:portal",
+    "build": "npm run build:shared && npm run build:api",
     "db:migrate": "cd apps/api && npx prisma migrate dev",
     "db:generate": "cd apps/api && npx prisma generate",
     "db:seed": "cd apps/api && npm run seed",
