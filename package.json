@@ -19,7 +19,7 @@
     "build:portal": "cd apps/portal && npm run build",
     "prebuild": "cd apps/api && node prisma/set-provider.js && npx prisma generate --schema=prisma/schema.prisma",
     "build": "npm run build:shared && npm run build:api && npm run build:admin && npm run build:merchant && npm run build:portal && npm run build:launcher",
-    "build:launcher": "node -e \"const fs=require('fs');const p=require('path');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/main.js',`// Hostinger launcher — sets NODE_PATH so the real entry can find all deps\\nconst path=require('path');\\nconst apiNodeModules=path.resolve(__dirname,'..','apps','api','node_modules');\\nconst rootNodeModules=path.resolve(__dirname,'..','node_modules');\\nprocess.env.NODE_PATH=apiNodeModules+require('path').delimiter+rootNodeModules;\\nrequire('module').Module._initPaths();\\nrequire(path.resolve(__dirname,'..','apps','api','dist','main.js'));\\n`);console.log('Created dist/main.js launcher')\"",
+    "build:launcher": "node scripts/create-launcher.js",
     "build:copy": "node -e \"const fs=require('fs');const p=require('path');function copyDir(src,dest){if(!fs.existsSync(dest))fs.mkdirSync(dest,{recursive:true});for(const e of fs.readdirSync(src,{withFileTypes:true})){const s=p.join(src,e.name),d=p.join(dest,e.name);if(e.isDirectory())copyDir(s,d);else fs.copyFileSync(s,d)}}copyDir('apps/api/dist','dist');console.log('Copied apps/api/dist to dist/')\"",
     "db:migrate": "cd apps/api && npm run prisma:migrate",
     "db:migrate:deploy": "cd apps/api && npm run prisma:migrate:deploy",
