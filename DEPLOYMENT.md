@@ -88,6 +88,30 @@ On boot, `main.ts` loads environment variables and calls
 misconfigured production environment fails fast, before any database
 connection, Redis connection, or admin-bootstrap logic executes.
 
+### Single-process frontend serving
+
+The NestJS backend also serves the three React frontends as static assets
+with SPA fallback — no separate web server (Caddy/Nginx) or Docker
+containers required for production.
+
+| Path              | Served by          | Description                         |
+|-------------------|--------------------|-------------------------------------|
+| `/`               | Admin frontend     | Admin/merchant/customer SPA (root)  |
+| `/merchant/*`     | Merchant frontend  | Merchant dashboard SPA              |
+| `/d/*`            | Portal frontend    | Customer code delivery SPA          |
+| `/api/v1/*`       | NestJS API         | All REST API endpoints              |
+| `/api/docs`       | NestJS API         | Swagger / OpenAPI docs              |
+| `/reveal/*`       | NestJS API         | Server-rendered reveal HTML page    |
+
+SPA fallback ensures that refreshing any client-side route (e.g.
+`/admin/dashboard`, `/merchant/orders`, `/d/:token`) returns `index.html`
+instead of a 404. API routes (`/api/*`) and reveal routes (`/reveal/*`)
+are explicitly excluded from SPA fallback.
+
+The frontend dist directories are resolved relative to `apps/api/dist/`:
+`apps/admin/dist`, `apps/merchant/dist`, `apps/portal/dist`. If a dist
+directory is missing, a warning is logged but the app still starts.
+
 ## 6. Required environment variables
 
 ### `apps/api/.env` (backend)
@@ -159,21 +183,52 @@ verification (not just reviewed):
   merchant login code path is identical to the verified admin path
   (`AuthService.merchantLogin` / `merchantRefresh`).
 
-## 9. Hostinger Node.js App deployment
+## 9. Hostinger Node.js App deployment (single-process)
+
+The app runs as a **single Node.js process** — the NestJS API serves the
+pre-built React frontends (Admin, Merchant, Portal) from the same domain.
+No Docker, Caddy, Nginx, or multiple containers required.
+
+### Architecture
+
+```
+Browser → Hostinger proxy → Node.js (apps/api/dist/main.js)
+                                ├── /api/v1/*    → NestJS REST API
+                                ├── /api/docs    → Swagger UI
+                                ├── /reveal/*    → NestJS HTML reveal page
+                                ├── /merchant/*  → Merchant SPA (static + fallback)
+                                ├── /d/*         → Portal SPA (static + fallback)
+                                └── /*           → Admin SPA (static + fallback)
+```
+
+All frontend API calls use the relative path `/api/v1` (no `VITE_API_URL`
+needed since everything is same-origin).
+
+### Hostinger configuration
+
+In Hostinger's Node.js App dashboard, set:
+
+| Setting            | Value                          |
+|--------------------|--------------------------------|
+| **Node.js version**| 20+ (24.x recommended)         |
+| **Root directory** | (repo root, e.g. `domains/deliverapi.link/public_html` or wherever you uploaded) |
+| **Build command**  | `bash apps/api/deploy-build.sh` |
+| **Start command**  | `node apps/api/dist/main.js`    |
+| **Entry file**     | `apps/api/dist/main.js`         |
+
+### Prisma client issue
 
 Hostinger's shared hosting "Node.js App" feature has an unreliable build
 pipeline that may not execute `postinstall` scripts or expose environment
 variables during `npm install`. This causes `@prisma/client did not
 initialize yet` at runtime.
 
-### Root cause
+**Root cause**: The `postinstall` script runs `node prisma/set-provider.js
+&& npx prisma generate`. If `DATABASE_URL` is not available during
+`npm install`, `set-provider.js` defaults to `sqlite` and `prisma generate`
+produces a SQLite client that cannot connect to PostgreSQL.
 
-The `postinstall` script runs `node prisma/set-provider.js && npx prisma generate`.
-If `DATABASE_URL` is not available during `npm install`, `set-provider.js`
-defaults to `sqlite` and `prisma generate` produces a SQLite client that
-cannot connect to PostgreSQL.
-
-### Fixes applied
+**Fixes applied**:
 
 1. **`set-provider.js` auto-loads `.env`** — works even when env vars
    aren't exported by the shell.
@@ -223,10 +278,15 @@ Set these in Hostinger's Node.js App dashboard:
 | `JWT_SECRET` | (random string) |
 | `JWT_REFRESH_SECRET` | (random string) |
 | `ENCRYPTION_KEY` | (64 hex chars) |
-| `CORS_ORIGIN` | `https://yourdomain.com` |
-| `APP_URL` | `https://api.yourdomain.com` |
+| `CORS_ORIGIN` | `https://deliverapi.link` |
+| `APP_URL` | `https://deliverapi.link` |
 | `EMAIL_PROVIDER` | `smtp` / `sendgrid` / `resend` |
 | `SMTP_HOST` / `SMTP_PORT` / etc. | (if provider=smtp) |
+
+> **Note**: `CORS_ORIGIN` and `APP_URL` should both be your domain
+> (e.g. `https://deliverapi.link`) since the API and frontends share the
+> same origin. `VITE_API_URL` is **not needed** — frontends use the
+> relative `/api/v1` path automatically.
 
 ## 10. Recommendation: Consider Hostinger VPS
 
@@ -274,3 +334,7 @@ pm2 startup
 ```
 
 This eliminates all the shared hosting pipeline issues entirely.
+
+On a VPS, the same single-process architecture applies — the NestJS API
+serves all frontends. Use Nginx only as a TLS terminator / reverse proxy
+in front of the Node.js process.

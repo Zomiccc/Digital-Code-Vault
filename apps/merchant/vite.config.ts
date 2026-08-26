@@ -16,6 +16,7 @@ export default defineConfig(({ mode, command }) => {
     );
   }
   return {
+    base: '/merchant/',
     plugins: [react()],
     resolve: {
       alias: { '@': path.resolve(__dirname, './src') },

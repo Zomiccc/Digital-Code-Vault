@@ -1,6 +1,8 @@
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import * as express from 'express';
 
 // Load .env files (same candidates as ConfigModule.forRoot in app.module.ts)
 // and validate production config BEFORE NestFactory.create() runs. Nest calls
@@ -31,7 +33,7 @@ import { SecurityHeadersMiddleware } from './common/middleware/security-headers.
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
     rawBody: true,
   });
@@ -123,6 +125,59 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   const logger = new Logger('Bootstrap');
+
+  // ─── Static frontend serving (single-process Hostinger deployment) ───
+  // Resolve frontend dist directories relative to apps/api/dist/main.js.
+  // In production (Hostinger), the app is started from apps/api/dist/main.js,
+  // so __dirname = apps/api/dist. Frontend builds are at apps/<name>/dist.
+  const distRoot = path.resolve(__dirname, '..');
+  const frontends = [
+    { mount: '/merchant', dir: path.resolve(distRoot, 'merchant', 'dist') },
+    { mount: '/d',        dir: path.resolve(distRoot, 'portal', 'dist') },
+    { mount: '',          dir: path.resolve(distRoot, 'admin', 'dist') },  // root — must be last
+  ];
+
+  for (const { mount, dir } of frontends) {
+    if (!fs.existsSync(dir)) {
+      logger.warn(`Frontend dist not found at ${dir} — skipping ${mount || '/'}`);
+      continue;
+    }
+
+    // Serve static assets (JS, CSS, images, etc.) from the mount point.
+    // Only serve files that actually exist; no directory listing.
+    app.useStaticAssets(dir, {
+      prefix: mount || undefined,
+      index: false,
+    });
+
+    // SPA fallback: for any GET request under the mount point that doesn't
+    // match a static file, serve index.html so client-side routing works.
+    const indexHtml = path.join(dir, 'index.html');
+    const mountPath = mount || '';
+    app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+      // Only handle GET requests for HTML (not API calls or other methods)
+      if (req.method !== 'GET' || !req.accepts('html')) {
+        return next();
+      }
+      // Never intercept API, Swagger docs, or reveal routes
+      if (req.path.startsWith('/api/') || req.path.startsWith('/reveal/')) {
+        return next();
+      }
+      // Only handle requests under this mount point
+      if (mountPath && !req.path.startsWith(mountPath + '/') && req.path !== mountPath) {
+        return next();
+      }
+      // Skip if the request looks like a file (has an extension)
+      const lastSegment = req.path.split('/').pop() || '';
+      if (lastSegment.includes('.')) {
+        return next();
+      }
+      // Serve the SPA index.html
+      res.sendFile(indexHtml);
+    });
+    logger.log(`Serving frontend at ${mount || '/'}`);
+  }
+
   await app.listen(port);
   logger.log(`Digital Code Vault API running on port ${port}`);
   const loggedBaseUrl = appUrl || `http://localhost:${port}`;
