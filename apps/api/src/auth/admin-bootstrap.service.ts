@@ -15,7 +15,20 @@ export class AdminBootstrapService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    await this.bootstrapAdmin();
+    // Admin bootstrap is a convenience, not a hard requirement for the app to
+    // serve traffic. If the database is unreachable at boot (bad credentials,
+    // network hiccup, pooler restart) we log loudly but let the process keep
+    // starting so it can still call listen() — otherwise the whole deployment
+    // dies and every request 503s instead of surfacing a readable error.
+    try {
+      await this.bootstrapAdmin();
+    } catch (err) {
+      this.logger.error(
+        `Admin bootstrap failed — continuing startup. Fix the database connection and restart. Error: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
   }
 
   private async bootstrapAdmin() {
