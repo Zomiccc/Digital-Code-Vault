@@ -158,3 +158,119 @@ verification (not just reviewed):
   not re-verified in this session (admin login/refresh was). The underlying
   merchant login code path is identical to the verified admin path
   (`AuthService.merchantLogin` / `merchantRefresh`).
+
+## 9. Hostinger Node.js App deployment
+
+Hostinger's shared hosting "Node.js App" feature has an unreliable build
+pipeline that may not execute `postinstall` scripts or expose environment
+variables during `npm install`. This causes `@prisma/client did not
+initialize yet` at runtime.
+
+### Root cause
+
+The `postinstall` script runs `node prisma/set-provider.js && npx prisma generate`.
+If `DATABASE_URL` is not available during `npm install`, `set-provider.js`
+defaults to `sqlite` and `prisma generate` produces a SQLite client that
+cannot connect to PostgreSQL.
+
+### Fixes applied
+
+1. **`set-provider.js` auto-loads `.env`** — works even when env vars
+   aren't exported by the shell.
+2. **`binaryTargets` in `schema.prisma`** includes Linux targets, so
+   `prisma generate` on Windows produces binaries that work on Hostinger.
+3. **`deploy-build.sh`** — a robust build script for Hostinger's build command.
+4. **`prepare-deploy.ps1`** — a local script that pre-generates everything
+   and creates a deployment-ready zip.
+
+### Option A: Pre-generated zip (recommended)
+
+```powershell
+# From repo root:
+.\prepare-deploy.ps1 -DatabaseUrl "postgresql://user:pass@host:5432/db"
+# Or if DATABASE_URL is in apps/api/.env:
+.\prepare-deploy.ps1
+```
+
+This builds, generates the Prisma client with Linux binaries, and creates
+a zip in `./deploy-output/`. Upload it to Hostinger and set:
+
+- **Build command**: `bash apps/api/deploy-build.sh`
+- **Entry file**: `apps/api/dist/main.js`
+- **Environment variables**: Set all required vars in Hostinger's dashboard
+
+The pre-generated Prisma client is included in the zip, so even if
+`deploy-build.sh` fails, the client should already be present.
+
+### Option B: Let Hostinger generate at build time
+
+1. Upload the repo zip (without pre-generated `node_modules/.prisma`)
+2. Set **Build command**: `bash apps/api/deploy-build.sh`
+3. Ensure `DATABASE_URL` is set in Hostinger's env var dashboard **before**
+   triggering the build
+4. `deploy-build.sh` will fix permissions, set the provider, and generate
+   the client
+
+### Hostinger environment variables
+
+Set these in Hostinger's Node.js App dashboard:
+
+| Variable | Value |
+|---|---|
+| `NODE_ENV` | `production` |
+| `DATABASE_URL` | `postgresql://...` |
+| `REDIS_URL` | `redis://...` (or leave unset for in-memory fallback) |
+| `JWT_SECRET` | (random string) |
+| `JWT_REFRESH_SECRET` | (random string) |
+| `ENCRYPTION_KEY` | (64 hex chars) |
+| `CORS_ORIGIN` | `https://yourdomain.com` |
+| `APP_URL` | `https://api.yourdomain.com` |
+| `EMAIL_PROVIDER` | `smtp` / `sendgrid` / `resend` |
+| `SMTP_HOST` / `SMTP_PORT` / etc. | (if provider=smtp) |
+
+## 10. Recommendation: Consider Hostinger VPS
+
+If the shared hosting Node.js App feature continues to be unreliable,
+**strongly consider upgrading to a Hostinger VPS plan** (KVM plans starting
+at ~$4/month). A VPS gives you:
+
+- **Full SSH access** with root permissions
+- **PM2** for process management (auto-restart, logs, clustering)
+- **Nginx** as a reverse proxy (proper HTTPS, WebSocket support)
+- **No build pipeline restrictions** — you run `npm install`, `prisma
+  generate`, and `node dist/main.js` directly
+- **No `postinstall` or env var timing issues** — everything runs in a
+  normal Linux shell
+
+### VPS deployment (quick reference)
+
+```bash
+# SSH into the VPS
+ssh root@your-vps-ip
+
+# Install Node.js 20+
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+apt-get install -y nodejs
+
+# Clone and build
+git clone https://github.com/Zomiccc/digitalvaul.git
+cd digitalvaul
+npm install
+npm run build:shared && npm run build:api
+
+# Set up Prisma
+cd apps/api
+export DATABASE_URL="postgresql://..."
+node prisma/set-provider.js
+npx prisma generate
+npx prisma migrate deploy
+cd ../..
+
+# Start with PM2
+npm install -g pm2
+NODE_ENV=production pm2 start apps/api/dist/main.js --name api
+pm2 save
+pm2 startup
+```
+
+This eliminates all the shared hosting pipeline issues entirely.

@@ -22,7 +22,9 @@
     "db:migrate:deploy": "cd apps/api && npm run prisma:migrate:deploy",
     "db:generate": "cd apps/api && npm run prisma:generate",
     "db:seed": "cd apps/api && npm run seed",
-    "db:studio": "cd apps/api && npm run prisma:set-provider && npx prisma studio"
+    "db:studio": "cd apps/api && npm run prisma:set-provider && npx prisma studio",
+    "deploy:prepare": "powershell -ExecutionPolicy Bypass -File prepare-deploy.ps1",
+    "deploy:build": "bash apps/api/deploy-build.sh"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
