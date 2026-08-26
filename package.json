@@ -18,7 +18,7 @@
     "build:merchant": "cd apps/merchant && npm run build",
     "build:portal": "cd apps/portal && npm run build",
     "build": "npm run build:shared && npm run build:api && npm run build:admin && npm run build:merchant && npm run build:portal && npm run build:copy",
-    "build:copy": "node -e \"const fs=require('fs');const p=require('path');const dest=p.resolve('dist');if(!fs.existsSync(dest))fs.mkdirSync(dest,{recursive:true});fs.copyFileSync('apps/api/dist/main.js',p.join(dest,'main.js'));fs.copyFileSync('apps/api/dist/main.js.map',p.join(dest,'main.js.map'));console.log('Copied main.js to dist/')\"",
+    "build:copy": "node -e \"const fs=require('fs');const p=require('path');function copyDir(src,dest){if(!fs.existsSync(dest))fs.mkdirSync(dest,{recursive:true});for(const e of fs.readdirSync(src,{withFileTypes:true})){const s=p.join(src,e.name),d=p.join(dest,e.name);if(e.isDirectory())copyDir(s,d);else fs.copyFileSync(s,d)}}copyDir('apps/api/dist','dist');console.log('Copied apps/api/dist to dist/')\"",
     "db:migrate": "cd apps/api && npm run prisma:migrate",
     "db:migrate:deploy": "cd apps/api && npm run prisma:migrate:deploy",
     "db:generate": "cd apps/api && npm run prisma:generate",
