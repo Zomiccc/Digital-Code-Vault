@@ -113,6 +113,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<LoginPage />} />
+        <Route path="/merchant/login" element={<Navigate to="/login" replace />} />
         <Route path="/*" element={<ProtectedRoutes />} />
       </Routes>
     </AuthProvider>

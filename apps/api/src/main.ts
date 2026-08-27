@@ -156,9 +156,8 @@ async function bootstrap() {
     return null;
   };
   const frontends = [
-    { mount: '/merchant', name: 'merchant' },
     { mount: '/d',        name: 'portal' },
-    { mount: '',          name: 'admin' },  // root — must be last
+    { mount: '',          name: 'admin' },  // root — must be last (handles /admin/*, /merchant/*, /customer/*)
   ];
 
   for (const { mount, name } of frontends) {
