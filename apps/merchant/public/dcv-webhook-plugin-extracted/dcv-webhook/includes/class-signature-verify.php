@@ -17,7 +17,6 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-if ( ! class_exists( 'DCV_Webhook_Signature_Verify' ) ) {
 class DCV_Webhook_Signature_Verify {
 
     /**
@@ -50,5 +49,4 @@ class DCV_Webhook_Signature_Verify {
     public static function read_raw_body() {
         return file_get_contents( 'php://input' );
     }
-}
 }

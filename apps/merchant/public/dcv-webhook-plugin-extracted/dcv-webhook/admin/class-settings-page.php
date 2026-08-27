@@ -12,7 +12,6 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-if ( ! class_exists( 'DCV_Webhook_Settings_Page' ) ) {
 class DCV_Webhook_Settings_Page {
 
     const PAGE_SLUG  = 'dcv-webhook-settings';
@@ -310,5 +309,4 @@ class DCV_Webhook_Settings_Page {
 
         require DCV_WEBHOOK_PLUGIN_DIR . 'admin/partials/settings-display.php';
     }
-}
 }

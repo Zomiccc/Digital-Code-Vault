@@ -19,7 +19,6 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-if ( ! class_exists( 'DCV_Webhook_Hooks' ) ) {
 class DCV_Webhook_Hooks {
 
     /**
@@ -371,5 +370,4 @@ class DCV_Webhook_Hooks {
             );
         }
     }
-}
 }

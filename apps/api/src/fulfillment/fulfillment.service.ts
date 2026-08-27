@@ -429,17 +429,13 @@ export class FulfillmentService {
       });
     }
 
-    // Calculate total cost.
-    // ESSENTIALS / variant presets: the bundle is a fixed set of pre-selected codes — the
-    // customer is charged the purchase amount directly; there is no denomination-sum math
-    // to validate.
-    // NORMAL: total cost must exactly equal the sum of allocated denomination face values.
-    let totalCost = productType === 'ESSENTIALS' || usedVariantPreset
-      ? amount
-      : combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
+    // Calculate total cost — always the sum of allocated denomination face values.
+    // This ensures consistent USD-based pricing across NORMAL and ESSENTIALS products.
+    // For variant presets (e.g. "PS Essential 1 Month" = $10 + $20), the totalCost is $30.
+    let totalCost = combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
 
-    // Validate combination total exactly matches the requested amount (NORMAL only)
-    if (productType !== 'ESSENTIALS' && !usedVariantPreset && totalCost !== amount) {
+    // Validate combination total exactly matches the requested amount
+    if (totalCost !== amount) {
       this.logger.error(`[Fulfillment] Combination total ${totalCost} does not match requested amount ${amount}`);
       const failedReq = await this.prisma.fulfillmentRequest.create({
         data: {

@@ -33,17 +33,18 @@ interface CategorySeed {
 }
 
 // PlayStation Plus plans offered on every PSN regional product
+// Prices in USD — the admin maps each variant to denomination codes via Fulfillment Presets.
 function psPlusVariants(): VariantSeed[] {
   return [
-    { name: 'PS Essential: 1 Month', price: 1850 },
-    { name: 'PS Essential: 3 Months', price: 5150 },
-    { name: 'PS Essential: 12 Months', price: 9900 },
-    { name: 'PS Extra: 1 Month', price: 3300 },
-    { name: 'PS Extra: 3 Months', price: 9250 },
-    { name: 'PS Extra: 12 Months', price: 17800 },
-    { name: 'PS Premium: 1 Month', price: 3750 },
-    { name: 'PS Premium: 3 Months', price: 10500 },
-    { name: 'PS Premium: 12 Months', price: 20500 },
+    { name: 'PS Essential: 1 Month', price: 9.99 },
+    { name: 'PS Essential: 3 Months', price: 24.99 },
+    { name: 'PS Essential: 12 Months', price: 59.99 },
+    { name: 'PS Extra: 1 Month', price: 14.99 },
+    { name: 'PS Extra: 3 Months', price: 39.99 },
+    { name: 'PS Extra: 12 Months', price: 99.99 },
+    { name: 'PS Premium: 1 Month', price: 17.99 },
+    { name: 'PS Premium: 3 Months', price: 49.99 },
+    { name: 'PS Premium: 12 Months', price: 119.99 },
   ];
 }
 
@@ -123,11 +124,11 @@ const CATALOG: CategorySeed[] = [
         name: 'Xbox Game Pass Subscriptions',
         regionCode: 'USA',
         variants: [
-          { name: 'Game Pass Core: 1 Month', price: 2450 },
-          { name: 'Game Pass Core: 3 Months', price: 6300 },
-          { name: 'Game Pass Ultimate: 1 Month', price: 4100 },
-          { name: 'Game Pass Ultimate: 3 Months', price: 11000 },
-          { name: 'Game Pass Ultimate: 12 Months', price: 39500 },
+          { name: 'Game Pass Core: 1 Month', price: 10.99 },
+          { name: 'Game Pass Core: 3 Months', price: 29.99 },
+          { name: 'Game Pass Ultimate: 1 Month', price: 19.99 },
+          { name: 'Game Pass Ultimate: 3 Months', price: 44.99 },
+          { name: 'Game Pass Ultimate: 12 Months', price: 194.99 },
         ],
       },
     ],
@@ -156,10 +157,10 @@ const CATALOG: CategorySeed[] = [
         name: 'Nintendo Switch Online Membership',
         regionCode: 'USA',
         variants: [
-          { name: 'Individual: 1 Month', price: 950 },
-          { name: 'Individual: 3 Months', price: 2100 },
-          { name: 'Individual: 12 Months', price: 5600 },
-          { name: 'Family: 12 Months', price: 10500 },
+          { name: 'Individual: 1 Month', price: 3.99 },
+          { name: 'Individual: 3 Months', price: 7.99 },
+          { name: 'Individual: 12 Months', price: 19.99 },
+          { name: 'Family: 12 Months', price: 34.99 },
         ],
       },
     ],
@@ -210,20 +211,20 @@ const CATALOG: CategorySeed[] = [
         name: 'Nord VPN Subscription',
         regionCode: 'GLOBAL',
         variants: [
-          { name: 'Nord VPN: 1 Month', price: 3600 },
-          { name: 'Nord VPN: 1 Year', price: 13500 },
-          { name: 'Nord VPN: 2 Years', price: 21500 },
+          { name: 'Nord VPN: 1 Month', price: 12.99 },
+          { name: 'Nord VPN: 1 Year', price: 59.88 },
+          { name: 'Nord VPN: 2 Years', price: 95.76 },
         ],
       },
       {
         name: 'MS Office Pro Plus Keys',
         regionCode: 'GLOBAL',
-        variants: [{ name: 'Office Pro Plus: 5 PCs', price: 9500 }],
+        variants: [{ name: 'Office Pro Plus: 5 PCs', price: 49.99 }],
       },
       {
         name: 'Windows 11 Pro Key',
         regionCode: 'GLOBAL',
-        variants: [{ name: 'Windows 11 Pro: 1 PC', price: 5200 }],
+        variants: [{ name: 'Windows 11 Pro: 1 PC', price: 25.99 }],
       },
     ],
   },
@@ -331,21 +332,28 @@ async function ensureDenomination(productId: string, faceValue: number, currency
 
 async function ensureVariant(productRegionId: string, v: VariantSeed, sortOrder: number) {
   const slug = slugify(v.name);
-  return (
-    (await prisma.variant.findUnique({
-      where: { productRegionId_slug: { productRegionId, slug } },
-    })) ||
-    (await prisma.variant.create({
-      data: {
-        productRegionId,
-        name: v.name,
-        slug,
-        customerPrice: v.price,
-        currency: 'PKR',
-        sortOrder,
-      },
-    }))
-  );
+  const existing = await prisma.variant.findUnique({
+    where: { productRegionId_slug: { productRegionId, slug } },
+  });
+  if (existing) {
+    if (Number(existing.customerPrice) !== v.price || existing.currency !== 'USD') {
+      return prisma.variant.update({
+        where: { id: existing.id },
+        data: { customerPrice: v.price, currency: 'USD' },
+      });
+    }
+    return existing;
+  }
+  return prisma.variant.create({
+    data: {
+      productRegionId,
+      name: v.name,
+      slug,
+      customerPrice: v.price,
+      currency: 'USD',
+      sortOrder,
+    },
+  });
 }
 
 async function main() {

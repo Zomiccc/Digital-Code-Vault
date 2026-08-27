@@ -15,12 +15,6 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-// Minimum PHP version check — guard against older hosting environments.
-if ( version_compare( PHP_VERSION, '5.6.0', '<' ) ) {
-    deactivate_plugins( plugin_basename( __FILE__ ) );
-    wp_die( esc_html__( 'DCV Webhook Connector requires PHP 5.6 or higher. Please contact your hosting provider to upgrade your PHP version.', 'dcv-webhook' ) );
-}
-
 define( 'DCV_WEBHOOK_VERSION', '1.0.0' );
 define( 'DCV_WEBHOOK_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'DCV_WEBHOOK_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -32,15 +26,6 @@ require_once DCV_WEBHOOK_PLUGIN_DIR . 'includes/class-signature-verify.php';
 require_once DCV_WEBHOOK_PLUGIN_DIR . 'includes/class-webhook-hooks.php';
 require_once DCV_WEBHOOK_PLUGIN_DIR . 'admin/class-settings-page.php';
 
-// Guard: only instantiate if classes loaded successfully.
-if ( ! class_exists( 'DCV_Webhook_Settings_Page' ) || ! class_exists( 'DCV_Webhook_Hooks' ) ) {
-    deactivate_plugins( plugin_basename( __FILE__ ) );
-    add_action( 'admin_notices', function() {
-        echo '<div class="notice notice-error"><p>' . esc_html__( 'DCV Webhook Connector: Required classes could not be loaded. Plugin deactivated.', 'dcv-webhook' ) . '</p></div>';
-    } );
-    return;
-}
-
 /**
  * Returns the plugin settings array with defaults applied.
  *
@@ -50,7 +35,6 @@ if ( ! class_exists( 'DCV_Webhook_Settings_Page' ) || ! class_exists( 'DCV_Webho
  *     @type string $skip_verification  "1" or "" — whether to skip challenge verification.
  * }
  */
-if ( ! function_exists( 'dcv_webhook_get_settings' ) ) {
 function dcv_webhook_get_settings() {
     $defaults = array(
         'api_key'           => '',
@@ -64,7 +48,6 @@ function dcv_webhook_get_settings() {
     }
     return array_merge( $defaults, $stored );
 }
-}
 
 /**
  * Returns the stored endpoint data from a successful registration.
@@ -76,14 +59,12 @@ function dcv_webhook_get_settings() {
  *     @type string $secret  Endpoint secret for verifying deliveries.
  * } or false if not registered.
  */
-if ( ! function_exists( 'dcv_webhook_get_endpoint' ) ) {
 function dcv_webhook_get_endpoint() {
     $endpoint = get_option( DCV_WEBHOOK_ENDPOINT_OPTION, false );
     if ( ! is_array( $endpoint ) ) {
         return false;
     }
     return $endpoint;
-}
 }
 
 /**
@@ -94,7 +75,6 @@ function dcv_webhook_get_endpoint() {
  * @param string $message  Human-readable message.
  * @param array  $details  Optional key-value details.
  */
-if ( ! function_exists( 'dcv_webhook_log' ) ) {
 function dcv_webhook_log( $step, $message, $details = array() ) {
     $ts = current_time( 'mysql' );
     $detail_str = '';
@@ -103,16 +83,13 @@ function dcv_webhook_log( $step, $message, $details = array() ) {
     }
     error_log( "[DCV-Webhook {$ts}] [{$step}] {$message}{$detail_str}" );
 }
-}
 
 /**
  * Activation hook — just logs. No auto-registration.
  * The merchant must paste their API key and click "Register this site" manually.
  */
-if ( ! function_exists( 'dcv_webhook_activate' ) ) {
 function dcv_webhook_activate() {
     dcv_webhook_log( 'activate', 'Plugin activated. Merchant must configure API key and register endpoint manually.' );
-}
 }
 register_activation_hook( __FILE__, 'dcv_webhook_activate' );
 
@@ -120,19 +97,13 @@ register_activation_hook( __FILE__, 'dcv_webhook_activate' );
  * Deactivation hook — logs. Does NOT delete the endpoint on the platform.
  * The merchant can delete it from the admin portal if needed.
  */
-if ( ! function_exists( 'dcv_webhook_deactivate' ) ) {
 function dcv_webhook_deactivate() {
     dcv_webhook_log( 'deactivate', 'Plugin deactivated. Webhook endpoint remains registered on the platform.' );
-}
 }
 register_deactivation_hook( __FILE__, 'dcv_webhook_deactivate' );
 
 // Initialize the settings page.
-if ( class_exists( 'DCV_Webhook_Settings_Page' ) ) {
-    new DCV_Webhook_Settings_Page();
-}
+new DCV_Webhook_Settings_Page();
 
 // Initialize webhook hooks (WooCommerce + Elementor + incoming receiver).
-if ( class_exists( 'DCV_Webhook_Hooks' ) ) {
-    new DCV_Webhook_Hooks();
-}
+new DCV_Webhook_Hooks();

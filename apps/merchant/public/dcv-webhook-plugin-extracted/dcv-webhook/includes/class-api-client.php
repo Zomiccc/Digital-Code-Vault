@@ -19,7 +19,6 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-if ( ! class_exists( 'DCV_Webhook_API_Client' ) ) {
 class DCV_Webhook_API_Client {
 
     /**
@@ -340,5 +339,4 @@ class DCV_Webhook_API_Client {
         dcv_webhook_log( 'forward_incoming', 'Event forwarded successfully.', array( 'status' => $status_code ) );
         return true;
     }
-}
 }
