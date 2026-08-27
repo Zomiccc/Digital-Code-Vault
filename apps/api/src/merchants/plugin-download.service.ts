@@ -14,14 +14,20 @@ export class PluginDownloadService {
 
   constructor() {
     const parentDir = path.resolve(__dirname, '..');
+    const grandParentDir = path.resolve(parentDir, '..');
 
     this.zipCandidates = [
-      // Hostinger: dist/public/merchant/dcv-webhook-plugin.zip
+      // 1. Copied into apps/api/dist/ by deploy-build.sh (most reliable on Hostinger)
+      path.resolve(__dirname, 'dcv-webhook-plugin.zip'),
+      // 2. Hostinger create-launcher layout: dist/public/merchant/
       path.resolve(__dirname, 'public', 'merchant', 'dcv-webhook-plugin.zip'),
-      // Local dev: apps/merchant/public/dcv-webhook-plugin.zip
-      path.resolve(parentDir, 'merchant', 'public', 'dcv-webhook-plugin.zip'),
-      // Root project: apps/merchant/public/dcv-webhook-plugin.zip
-      path.resolve(parentDir, '..', 'merchant', 'public', 'dcv-webhook-plugin.zip'),
+      // 3. apps/merchant/public/ relative to apps/api/dist/.. = apps/api/../merchant = wrong
+      //    relative to apps/api/dist/../.. = apps/merchant — correct for standard layout
+      path.resolve(grandParentDir, 'merchant', 'public', 'dcv-webhook-plugin.zip'),
+      // 4. Relative to process.cwd() (Hostinger cwd = repo root or nodejs/)
+      path.resolve(process.cwd(), 'apps', 'merchant', 'public', 'dcv-webhook-plugin.zip'),
+      // 5. Relative to process.cwd() without apps/ prefix
+      path.resolve(process.cwd(), 'merchant', 'public', 'dcv-webhook-plugin.zip'),
     ];
 
     this.sourceCandidates = [

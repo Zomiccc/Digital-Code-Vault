@@ -83,4 +83,13 @@ for dir in apps/api/dist apps/admin/dist apps/merchant/dist apps/portal/dist; do
   fi
 done
 
+# Step 7: Copy WordPress plugin ZIP into apps/api/dist/
+echo "--- Copying WordPress plugin ZIP ---"
+if [ -f "apps/merchant/public/dcv-webhook-plugin.zip" ]; then
+  cp apps/merchant/public/dcv-webhook-plugin.zip apps/api/dist/dcv-webhook-plugin.zip
+  echo "OK: Plugin ZIP copied to apps/api/dist/"
+else
+  echo "WARNING: apps/merchant/public/dcv-webhook-plugin.zip not found"
+fi
+
 echo "=== deploy-build.sh complete ==="
