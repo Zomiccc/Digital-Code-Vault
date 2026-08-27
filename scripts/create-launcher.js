@@ -57,6 +57,18 @@ for (const name of ['admin', 'merchant', 'portal']) {
   console.log(`Copied apps/${name}/dist to dist/public/${name}/`);
 }
 
+// 2d. Copy the pre-built WordPress plugin ZIP into dist/public/merchant/.
+// This guarantees the plugin is available even if Vite didn't copy it.
+const pluginZip = path.resolve(rootDir, 'apps', 'merchant', 'public', 'dcv-webhook-plugin.zip');
+if (fs.existsSync(pluginZip)) {
+  const destZip = path.join(distDir, 'public', 'merchant', 'dcv-webhook-plugin.zip');
+  fs.mkdirSync(path.dirname(destZip), { recursive: true });
+  fs.copyFileSync(pluginZip, destZip);
+  console.log('Copied dcv-webhook-plugin.zip to dist/public/merchant/');
+} else {
+  console.warn('WARNING: dcv-webhook-plugin.zip not found in apps/merchant/public/');
+}
+
 // 3. Create launcher as dist/main.js
 const launcher = [
   '// Hostinger launcher — sets NODE_PATH so the app can find all deps',
