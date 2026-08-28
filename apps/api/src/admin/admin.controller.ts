@@ -677,15 +677,11 @@ export class AdminController {
       orderBy: { name: 'asc' },
     });
 
-    // Build a set of existing SKUs to avoid collisions
+    // Build a set of existing product SKUs to avoid collisions
     const existingSkus = new Set<string>();
     const allProducts = await this.prisma.product.findMany({ select: { sku: true } });
     for (const p of allProducts) {
       if (p.sku) existingSkus.add(p.sku.toUpperCase());
-    }
-    const allDenoms = await this.prisma.denomination.findMany({ select: { sku: true } });
-    for (const d of allDenoms) {
-      if (d.sku) existingSkus.add(d.sku.toUpperCase());
     }
 
     const updated: { id: string; name: string; sku: string; denominationSkus: { id: string; faceValue: number; sku: string }[] }[] = [];
@@ -694,7 +690,7 @@ export class AdminController {
     for (const product of products) {
       const baseSku = resolveProductSkuBase(product.name, product.region);
 
-      // Generate or update product-level SKU
+      // Generate or update product-level SKU (persisted on Product.sku)
       if (!product.sku) {
         let productSku = baseSku;
         // Ensure uniqueness with numeric suffix if needed
@@ -712,39 +708,19 @@ export class AdminController {
       }
 
       const productSku = product.sku || baseSku;
-      const denominationSkus: { id: string; faceValue: number; sku: string }[] = [];
 
-      // Generate per-denomination SKUs: PREFIX-REGION-FACEVALUE (e.g. PSN-KSA-10)
-      for (const denom of product.denominations) {
-        const faceValue = Number(denom.faceValue);
-        const denomSku = `${baseSku}-${faceValue}`;
+      // Compute per-denomination SKUs on-the-fly: BASE-FACEVALUE (e.g. PSN-KSA-10)
+      // NOT persisted — derived from product SKU + denomination faceValue
+      const denominationSkus = product.denominations.map((denom) => ({
+        id: denom.id,
+        faceValue: Number(denom.faceValue),
+        sku: `${baseSku}-${Number(denom.faceValue)}`,
+      }));
 
-        if (denom.sku) {
-          // Already has a SKU — skip
-          existingSkus.add(denom.sku.toUpperCase());
-          denominationSkus.push({ id: denom.id, faceValue, sku: denom.sku });
-          continue;
-        }
-
-        // Ensure uniqueness
-        let finalDenomSku = denomSku;
-        if (existingSkus.has(denomSku.toUpperCase())) {
-          let suffix = 1;
-          while (existingSkus.has(`${denomSku}-${suffix}`.toUpperCase())) {
-            suffix++;
-          }
-          finalDenomSku = `${denomSku}-${suffix}`;
-        }
-
-        existingSkus.add(finalDenomSku.toUpperCase());
-        await this.prisma.denomination.update({ where: { id: denom.id }, data: { sku: finalDenomSku } });
-        denominationSkus.push({ id: denom.id, faceValue, sku: finalDenomSku });
-      }
-
-      if (denominationSkus.length > 0 || !product.sku) {
+      if (!product.sku || denominationSkus.length > 0) {
         updated.push({ id: product.id, name: product.name, sku: productSku, denominationSkus });
       } else {
-        skipped.push({ id: product.id, name: product.name, reason: 'Product and all denominations already have SKUs' });
+        skipped.push({ id: product.id, name: product.name, reason: 'Product already has SKU' });
       }
     }
 
@@ -769,18 +745,21 @@ export class AdminController {
       orderBy: { name: 'asc' },
     });
 
-    const items = products.map((p) => ({
-      id: p.id,
-      name: p.name,
-      region: p.region,
-      sku: p.sku || '',
-      denominations: p.denominations.map((d) => ({
-        id: d.id,
-        faceValue: Number(d.faceValue),
-        currency: d.currency,
-        sku: d.sku || '',
-      })),
-    }));
+    const items = products.map((p) => {
+      const baseSku = p.sku || resolveProductSkuBase(p.name, p.region);
+      return {
+        id: p.id,
+        name: p.name,
+        region: p.region,
+        sku: p.sku || '',
+        denominations: p.denominations.map((d) => ({
+          id: d.id,
+          faceValue: Number(d.faceValue),
+          currency: d.currency,
+          sku: p.sku ? `${baseSku}-${Number(d.faceValue)}` : '',
+        })),
+      };
+    });
 
     return { items, total: items.length };
   }

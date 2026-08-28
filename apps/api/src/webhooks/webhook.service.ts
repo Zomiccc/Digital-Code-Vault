@@ -808,26 +808,46 @@ export class WebhookService implements OnModuleDestroy {
         }
       }
 
-      // Strategy 2b: Denomination SKU match
-      // If the webhook SKU matches a Denomination.sku (e.g. PSN-KSA-10),
-      // resolve the product from the denomination and set exactDenominationId.
+      // Strategy 2b: Denomination SKU match (computed)
+      // Incoming SKU like "PSN-KSA-10" — try to split off the last segment as a face value,
+      // match the product by the prefix as Product.sku, then find the denomination by faceValue.
       if (!product && searchSku) {
-        const denomSkuMatch = await this.prisma.denomination.findFirst({
-          where: { sku: searchSku },
-          include: { product: true },
-        });
-        if (denomSkuMatch?.product && denomSkuMatch.product.status === 'ACTIVE') {
-          product = denomSkuMatch.product;
-          exactDenominationId = denomSkuMatch.id;
-          this.logger.log(`[WEBHOOK] Auto-matched product "${product.name}" via denomination SKU: ${searchSku} (denomination faceValue: ${denomSkuMatch.faceValue})`);
-          // Persist the auto-match on the ConnectedProduct so future orders use Strategy 1
-          if (connectedProduct?.id) {
-            await this.prisma.connectedProduct.update({
-              where: { id: connectedProduct.id },
-              data: { dcvProductId: product.id, dcvDenominationId: denomSkuMatch.id },
-            }).catch((err) => {
-              this.logger.warn(`[WEBHOOK] Failed to persist denomination SKU auto-match on ConnectedProduct: ${(err as Error).message}`);
+        const lastDash = searchSku.lastIndexOf('-');
+        if (lastDash > 0) {
+          const prefixSku = searchSku.substring(0, lastDash);
+          const faceValueStr = searchSku.substring(lastDash + 1);
+          const faceValueNum = parseFloat(faceValueStr);
+
+          if (!isNaN(faceValueNum) && faceValueNum > 0) {
+            // Try matching the prefix as a Product.sku
+            const prefixProduct = await this.prisma.product.findFirst({
+              where: { sku: prefixSku, status: 'ACTIVE' },
+              include: { denominations: { orderBy: { faceValue: 'asc' } } },
             });
+
+            if (prefixProduct) {
+              // Find the denomination matching this face value
+              const matchedDenom = prefixProduct.denominations.find(
+                (d) => Number(d.faceValue) === faceValueNum,
+              );
+
+              if (matchedDenom) {
+                product = prefixProduct;
+                exactDenominationId = matchedDenom.id;
+                this.logger.log(`[WEBHOOK] Auto-matched product "${product.name}" via denomination SKU: ${searchSku} (prefix: ${prefixSku}, faceValue: ${faceValueNum})`);
+                // Persist the auto-match on the ConnectedProduct so future orders use Strategy 1
+                if (connectedProduct?.id) {
+                  await this.prisma.connectedProduct.update({
+                    where: { id: connectedProduct.id },
+                    data: { dcvProductId: product.id, dcvDenominationId: matchedDenom.id },
+                  }).catch((err) => {
+                    this.logger.warn(`[WEBHOOK] Failed to persist denomination SKU auto-match on ConnectedProduct: ${(err as Error).message}`);
+                  });
+                }
+              } else {
+                this.logger.warn(`[WEBHOOK] SKU prefix "${prefixSku}" matched product "${prefixProduct.name}" but no denomination with faceValue ${faceValueNum} found`);
+              }
+            }
           }
         }
       }
