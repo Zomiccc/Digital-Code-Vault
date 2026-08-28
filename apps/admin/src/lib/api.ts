@@ -213,10 +213,10 @@ export const api = {
     apiFetch('/merchant/dashboard/api-keys', { method: 'POST', body: JSON.stringify({ scopes }) }),
   revokeApiKey: (id: string) =>
     apiFetch(`/merchant/dashboard/api-keys/${id}`, { method: 'DELETE' }),
-  createDashboardFulfillment: (productId: string, amount: number, referenceId?: string) =>
+  createDashboardFulfillment: (productId: string, amount: number, referenceId?: string, customerEmail?: string, customerName?: string) =>
     apiFetch('/merchant/dashboard/fulfillment', {
       method: 'POST',
-      body: JSON.stringify({ product_id: productId, amount, reference_id: referenceId }),
+      body: JSON.stringify({ product_id: productId, amount, reference_id: referenceId, customer_email: customerEmail, customer_name: customerName }),
     }),
   listWebhooks: () => apiFetch('/merchant/webhooks'),
   createWebhook: (url: string, skipVerification: boolean = false) =>

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { RotateCcw, Plus } from 'lucide-react';
+import { RotateCcw, Plus, Copy, Check, Loader2 } from 'lucide-react';
 import { Input, Select } from '@/components/ui';
 import { api } from '@/lib/api';
 import { Card, Button, Table, Th, Td, Badge, Modal, AddressWithMapsLink } from '@/components/ui';
@@ -10,11 +10,15 @@ export function FulfillmentPage() {
   const queryClient = useQueryClient();
   const [reverseItem, setReverseItem] = useState<any>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [orderResult, setOrderResult] = useState<any>(null);
+  const [copied, setCopied] = useState(false);
   const [orderForm, setOrderForm] = useState({ productId: '', variantId: '', amount: '', customerEmail: '', customerName: '' });
 
   const { data: hierarchyForOrder } = useQuery({ queryKey: ['catalog-hierarchy'], queryFn: api.getCatalogHierarchy, enabled: showCreate });
   const orderProducts = (hierarchyForOrder || []).flatMap((c: any) => c.products);
-  const selectedProductVariants = orderProducts.find((p: any) => p.id === orderForm.productId)?.productRegions?.flatMap((pr: any) => pr.variants) || [];
+  const selectedProductData = orderProducts.find((p: any) => p.id === orderForm.productId);
+  const selectedProductVariants = selectedProductData?.productRegions?.flatMap((pr: any) => pr.variants) || [];
+  const selectedProductDenominations = selectedProductData?.denominations || [];
 
   const createOrderMutation = useMutation({
     mutationFn: () => api.createManualOrder({
@@ -24,9 +28,9 @@ export function FulfillmentPage() {
       customerEmail: orderForm.customerEmail || undefined,
       customerName: orderForm.customerName || undefined,
     }),
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['fulfillment'] });
-      setShowCreate(false);
+      setOrderResult(data);
       setOrderForm({ productId: '', variantId: '', amount: '', customerEmail: '', customerName: '' });
     },
   });
@@ -63,7 +67,34 @@ export function FulfillmentPage() {
       </div>
 
       {/* Manual order modal */}
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create Order Manually (admin-managed)">
+      <Modal open={showCreate} onClose={() => { setShowCreate(false); setOrderResult(null); }} title="Create Order Manually (admin-managed)">
+        {orderResult ? (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-4 py-3">
+              <p className="font-semibold text-emerald-500">Order Created Successfully</p>
+            </div>
+            <div className="space-y-2 text-sm">
+              <div><span className="text-muted-foreground">Fulfillment ID:</span> <span className="font-mono">{orderResult.fulfillment_id}</span></div>
+              <div><span className="text-muted-foreground">Status:</span> <span className="font-medium">{orderResult.status}</span></div>
+              <div><span className="text-muted-foreground">Allocation:</span> {orderResult.allocation?.join(', ')}</div>
+              {orderResult.delivery_link && (
+                <div className="pt-2">
+                  <div className="text-muted-foreground mb-1">Delivery Link:</div>
+                  <div className="flex items-center gap-2 rounded-lg bg-background p-3 font-mono text-sm break-all">
+                    <span className="flex-1">{orderResult.delivery_link}</span>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(orderResult.delivery_link); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                      className="shrink-0 rounded p-1 hover:bg-secondary"
+                    >
+                      {copied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <Button className="w-full" onClick={() => { setShowCreate(false); setOrderResult(null); }}>Done</Button>
+          </div>
+        ) : (
         <div className="space-y-4">
           <p className="rounded-lg bg-primary/5 border border-primary/20 px-4 py-2.5 text-xs text-muted-foreground">
             Admin orders are fulfilled from vault stock at the platform's own responsibility — no merchant wallet is charged.
@@ -91,6 +122,27 @@ export function FulfillmentPage() {
               ]}
             />
           )}
+          {selectedProductDenominations.length > 0 && !orderForm.variantId && (
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Available Denominations</label>
+              <div className="flex flex-wrap gap-2">
+                {selectedProductDenominations.map((d: any) => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => setOrderForm({ ...orderForm, amount: String(Number(d.faceValue)) })}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                      orderForm.amount === String(Number(d.faceValue))
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                    }`}
+                  >
+                    ${Number(d.faceValue)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <Input label="Amount (USD charged to wallet)" type="number" value={orderForm.amount} onChange={(e) => setOrderForm({ ...orderForm, amount: e.target.value })} placeholder="30.00" />
           <Input label="Customer email (sends delivery link)" type="email" value={orderForm.customerEmail} onChange={(e) => setOrderForm({ ...orderForm, customerEmail: e.target.value })} placeholder="customer@example.com" />
           <Input label="Customer name (optional)" value={orderForm.customerName} onChange={(e) => setOrderForm({ ...orderForm, customerName: e.target.value })} placeholder="John Doe" />
@@ -106,6 +158,7 @@ export function FulfillmentPage() {
             {createOrderMutation.isPending ? 'Creating...' : 'Create & Deliver'}
           </Button>
         </div>
+        )}
       </Modal>
 
       <Card className="p-0">

@@ -136,6 +136,8 @@ export function MerchantCreateOrderPage() {
   const [selectedProduct, setSelectedProduct] = useState('');
   const [amount, setAmount] = useState('');
   const [referenceId, setReferenceId] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
+  const [customerName, setCustomerName] = useState('');
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
@@ -147,7 +149,13 @@ export function MerchantCreateOrderPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: () => api.createDashboardFulfillment(selectedProduct, parseFloat(amount), referenceId || undefined),
+    mutationFn: () => api.createDashboardFulfillment(
+      selectedProduct,
+      parseFloat(amount),
+      referenceId || undefined,
+      customerEmail || undefined,
+      customerName || undefined,
+    ),
     onSuccess: (data) => {
       setResult(data);
       setError('');
@@ -174,7 +182,7 @@ export function MerchantCreateOrderPage() {
     <div className="space-y-8">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Create Order</h1>
-        <p className="text-sm text-muted-foreground">Create a fulfillment request and get a delivery link</p>
+        <p className="text-sm text-muted-foreground">Create a fulfillment request — enter a customer email to send the delivery link directly</p>
       </div>
 
       <Card>
@@ -212,13 +220,15 @@ export function MerchantCreateOrderPage() {
           )}
 
           <Input label="Amount (USD)" type="number" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="10.00" required />
+          <Input label="Customer email (sends delivery link)" type="email" value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} placeholder="customer@example.com" />
+          <Input label="Customer name (optional)" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="John Doe" />
           <Input label="Reference ID (optional)" value={referenceId} onChange={(e) => setReferenceId(e.target.value)} placeholder="order-12345" />
 
           {error && <div className="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
 
           <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending || !selectedProduct || !amount || parseFloat(amount) <= 0}>
             {createMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            {createMutation.isPending ? 'Creating...' : 'Create Order'}
+            {createMutation.isPending ? 'Creating...' : 'Create & Deliver'}
           </Button>
         </div>
       </Card>
@@ -230,6 +240,11 @@ export function MerchantCreateOrderPage() {
             <div><span className="text-muted-foreground">Fulfillment ID:</span> <span className="font-mono">{result.fulfillment_id}</span></div>
             <div><span className="text-muted-foreground">Status:</span> <span className="font-medium">{result.status}</span></div>
             <div><span className="text-muted-foreground">Wallet Balance After:</span> {formatCurrency(result.wallet_balance_after)}</div>
+            {customerEmail && (
+              <div className="rounded-lg bg-primary/10 px-3 py-2 text-sm text-primary">
+                Delivery link sent to <strong>{customerEmail}</strong>
+              </div>
+            )}
             {result.delivery_link && (
               <div className="pt-2">
                 <div className="text-muted-foreground mb-1">Delivery Link:</div>
