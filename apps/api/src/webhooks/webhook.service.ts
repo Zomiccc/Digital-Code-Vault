@@ -785,7 +785,30 @@ export class WebhookService implements OnModuleDestroy {
         }
       }
 
-      // Strategy 2: Exact UUID match (rarely matches for WooCommerce)
+      // Strategy 2: Exact SKU auto-match (PRIMARY for new products)
+      // If the webhook carries a product_sku, look up a DCV Product with a matching
+      // sku field. If found, auto-populate the ConnectedProduct's dcvProductId so
+      // future orders for this product skip this lookup entirely.
+      if (!product && searchSku) {
+        const skuMatch = await this.prisma.product.findFirst({
+          where: { sku: searchSku, status: 'ACTIVE' },
+        });
+        if (skuMatch) {
+          product = skuMatch;
+          this.logger.log(`[WEBHOOK] Auto-matched product "${product.name}" via SKU: ${searchSku}`);
+          // Persist the auto-match on the ConnectedProduct so future orders use Strategy 1
+          if (connectedProduct?.id) {
+            await this.prisma.connectedProduct.update({
+              where: { id: connectedProduct.id },
+              data: { dcvProductId: product.id },
+            }).catch((err) => {
+              this.logger.warn(`[WEBHOOK] Failed to persist SKU auto-match on ConnectedProduct: ${(err as Error).message}`);
+            });
+          }
+        }
+      }
+
+      // Strategy 3: Exact UUID match (rarely matches for WooCommerce)
       if (!product && searchId) {
         product = await this.prisma.product.findUnique({ where: { id: searchId } });
         if (product) {
@@ -793,7 +816,7 @@ export class WebhookService implements OnModuleDestroy {
         }
       }
 
-      // Strategy 3: Exact name match (case-insensitive) — safe, no fuzzy guessing
+      // Strategy 4: Exact name match (case-insensitive) — safe, no fuzzy guessing
       if (!product && searchName) {
         product = await this.prisma.product.findFirst({
           where: { name: { equals: searchName } },
@@ -845,7 +868,48 @@ export class WebhookService implements OnModuleDestroy {
 
       // Use FulfillmentService for proper order processing
       const webhookAmount = webhook.amount ? Number(webhook.amount) : 0;
-      this.logger.log(`[WEBHOOK] Creating fulfillment via FulfillmentService for merchant ${merchantId}`);
+      const webhookCurrency = (webhook.currency || 'USD').toUpperCase();
+      this.logger.log(`[WEBHOOK] Creating fulfillment via FulfillmentService for merchant ${merchantId} (amount: ${webhookAmount} ${webhookCurrency})`);
+
+      // Currency guard: denomination face values are in USD. Fulfilling a non-USD
+      // amount as if it were USD would charge the wrong wallet amount (e.g. 50 PKR
+      // treated as $50 USD). Reject with a clear error until multi-currency support
+      // is implemented.
+      if (webhookCurrency !== 'USD') {
+        const errMsg = `Webhook currency "${webhookCurrency}" is not supported. ` +
+          `Order amount ${webhookAmount} ${webhookCurrency} cannot be mapped to USD denominations. ` +
+          `Fulfillment rejected — no wallet debit, no inventory allocation. ` +
+          `Configure WooCommerce to use USD or contact platform admin.`;
+        this.logger.warn(`[WEBHOOK] ${errMsg}`);
+
+        await this.prisma.incomingWebhook.update({
+          where: { id: webhookId },
+          data: {
+            merchantId,
+            processingStatus: 'REJECTED',
+            errorMessage: errMsg,
+            processedAt: new Date(),
+          },
+        });
+
+        await this.prisma.auditLog.create({
+          data: {
+            actorType: 'SYSTEM',
+            actorId: 'webhook-processor',
+            action: 'webhook.unsupported_currency',
+            entity: 'IncomingWebhook',
+            entityId: webhookId,
+            metadata: JSON.stringify({
+              merchantId,
+              currency: webhookCurrency,
+              amount: webhookAmount,
+              orderId: webhook.orderId,
+            }),
+          },
+        });
+
+        return;
+      }
 
       let fulfillmentResult: any;
       const MAX_WEBHOOK_RETRIES = 3;

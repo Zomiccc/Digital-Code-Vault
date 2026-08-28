@@ -89,16 +89,30 @@ export class FulfillmentService {
     });
 
     if (existing) {
-      // Return the original result
-      const response = this.formatFulfillmentResponse(existing);
-      // Try to restore delivery link from idempotency record
-      const idempotencyRecord = await this.prisma.idempotencyRecord.findUnique({
-        where: { key: `${merchantId}:${idempotencyKey}` },
-      });
-      if (idempotencyRecord) {
-        return JSON.parse(idempotencyRecord.responseBody);
+      // If the existing request FAILED, the idempotency cache should NOT return
+      // a failure as if it were a success. Delete the failed record and its
+      // idempotency cache so we can re-attempt fulfillment (e.g. after an admin
+      // mapped the product or added stock).
+      if (existing.status === 'FAILED') {
+        this.logger.log(`[Fulfillment] Existing request ${existing.id} has FAILED status — clearing idempotency cache and re-attempting`);
+        await this.prisma.idempotencyRecord.deleteMany({
+          where: { key: `${merchantId}:${idempotencyKey}` },
+        }).catch(() => {});
+        await this.prisma.fulfillmentRequest.delete({
+          where: { id: existing.id },
+        }).catch(() => {});
+        // Fall through to re-attempt fulfillment from scratch
+      } else {
+        // Return the original successful result
+        const response = this.formatFulfillmentResponse(existing);
+        const idempotencyRecord = await this.prisma.idempotencyRecord.findUnique({
+          where: { key: `${merchantId}:${idempotencyKey}` },
+        });
+        if (idempotencyRecord) {
+          return JSON.parse(idempotencyRecord.responseBody);
+        }
+        return response;
       }
-      return response;
     }
 
     // Check for a cached idempotency record (e.g. from a failed attempt)

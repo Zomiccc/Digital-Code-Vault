@@ -224,6 +224,7 @@ model Product {
   name       String
   region     String
   productType String  @default("NORMAL") // NORMAL | ESSENTIALS
+  sku        String?  // Optional SKU for auto-matching incoming webhook orders
   categoryId String?
   supplierId String?
   merchantId String?
@@ -242,6 +243,7 @@ model Product {
 
   @@index([merchantId])
   @@index([categoryId])
+  @@index([sku])
 }
 
 // Essentials delivery rule: a reusable, denomination-based fulfillment configuration.

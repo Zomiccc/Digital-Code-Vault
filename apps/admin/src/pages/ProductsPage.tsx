@@ -145,15 +145,15 @@ export function ProductsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showDenom, setShowDenom] = useState<any>(null);
   const [showEssentials, setShowEssentials] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', region: '', supplierId: '', product_type: 'NORMAL', category_id: '' });
+  const [form, setForm] = useState({ name: '', region: '', supplierId: '', product_type: 'NORMAL', category_id: '', sku: '' });
   const [denomValue, setDenomValue] = useState('');
 
   const createMutation = useMutation({
-    mutationFn: () => api.createProduct({ name: form.name, region: form.region, supplierId: form.supplierId || undefined, product_type: form.product_type, category_id: form.category_id || undefined }),
+    mutationFn: () => api.createProduct({ name: form.name, region: form.region, supplierId: form.supplierId || undefined, product_type: form.product_type, category_id: form.category_id || undefined, sku: form.sku || undefined }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
       setShowCreate(false);
-      setForm({ name: '', region: '', supplierId: '', product_type: 'NORMAL', category_id: '' });
+      setForm({ name: '', region: '', supplierId: '', product_type: 'NORMAL', category_id: '', sku: '' });
     },
   });
 
@@ -199,6 +199,7 @@ export function ProductsPage() {
               <div>
                 <h3 className="text-lg font-semibold tracking-tight">{p.name}</h3>
                 <p className="text-sm text-muted-foreground">{p.region}</p>
+                {p.sku && <p className="text-xs text-muted-foreground/70">SKU: {p.sku}</p>}
                 <div className="mt-3 flex items-center gap-2">
                   <Badge className={statusColor(p.status)}>{p.status}</Badge>
                   <Badge className={p.productType === 'ESSENTIALS' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}>
@@ -254,6 +255,7 @@ export function ProductsPage() {
         <div className="space-y-4">
           <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. PSN" />
           <Input label="Region" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} placeholder="e.g. USA" />
+          <Input label="SKU (optional — for auto-matching webhook orders)" value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="e.g. PSN-USA-10" />
           <Select
             label="Supplier"
             value={form.supplierId}

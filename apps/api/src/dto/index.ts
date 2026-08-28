@@ -101,6 +101,10 @@ export class CreateProductDto {
   @IsOptional()
   @IsString()
   category_id?: string;
+
+  @IsOptional()
+  @IsString()
+  sku?: string;
 }
 
 export class CreateDenominationDto {

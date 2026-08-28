@@ -346,6 +346,7 @@ export class MerchantsService {
         id: r.id,
         product: r.product.name,
         amount: r.amount,
+        currency: r.currency,
         status: r.status,
         reference_id: r.referenceId,
         created_at: r.createdAt,

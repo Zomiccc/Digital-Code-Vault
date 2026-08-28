@@ -88,7 +88,7 @@ export class ProductsService {
     }));
   }
 
-  async createProduct(data: { name: string; region: string; supplierId?: string; productType?: string; categoryId?: string }) {
+  async createProduct(data: { name: string; region: string; supplierId?: string; productType?: string; categoryId?: string; sku?: string }) {
     return this.prisma.product.create({
       data: {
         name: data.name,
@@ -96,6 +96,7 @@ export class ProductsService {
         supplierId: data.supplierId,
         productType: data.productType || 'NORMAL',
         categoryId: data.categoryId || null,
+        sku: data.sku || null,
       },
     });
   }
@@ -108,6 +109,15 @@ export class ProductsService {
     return this.prisma.product.update({
       where: { id: productId },
       data: { categoryId },
+    });
+  }
+
+  async updateProductSku(productId: string, sku: string | null) {
+    const product = await this.prisma.product.findUnique({ where: { id: productId } });
+    if (!product) throw new NotFoundException('Product not found');
+    return this.prisma.product.update({
+      where: { id: productId },
+      data: { sku },
     });
   }
 

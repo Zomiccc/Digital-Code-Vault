@@ -57,7 +57,7 @@ export function MerchantDashboardPage() {
             {orders?.items?.map((o: any) => (
               <tr key={o.id}>
                 <Td>{o.product}</Td>
-                <Td>{formatCurrency(o.amount)}</Td>
+                <Td>{formatCurrency(o.amount, o.currency)}</Td>
                 <Td><Badge className={statusColor(o.status)}>{o.status}</Badge></Td>
                 <Td>{formatDate(o.created_at)}</Td>
               </tr>
@@ -86,7 +86,7 @@ export function MerchantOrdersPage() {
             {data?.items?.map((o: any) => (
               <tr key={o.id}>
                 <Td>{o.product}</Td>
-                <Td>{formatCurrency(o.amount)}</Td>
+                <Td>{formatCurrency(o.amount, o.currency)}</Td>
                 <Td><Badge className={statusColor(o.status)}>{o.status}</Badge></Td>
                 <Td><AddressWithMapsLink address={o.customer_address} /></Td>
                 <Td className="font-mono text-xs">{o.reference_id?.slice(0, 16) || '—'}</Td>

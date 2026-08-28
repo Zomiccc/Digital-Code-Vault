@@ -5,9 +5,14 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatCurrency(value: number | string): string {
+export function formatCurrency(value: number | string, currency?: string | null): string {
   const num = typeof value === 'string' ? parseFloat(value) : value;
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(num);
+  const code = (currency || 'USD').toUpperCase();
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: code }).format(num);
+  } catch {
+    return `${getCurrencySymbol(code)}${num.toLocaleString()}`;
+  }
 }
 
 // Currency symbols for known ISO codes used across the catalog (Region.currency /

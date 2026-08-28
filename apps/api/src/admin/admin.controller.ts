@@ -142,7 +142,14 @@ export class AdminController {
       supplierId: body.supplier_id,
       categoryId: body.category_id,
       productType: body.product_type,
+      sku: body.sku,
     });
+  }
+
+  @Patch('products/:id/sku')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async updateProductSku(@Param('id') id: string, @Body() body: { sku?: string | null }) {
+    return this.productsService.updateProductSku(id, body.sku || null);
   }
 
   @Patch('products/:id/type')

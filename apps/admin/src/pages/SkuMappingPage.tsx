@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus } from 'lucide-react';
+import { Loader2, Plus, AlertCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Badge, Table, Th, Td, Input, Select, Modal } from '@/components/ui';
 import { formatDate } from '@/lib/utils';
@@ -29,9 +29,19 @@ export function SkuMappingPage() {
     queryFn: () => api.adminListConnectedProducts({ merchantId: merchantFilter || undefined, unmapped: unmappedOnly }),
   });
 
+  const { data: unmappedProducts } = useQuery({
+    queryKey: ['admin-connected-products-unmapped'],
+    queryFn: () => api.adminListConnectedProducts({ unmapped: true }),
+  });
+
+  const unmappedCount = Array.isArray(unmappedProducts) ? unmappedProducts.length : 0;
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.adminDeleteConnectedProduct(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-connected-products'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-connected-products'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-connected-products-unmapped'] });
+    },
   });
 
   if (isLoading) return <div className="text-muted-foreground">Loading SKU mappings...</div>;
@@ -49,6 +59,19 @@ export function SkuMappingPage() {
           <Plus className="mr-2 h-4 w-4" /> Add SKU Mapping
         </Button>
       </div>
+
+      {unmappedCount > 0 && !unmappedOnly && (
+        <div className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+          <AlertCircle className="h-5 w-5 shrink-0 text-amber-500" />
+          <div className="flex-1 text-sm">
+            <span className="font-semibold text-amber-600">{unmappedCount} product{unmappedCount !== 1 ? 's' : ''} need mapping</span>
+            <span className="text-muted-foreground"> — incoming webhook orders for these products are being rejected until mapped.</span>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setUnmappedOnly(true)}>
+            View unmapped
+          </Button>
+        </div>
+      )}
 
       <Card>
         <div className="grid gap-4 md:grid-cols-3">
@@ -161,6 +184,7 @@ function MappingModal({ target, products, onClose }: { target: any; products: an
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-connected-products'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-connected-products-unmapped'] });
       onClose();
     },
   });
@@ -251,6 +275,7 @@ function CreateMappingModal({ merchants, products, onClose }: { merchants: any[]
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-connected-products'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-connected-products-unmapped'] });
       onClose();
     },
   });
