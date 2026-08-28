@@ -46,13 +46,18 @@ export class MerchantDashboardController {
   @Post('dashboard/funding-requests')
   @UseGuards(JwtAuthGuard)
   async createFundingRequest(@Body() body: CreateFundingRequestDto, @Req() req: any) {
-    const request = await this.walletService.createFundingRequest(req.user.merchantId, body.amount, body.note, body.screenshot);
+    const request = await this.walletService.createFundingRequest(
+      req.user.merchantId, body.amount, body.note, body.screenshot, body.currency,
+    );
 
     // Notify admins on the support thread so they see the proof + message together
+    const merchant = await this.merchantsService.getWallet(req.user.merchantId);
+    const cur = merchant?.currency || 'USD';
+    const curSymbol = cur === 'PKR' ? 'Rs' : '$';
     await this.supportService.sendMerchantMessage(
       req.user.merchantId,
       req.user.name || req.user.email,
-      body.note || `I sent $${body.amount} via EasyPaisa/bank transfer — please verify and approve.`,
+      body.note || `I sent ${curSymbol}${body.amount} ${cur} via EasyPaisa/bank transfer — please verify and approve.`,
       body.screenshot,
       request.id,
     ).catch(() => {});

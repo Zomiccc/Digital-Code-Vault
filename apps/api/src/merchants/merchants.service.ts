@@ -234,6 +234,7 @@ export class MerchantsService {
         id: t.id,
         type: t.type,
         amount: t.amount,
+        balance_after: t.balanceAfter,
         reference_id: t.referenceId,
         created_at: t.createdAt,
       })),

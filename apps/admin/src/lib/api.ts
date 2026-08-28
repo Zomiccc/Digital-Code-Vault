@@ -187,6 +187,7 @@ export const api = {
   // Admin wallet / finance
   getAdminWallet: () => apiFetch('/admin/wallet'),
   getPlatformFinanceOverview: () => apiFetch('/admin/finance/overview'),
+  getCostBasis: () => apiFetch('/admin/finance/cost-basis'),
   updateExchangeRate: (rate: number) =>
     apiFetch('/admin/finance/exchange-rate', { method: 'PATCH', body: JSON.stringify({ rate }) }),
   getAdminWalletTransactions: (limit = 50, offset = 0) =>
@@ -207,7 +208,7 @@ export const api = {
   updateMyCurrency: (currency: string) =>
     apiFetch('/merchant/dashboard/currency', { method: 'PATCH', body: JSON.stringify({ currency }) }),
   listMyFundingRequests: () => apiFetch('/merchant/dashboard/funding-requests'),
-  createFundingRequest: (data: { amount: number; note?: string; screenshot: string }) =>
+  createFundingRequest: (data: { amount: number; note?: string; screenshot: string; currency?: string }) =>
     apiFetch('/merchant/dashboard/funding-requests', { method: 'POST', body: JSON.stringify(data) }),
   getPaymentDetails: () => apiFetch('/merchant/dashboard/payment-details'),
   listOrders: (limit = 50, offset = 0) =>

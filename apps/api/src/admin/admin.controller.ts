@@ -170,6 +170,12 @@ export class AdminController {
     return this.walletService.updateExchangeRate(body.rate, user.id);
   }
 
+  @Get('finance/cost-basis')
+  @Roles('SUPER_ADMIN', 'FINANCE')
+  async getCostBasis() {
+    return this.walletService.getCostBasisByCurrency();
+  }
+
   @Get('wallet/transactions')
   async getAdminWalletTransactions(@Query('limit') limit?: string, @Query('offset') offset?: string) {
     return this.walletService.getAdminWalletTransactions(

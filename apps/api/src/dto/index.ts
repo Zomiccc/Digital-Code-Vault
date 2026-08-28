@@ -199,6 +199,10 @@ export class CreateFundingRequestDto {
   @IsString()
   @MinLength(10)
   screenshot!: string; // base64 data-URL of the payment proof
+
+  @IsOptional()
+  @IsString()
+  currency?: string; // USD | PKR — must match merchant's currency
 }
 
 export class CreateSupportMessageDto {

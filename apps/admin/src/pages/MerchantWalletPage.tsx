@@ -11,6 +11,7 @@ import { formatCurrency, formatDate, statusColor } from '@/lib/utils';
 export function MerchantWalletPage() {
   const queryClient = useQueryClient();
   const [showAddFunds, setShowAddFunds] = useState(false);
+  const [showCurrencyPrompt, setShowCurrencyPrompt] = useState(false);
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
@@ -26,9 +27,15 @@ export function MerchantWalletPage() {
     enabled: showAddFunds && step >= 2,
   });
 
+  const merchantCurrency = wallet?.currency || 'USD';
+  const curSymbol = merchantCurrency === 'PKR' ? '\u20A8' : '$';
+
   const currencyMutation = useMutation({
     mutationFn: (currency: string) => api.updateMyCurrency(currency),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['wallet'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['wallet'] });
+      setShowCurrencyPrompt(false);
+    },
   });
 
   const resetWizard = () => {
@@ -46,6 +53,7 @@ export function MerchantWalletPage() {
         amount: parseFloat(amount),
         note: note || undefined,
         screenshot: screenshot!,
+        currency: merchantCurrency,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['my-funding-requests'] });
@@ -57,7 +65,7 @@ export function MerchantWalletPage() {
   const pickFile = (file: File | undefined) => {
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
-      alert('Image too large — please upload a screenshot under 2 MB.');
+      alert('Image too large - please upload a screenshot under 2 MB.');
       return;
     }
     const reader = new FileReader();
@@ -88,6 +96,8 @@ export function MerchantWalletPage() {
   const totalDeposited = credits.reduce((sum: number, t: any) => sum + parseFloat(t.amount), 0);
   const totalSpent = debits.reduce((sum: number, t: any) => sum + parseFloat(t.amount), 0);
 
+  const fmt = (val: any) => formatCurrency(val, merchantCurrency);
+
   return (
     <div className="space-y-8 animate-slide-up">
       <div className="flex items-center justify-between">
@@ -106,32 +116,28 @@ export function MerchantWalletPage() {
           <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
             <Wallet className="h-3.5 w-3.5" /> Current Balance
           </div>
-          <p className="mt-2 text-3xl font-semibold text-primary">{formatCurrency(wallet?.balance || 0)}</p>
+          <p className="mt-2 text-3xl font-semibold text-primary">{fmt(wallet?.balance || 0)}</p>
           <div className="mt-2 flex items-center gap-2">
-            <select
-              value={wallet?.currency || 'USD'}
-              onChange={(e) => currencyMutation.mutate(e.target.value)}
-              disabled={currencyMutation.isPending}
-              className="border rounded px-2 py-1 bg-background text-xs"
+            <Badge className="bg-primary/10 text-primary">{merchantCurrency}</Badge>
+            <button
+              onClick={() => setShowCurrencyPrompt(true)}
+              className="text-xs text-muted-foreground hover:text-foreground underline"
             >
-              <option value="USD">USD</option>
-              <option value="PKR">PKR</option>
-              <option value="EUR">EUR</option>
-            </select>
-            {currencyMutation.isPending && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+              Change currency
+            </button>
           </div>
         </Card>
         <Card>
           <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
             <TrendingUp className="h-3.5 w-3.5" /> Total Deposited
           </div>
-          <p className="mt-2 text-3xl font-semibold text-emerald-400">{formatCurrency(totalDeposited)}</p>
+          <p className="mt-2 text-3xl font-semibold text-emerald-400">{fmt(totalDeposited)}</p>
         </Card>
         <Card>
           <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
             <TrendingDown className="h-3.5 w-3.5" /> Total Spent
           </div>
-          <p className="mt-2 text-3xl font-semibold text-amber-400">{formatCurrency(totalSpent)}</p>
+          <p className="mt-2 text-3xl font-semibold text-amber-400">{fmt(totalSpent)}</p>
         </Card>
       </div>
 
@@ -153,15 +159,15 @@ export function MerchantWalletPage() {
             <tbody>
               {fundingRequests.map((r: any) => (
                 <tr key={r.id}>
-                  <Td className="font-semibold">{formatCurrency(r.amount)}</Td>
+                  <Td className="font-semibold">{formatCurrency(r.amount, r.currency || merchantCurrency)}</Td>
                   <Td>
                     {r.screenshot ? (
                       <a href={r.screenshot} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-primary hover:underline">
                         <ImageIcon className="h-4 w-4" /> View
                       </a>
-                    ) : '—'}
+                    ) : '\u2014'}
                   </Td>
-                  <Td className="text-sm text-muted-foreground">{r.note || '—'}</Td>
+                  <Td className="text-sm text-muted-foreground">{r.note || '\u2014'}</Td>
                   <Td>
                     <Badge className={statusColor(r.status)}>
                       {r.status === 'PENDING' && <Clock className="mr-1 h-3 w-3" />}
@@ -170,7 +176,7 @@ export function MerchantWalletPage() {
                       {r.status}
                     </Badge>
                   </Td>
-                  <Td className="text-sm text-muted-foreground">{r.admin_note || '—'}</Td>
+                  <Td className="text-sm text-muted-foreground">{r.admin_note || '\u2014'}</Td>
                   <Td className="text-muted-foreground">{formatDate(r.created_at)}</Td>
                 </tr>
               ))}
@@ -203,9 +209,9 @@ export function MerchantWalletPage() {
                       {t.type}
                     </Badge>
                   </Td>
-                  <Td className="font-semibold">{formatCurrency(t.amount)}</Td>
-                  <Td>{formatCurrency(t.balance_after)}</Td>
-                  <Td className="font-mono text-xs text-muted-foreground">{t.reference_id?.substring(0, 8) || '—'}</Td>
+                  <Td className="font-semibold">{fmt(t.amount)}</Td>
+                  <Td>{fmt(t.balance_after)}</Td>
+                  <Td className="font-mono text-xs text-muted-foreground">{t.reference_id?.substring(0, 8) || '\u2014'}</Td>
                   <Td className="text-muted-foreground">{formatDate(t.created_at)}</Td>
                 </tr>
               ))}
@@ -216,7 +222,57 @@ export function MerchantWalletPage() {
         )}
       </Card>
 
-      {/* ─── Add Funds wizard ─── */}
+      {/* Currency Selection Modal */}
+      <Modal open={showCurrencyPrompt} onClose={() => setShowCurrencyPrompt(false)} title="Choose Your Account Currency" size="sm">
+        <div className="space-y-4">
+          <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-3 text-sm text-amber-600">
+            <strong>Important:</strong> Your currency determines how all balances, funding requests, and transactions are displayed.
+            Please choose carefully - you can change it later, but all existing records remain in their original currency.
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button
+              onClick={() => currencyMutation.mutate('USD')}
+              disabled={currencyMutation.isPending}
+              className={`rounded-lg border p-4 text-left transition-all ${
+                merchantCurrency === 'USD' ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-2xl font-bold">$</span>
+                <div>
+                  <p className="font-semibold">USD</p>
+                  <p className="text-xs text-muted-foreground">US Dollar</p>
+                </div>
+              </div>
+            </button>
+            <button
+              onClick={() => currencyMutation.mutate('PKR')}
+              disabled={currencyMutation.isPending}
+              className={`rounded-lg border p-4 text-left transition-all ${
+                merchantCurrency === 'PKR' ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-2xl font-bold">PKR</span>
+                <div>
+                  <p className="font-semibold">PKR</p>
+                  <p className="text-xs text-muted-foreground">Pakistani Rupee</p>
+                </div>
+              </div>
+            </button>
+          </div>
+          {currencyMutation.isPending && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Updating...
+            </div>
+          )}
+          {currencyMutation.isError && (
+            <p className="text-sm text-destructive">{(currencyMutation.error as Error).message}</p>
+          )}
+        </div>
+      </Modal>
+
+      {/* Add Funds wizard */}
       <Modal open={showAddFunds} onClose={resetWizard} title="Add Funds to Wallet">
         {/* Step indicator */}
         <div className="mb-5 flex items-center gap-2 text-xs">
@@ -237,9 +293,13 @@ export function MerchantWalletPage() {
 
         {step === 1 && (
           <div className="space-y-4">
+            <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-sm">
+              Your account currency is <strong className="text-primary">{merchantCurrency}</strong>.
+              All funding requests and balances are in {merchantCurrency}.
+            </div>
             <p className="text-sm text-muted-foreground">How much do you want to add to your wallet?</p>
             <Input
-              label="Amount (USD)"
+              label={`Amount (${merchantCurrency})`}
               type="number"
               value={amount}
               onChange={(e: any) => setAmount(e.target.value)}
@@ -247,7 +307,7 @@ export function MerchantWalletPage() {
               required
             />
             <div className="flex flex-wrap gap-2">
-              {[50, 100, 250, 500].map((v) => (
+              {(merchantCurrency === 'PKR' ? [5000, 10000, 50000, 100000] : [50, 100, 250, 500]).map((v) => (
                 <button
                   key={v}
                   onClick={() => setAmount(String(v))}
@@ -255,7 +315,7 @@ export function MerchantWalletPage() {
                     amount === String(v) ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:border-primary/50'
                   }`}
                 >
-                  ${v}
+                  {curSymbol}{v.toLocaleString()}
                 </button>
               ))}
             </div>
@@ -268,7 +328,7 @@ export function MerchantWalletPage() {
         {step === 2 && (
           <div className="space-y-4">
             <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-sm">
-              Send exactly <strong className="text-primary">${parseFloat(amount || '0').toFixed(2)} USD</strong> to any account below.
+              Send exactly <strong className="text-primary">{curSymbol}{parseFloat(amount || '0').toLocaleString()} {merchantCurrency}</strong> to any account below.
             </div>
 
             {(paymentDetails?.accounts || []).map((acc: any) => (
@@ -335,7 +395,7 @@ export function MerchantWalletPage() {
               label="Message to admin (optional)"
               value={note}
               onChange={(e: any) => setNote(e.target.value)}
-              placeholder="e.g. Sent from my EasyPaisa — please approve"
+              placeholder="e.g. Sent from my EasyPaisa - please approve"
             />
 
             {fundingMutation.isError && (
@@ -369,8 +429,8 @@ export function MerchantWalletPage() {
             <div>
               <p className="text-lg font-semibold">Request submitted!</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Admin has been notified with your proof of ${parseFloat(amount).toFixed(2)}.
-                Your wallet will be credited once approved — track it under Funding Requests below or in the Help chat.
+                Admin has been notified with your proof of {curSymbol}{parseFloat(amount).toLocaleString()} {merchantCurrency}.
+                Your wallet will be credited once approved - track it under Funding Requests below or in the Help chat.
               </p>
             </div>
             <Button className="w-full" onClick={resetWizard}>Done</Button>

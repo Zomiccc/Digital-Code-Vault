@@ -172,7 +172,7 @@ export class WalletService {
 
   // ─── Funding Requests ───
 
-  async createFundingRequest(merchantId: string, amount: number, note?: string, screenshot?: string) {
+  async createFundingRequest(merchantId: string, amount: number, note?: string, screenshot?: string, currency?: string) {
     if (amount <= 0) {
       throw new BadRequestException('Amount must be greater than 0');
     }
@@ -184,12 +184,21 @@ export class WalletService {
     const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
     if (!merchant) throw new NotFoundException('Merchant not found');
 
+    // Enforce currency consistency: funding request must match merchant's currency
+    const requestCurrency = (currency || merchant.currency || 'USD').toUpperCase();
+    if (merchant.currency && requestCurrency !== merchant.currency.toUpperCase()) {
+      throw new BadRequestException(
+        `Currency mismatch: your account is set to ${merchant.currency} but you requested ${requestCurrency}. ` +
+        `Please switch your account currency to ${requestCurrency} first, or request funding in ${merchant.currency}.`
+      );
+    }
+
     const request = await this.prisma.fundingRequest.create({
       data: {
         merchantId,
         adminWalletId,
         amount,
-        currency: merchant.currency || 'USD',
+        currency: requestCurrency,
         note,
         screenshot,
         status: 'PENDING',
@@ -542,6 +551,90 @@ export class WalletService {
         created_at: r.createdAt,
         reviewed_at: r.reviewedAt,
       })),
+    };
+  }
+
+  // ─── Cost Basis by Currency (CodeBatch aggregation) ───
+
+  async getCostBasisByCurrency() {
+    // Fetch all batches with denomination + product info
+    const batches = await this.prisma.codeBatch.findMany({
+      include: {
+        denomination: {
+          include: {
+            product: { select: { id: true, name: true, region: true } },
+          },
+        },
+        supplier: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Group by currency
+    const byCurrency: Record<string, {
+      total_cost: number;
+      total_codes: number;
+      batch_count: number;
+      batches: any[];
+    }> = {};
+
+    for (const b of batches) {
+      const cur = b.currency || 'USD';
+      if (!byCurrency[cur]) {
+        byCurrency[cur] = { total_cost: 0, total_codes: 0, batch_count: 0, batches: [] };
+      }
+
+      const costPerCode = b.costPerCode ? Number(b.costPerCode) : 0;
+      const totalCost = costPerCode * b.quantity;
+
+      byCurrency[cur].total_cost += totalCost;
+      byCurrency[cur].total_codes += b.quantity;
+      byCurrency[cur].batch_count += 1;
+
+      byCurrency[cur].batches.push({
+        id: b.id,
+        product_name: b.denomination?.product?.name || '—',
+        product_region: b.denomination?.product?.region || '—',
+        denomination_face_value: b.denomination ? Number(b.denomination.faceValue) : 0,
+        denomination_currency: b.denomination?.currency || 'USD',
+        supplier_name: b.supplier?.name || '—',
+        quantity: b.quantity,
+        cost_per_code: costPerCode,
+        total_cost: totalCost,
+        currency: cur,
+        note: b.note,
+        created_at: b.createdAt,
+      });
+    }
+
+    // Get exchange rate for conversion
+    const rateSetting = await this.prisma.platformSetting.findUnique({ where: { key: 'USD_TO_PKR_RATE' } });
+    const usdToPkrRate = rateSetting ? parseFloat(rateSetting.value) : 280;
+
+    // Compute grand totals in USD and PKR
+    let totalUsd = 0;
+    let totalPkr = 0;
+    for (const [cur, data] of Object.entries(byCurrency)) {
+      if (cur === 'USD') {
+        totalUsd += data.total_cost;
+        totalPkr += data.total_cost * usdToPkrRate;
+      } else if (cur === 'PKR') {
+        totalPkr += data.total_cost;
+        totalUsd += data.total_cost / usdToPkrRate;
+      } else {
+        // Other currencies treated as USD equivalent for now
+        totalUsd += data.total_cost;
+        totalPkr += data.total_cost * usdToPkrRate;
+      }
+    }
+
+    return {
+      by_currency: byCurrency,
+      total_usd: totalUsd,
+      total_pkr: totalPkr,
+      usd_to_pkr_rate: usdToPkrRate,
+      total_batches: batches.length,
+      total_codes: batches.reduce((sum, b) => sum + b.quantity, 0),
     };
   }
 }

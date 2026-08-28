@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Wallet, TrendingUp, TrendingDown, DollarSign, Check, X, AlertTriangle,
-  Download, Zap, CreditCard,
+  Download, Zap, CreditCard, Database, ChevronRight,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, StatCard, Badge, Button, Table, Th, Td, Modal, Input } from '@/components/ui';
@@ -14,9 +14,10 @@ export function FinancePage() {
   const [rejectModal, setRejectModal] = useState<any>(null);
   const [adminNote, setAdminNote] = useState('');
   const [editedAmount, setEditedAmount] = useState('');
-  const [tab, setTab] = useState<'overview' | 'funding' | 'reconciliation' | 'transactions'>('overview');
+  const [tab, setTab] = useState<'overview' | 'costs' | 'funding' | 'reconciliation' | 'transactions'>('overview');
   const [displayCurrency, setDisplayCurrency] = useState<'USD' | 'PKR'>('USD');
   const [rateInput, setRateInput] = useState('');
+  const [batchDetailCurrency, setBatchDetailCurrency] = useState<string | null>(null);
 
   const { data: wallet, isLoading } = useQuery({
     queryKey: ['admin-wallet'],
@@ -26,6 +27,12 @@ export function FinancePage() {
   const { data: financeOverview } = useQuery({
     queryKey: ['platform-finance-overview'],
     queryFn: api.getPlatformFinanceOverview,
+  });
+
+  const { data: costBasis } = useQuery({
+    queryKey: ['cost-basis'],
+    queryFn: api.getCostBasis,
+    enabled: tab === 'costs' || tab === 'overview',
   });
 
   const { data: reconciliation } = useQuery({
@@ -84,7 +91,7 @@ export function FinancePage() {
 
       {/* Tabs */}
       <div className="flex gap-1 rounded-lg border border-border bg-card p-1 overflow-x-auto">
-        {(['overview', 'funding', 'reconciliation', 'transactions'] as const).map((t) => (
+        {(['overview', 'costs', 'funding', 'reconciliation', 'transactions'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -204,6 +211,63 @@ export function FinancePage() {
         </>
       )}
 
+      {tab === 'costs' && (
+        <>
+          {/* Grand totals */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              label="Total Cost (USD)"
+              value={formatCurrency(costBasis?.total_usd || 0)}
+              icon={DollarSign}
+              color="text-blue-400"
+            />
+            <StatCard
+              label="Total Cost (PKR)"
+              value={formatCurrency(costBasis?.total_pkr || 0)}
+              icon={DollarSign}
+              color="text-emerald-400"
+            />
+            <StatCard
+              label="Total Batches"
+              value={costBasis?.total_batches || 0}
+              icon={Database}
+              color="text-amber-400"
+            />
+            <StatCard
+              label="Total Codes"
+              value={costBasis?.total_codes || 0}
+              icon={Database}
+              color="text-purple-400"
+            />
+          </div>
+
+          {/* Cost by currency — clickable cards */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {costBasis?.by_currency && Object.entries(costBasis.by_currency).map(([cur, data]: [string, any]) => (
+              <Card key={cur} hover className="cursor-pointer" >
+                <div className="flex items-center justify-between" onClick={() => setBatchDetailCurrency(cur)}>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Badge className={cur === 'USD' ? 'bg-blue-500/20 text-blue-400' : cur === 'PKR' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}>
+                        {cur}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">{data.batch_count} batches · {data.total_codes} codes</span>
+                    </div>
+                    <p className="mt-2 text-2xl font-semibold">{formatCurrency(data.total_cost)}</p>
+                  </div>
+                  <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                </div>
+              </Card>
+            ))}
+            {(!costBasis?.by_currency || Object.keys(costBasis.by_currency).length === 0) && (
+              <Card>
+                <p className="text-sm text-muted-foreground">No cost data yet. Upload codes with cost info to see batch costs here.</p>
+              </Card>
+            )}
+          </div>
+        </>
+      )}
+
       {tab === 'funding' && (
         <Card>
           <h2 className="mb-4 text-lg font-semibold tracking-tight">Merchant Funding Requests</h2>
@@ -228,7 +292,10 @@ export function FinancePage() {
                       <div className="font-medium">{r.merchant?.name}</div>
                       <div className="text-xs text-muted-foreground">{r.merchant?.email}</div>
                     </Td>
-                    <Td className="font-semibold">{formatCurrency(r.amount)}</Td>
+                    <Td className="font-semibold">
+                      {formatCurrency(r.amount, r.currency)}
+                      <div className="text-xs text-muted-foreground">{r.currency}</div>
+                    </Td>
                     <Td>
                       {r.screenshot ? (
                         <a href={r.screenshot} target="_blank" rel="noreferrer" className="text-primary hover:underline text-sm">View proof</a>
@@ -356,6 +423,64 @@ export function FinancePage() {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Batch Detail Modal */}
+      <Modal
+        open={!!batchDetailCurrency}
+        onClose={() => setBatchDetailCurrency(null)}
+        title={`Batch Details — ${batchDetailCurrency || ''}`}
+        size="xl"
+      >
+        {batchDetailCurrency && costBasis?.by_currency?.[batchDetailCurrency] ? (
+          <>
+            <div className="mb-4 grid grid-cols-3 gap-4">
+              <div className="rounded-lg bg-muted/50 p-3">
+                <p className="text-xs text-muted-foreground">Total Cost</p>
+                <p className="text-lg font-semibold">{formatCurrency(costBasis.by_currency[batchDetailCurrency].total_cost)}</p>
+              </div>
+              <div className="rounded-lg bg-muted/50 p-3">
+                <p className="text-xs text-muted-foreground">Total Codes</p>
+                <p className="text-lg font-semibold">{costBasis.by_currency[batchDetailCurrency].total_codes}</p>
+              </div>
+              <div className="rounded-lg bg-muted/50 p-3">
+                <p className="text-xs text-muted-foreground">Batches</p>
+                <p className="text-lg font-semibold">{costBasis.by_currency[batchDetailCurrency].batch_count}</p>
+              </div>
+            </div>
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Product</Th>
+                  <Th>Denom</Th>
+                  <Th>Supplier</Th>
+                  <Th>Qty</Th>
+                  <Th>Cost/Code</Th>
+                  <Th>Total</Th>
+                  <Th>Date</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {costBasis.by_currency[batchDetailCurrency].batches.map((b: any) => (
+                  <tr key={b.id}>
+                    <Td className="text-sm">
+                      <div className="font-medium">{b.product_name}</div>
+                      <div className="text-xs text-muted-foreground">{b.product_region}</div>
+                    </Td>
+                    <Td className="text-sm">${b.denomination_face_value}</Td>
+                    <Td className="text-sm">{b.supplier_name}</Td>
+                    <Td className="text-sm">{b.quantity}</Td>
+                    <Td className="text-sm font-mono">{b.cost_per_code ? formatCurrency(b.cost_per_code) : '—'}</Td>
+                    <Td className="text-sm font-semibold">{formatCurrency(b.total_cost)}</Td>
+                    <Td className="text-xs text-muted-foreground">{formatDate(b.created_at)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">No data</p>
+        )}
       </Modal>
     </div>
   );
