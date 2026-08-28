@@ -121,6 +121,11 @@ export function MerchantIntegrationsPage() {
     queryFn: api.listConnectedProducts,
   });
 
+  const { data: registeredEndpoints } = useQuery({
+    queryKey: ['webhook-endpoints'],
+    queryFn: api.listWebhooks,
+  });
+
   const regenerateSecretMutation = useMutation({
     mutationFn: api.regenerateWebhookSecret,
     onSuccess: () => {
@@ -134,20 +139,31 @@ export function MerchantIntegrationsPage() {
     setTimeout(() => setCopied(null), 2000);
   };
 
-  const getPlatformStatus = (platformId: string): 'connected' | 'not_connected' | 'config_required' | 'error' => {
+  // The DCV WordPress plugin registers its delivery URL as /wp-json/dcv/v1/webhook.
+  // An ACTIVE endpoint matching that shape means the plugin successfully connected,
+  // even before any order events have been forwarded.
+  const hasActivePluginEndpoint = Array.isArray(registeredEndpoints)
+    && registeredEndpoints.some((e: any) =>
+      e.status === 'ACTIVE' && /\/wp-json\/dcv\/v1\/webhook/i.test(e.url || ''));
+
+  const getPlatformStatus = (platformId: string): 'connected' | 'registered' | 'not_connected' | 'config_required' | 'error' => {
     if (!webhookSecretData?.webhook_secret) return 'config_required';
 
     const platformWebhooks = Array.isArray(incomingWebhooks)
       ? incomingWebhooks.filter((w: any) => w.platform?.toLowerCase() === platformId)
       : [];
 
-    if (platformWebhooks.length === 0) return 'not_connected';
-
     const hasErrors = platformWebhooks.some((w: any) => w.processingStatus === 'FAILED');
     const hasCompleted = platformWebhooks.some((w: any) => w.processingStatus === 'COMPLETED');
 
-    if (hasErrors && !hasCompleted) return 'error';
     if (hasCompleted) return 'connected';
+    if (hasErrors) return 'error';
+
+    // No successfully processed events yet — but for plugin-based platforms an
+    // ACTIVE registered endpoint proves the connection itself is established.
+    const usesPlugin = platformId === 'woocommerce' || platformId === 'wordpress';
+    if (usesPlugin && hasActivePluginEndpoint) return 'registered';
+
     return 'not_connected';
   };
 
@@ -163,6 +179,7 @@ export function MerchantIntegrationsPage() {
 
   const statusConfig = {
     connected: { label: 'Connected', color: 'bg-emerald-500/20 text-emerald-400', icon: CheckCircle2 },
+    registered: { label: 'Registered — Awaiting Orders', color: 'bg-sky-500/20 text-sky-400', icon: CheckCircle2 },
     not_connected: { label: 'Not Connected', color: 'bg-muted text-muted-foreground', icon: XCircle },
     config_required: { label: 'Configuration Required', color: 'bg-amber-500/20 text-amber-400', icon: AlertCircle },
     error: { label: 'Error', color: 'bg-red-500/20 text-red-400', icon: AlertCircle },
@@ -254,6 +271,38 @@ export function MerchantIntegrationsPage() {
             </Button>
           </div>
         </div>
+      </Card>
+
+      {/* Registered Sites */}
+      <Card>
+        <h2 className="text-lg font-semibold tracking-tight flex items-center gap-2 mb-3">
+          <Globe className="h-5 w-5" /> Registered Sites
+        </h2>
+        <p className="text-sm text-muted-foreground mb-3">
+          External sites that have successfully registered with your account via the DCV plugin
+        </p>
+        {!Array.isArray(registeredEndpoints) || registeredEndpoints.length === 0 ? (
+          <div className="rounded-lg bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+            No sites registered yet. Install the plugin on your store and click "Register this site".
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {registeredEndpoints.map((e: any) => (
+              <div key={e.id} className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <code className="block truncate font-mono text-sm">{e.url}</code>
+                  <span className="text-xs text-muted-foreground">
+                    Registered {formatDate(e.createdAt)}
+                  </span>
+                </div>
+                <Badge className={e.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-muted text-muted-foreground'}>
+                  {e.status === 'ACTIVE' && <CheckCircle2 className="h-3 w-3 mr-1" />}
+                  {e.status}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
 
       {/* Platform Integration Cards */}
