@@ -384,10 +384,12 @@ export class FulfillmentService {
           }
         }
         if (!combination) {
-          this.logger.warn(`[Fulfillment] Exact denomination ${exactDenominationId} not available or does not evenly divide ${amount} for NORMAL product. No auto-combination fallback.`);
+          this.logger.warn(`[Fulfillment] Exact denomination ${exactDenominationId} not available or does not evenly divide ${amount} — falling back to combination search.`);
         }
-      } else {
-        // No exact denomination mapped — try single denomination that matches exactly
+      }
+
+      if (!combination) {
+        // No exact denomination mapped (or exact denom failed) — try single denomination that matches exactly
         const exactMatch = activeStock.find((d) => d.faceValue === amount && d.availableCount > 0);
         if (exactMatch) {
           combination = [{ denominationId: exactMatch.denominationId, faceValue: exactMatch.faceValue, count: 1 }];
