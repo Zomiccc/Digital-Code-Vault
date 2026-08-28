@@ -125,6 +125,15 @@ class DCV_Webhook_Settings_Page {
             ? esc_url_raw( trim( $input['api_url'] ) )
             : 'http://localhost:3000/api/v1';
 
+        // Strip trailing /webhooks/incoming if the user pasted the webhook endpoint
+        // URL instead of the API base URL (common mistake — the integrations page
+        // prominently shows the webhook endpoint URL).
+        $sanitized['api_url'] = preg_replace(
+            '#/webhooks/incoming/?$#i',
+            '',
+            $sanitized['api_url']
+        );
+
         $sanitized['skip_verification'] = isset( $input['skip_verification'] ) ? '1' : '';
 
         $new_secret = isset( $input['webhook_secret'] ) ? trim( $input['webhook_secret'] ) : '';

@@ -51,7 +51,9 @@ class DCV_Webhook_API_Client {
      */
     public function __construct( $api_key, $base_url, $webhook_secret = '' ) {
         $this->api_key        = $api_key;
-        $this->base_url       = rtrim( $base_url, '/' );
+        // Strip trailing /webhooks/incoming if present — users often paste the
+        // webhook endpoint URL from the integrations page instead of the API base.
+        $this->base_url       = rtrim( preg_replace( '#/webhooks/incoming/?$#i', '', $base_url ), '/' );
         $this->webhook_secret = $webhook_secret;
     }
 
