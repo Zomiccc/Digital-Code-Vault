@@ -270,6 +270,7 @@ model Denomination {
   productId  String
   faceValue  Decimal
   currency   String   @default("USD")
+  sku        String?  // Per-denomination SKU for WordPress mapping (e.g. PSN-KSA-10)
   createdAt  DateTime @default(now())
 
   product   Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -280,6 +281,7 @@ model Denomination {
 
   @@unique([productId, faceValue, currency])
   @@index([productId])
+  @@index([sku])
 }
 
 model CodeItem {

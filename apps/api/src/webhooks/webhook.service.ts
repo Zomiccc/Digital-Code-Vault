@@ -808,6 +808,30 @@ export class WebhookService implements OnModuleDestroy {
         }
       }
 
+      // Strategy 2b: Denomination SKU match
+      // If the webhook SKU matches a Denomination.sku (e.g. PSN-KSA-10),
+      // resolve the product from the denomination and set exactDenominationId.
+      if (!product && searchSku) {
+        const denomSkuMatch = await this.prisma.denomination.findFirst({
+          where: { sku: searchSku },
+          include: { product: true },
+        });
+        if (denomSkuMatch?.product && denomSkuMatch.product.status === 'ACTIVE') {
+          product = denomSkuMatch.product;
+          exactDenominationId = denomSkuMatch.id;
+          this.logger.log(`[WEBHOOK] Auto-matched product "${product.name}" via denomination SKU: ${searchSku} (denomination faceValue: ${denomSkuMatch.faceValue})`);
+          // Persist the auto-match on the ConnectedProduct so future orders use Strategy 1
+          if (connectedProduct?.id) {
+            await this.prisma.connectedProduct.update({
+              where: { id: connectedProduct.id },
+              data: { dcvProductId: product.id, dcvDenominationId: denomSkuMatch.id },
+            }).catch((err) => {
+              this.logger.warn(`[WEBHOOK] Failed to persist denomination SKU auto-match on ConnectedProduct: ${(err as Error).message}`);
+            });
+          }
+        }
+      }
+
       // Strategy 3: Exact UUID match (rarely matches for WooCommerce)
       if (!product && searchId) {
         product = await this.prisma.product.findUnique({ where: { id: searchId } });

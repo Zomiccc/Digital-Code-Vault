@@ -24,56 +24,78 @@ import {
   FundingRequestActionDto,
 } from '../dto';
 
-// Common brand abbreviations for SKU generation
-const BRAND_ABBREVIATIONS: Record<string, string> = {
-  'playstation': 'PSN',
-  'psn': 'PSN',
-  'playstationnetwork': 'PSN',
-  'itunes': 'ITUNES',
-  'apple': 'APPLE',
-  'appstore': 'APPLE',
-  'googleplay': 'GOOGLE',
-  'google': 'GOOGLE',
-  'steam': 'STEAM',
-  'amazon': 'AMAZON',
-  'netflix': 'NETFLIX',
-  'spotify': 'SPOTIFY',
-  'xbox': 'XBOX',
-  'nintendo': 'NINTENDO',
-  'eshop': 'NINTENDO',
-  'roblox': 'ROBLOX',
-  'fortnite': 'FORNITE',
-  'vbucks': 'VBUX',
-  'pubg': 'PUBG',
-  'freefire': 'FREEFIRE',
-  'valorant': 'VALORANT',
-  'leagueoflegends': 'LOL',
-  'riot': 'RIOT',
-  'paypal': 'PAYPAL',
-  'visa': 'VISA',
-  'mastercard': 'MASTERCARD',
-  'crypto': 'CRYPTO',
-  'usdt': 'USDT',
-  'usdc': 'USDC',
-  'binance': 'BINANCE',
+// ─── Exact product-name → SKU-prefix mapping (user-defined) ───
+// Keys are matched case-insensitively against the full product name.
+// If a product name doesn't match any entry, a fallback is generated.
+const PRODUCT_SKU_MAP: Record<string, string> = {
+  'psn ksa digital code': 'PSN-KSA',
+  'psn ca digital code': 'PSN-CA',
+  'psn au digital code': 'PSN-GLO',
+  'psn hk digital code': 'PSN-GLO-1',
+  'psn qa digital code': 'PSN-GLO-2',
+  'psn in digital code': 'PSN-GLO-3',
+  'xbox usa gift card': 'XBOX-USA',
+  'xbox game pass subscriptions': 'XBOX-USA-1',
+  'itunes usa gift card': 'ITUNES-USA',
+  'nintendo eshop usa': 'NINTENDO-USA',
+  'nintendo switch online membership': 'NINTENDO-USA-1',
+  'steam usa wallet code': 'STEAM-USA',
+  'google play usa gift card': 'GOOGLE-USA',
+  'pubg uc — pakistan region': 'PUBG-PK',
+  'pubg uc — other regions': 'PUBG-GLO',
+  'pubg uc - pakistan region': 'PUBG-PK',
+  'pubg uc - other regions': 'PUBG-GLO',
+  'nord vpn subscription': 'NVS-GLO',
+  'ms office pro plus keys': 'MOPP-GLO',
+  'windows 11 pro key': 'WPK-GLO',
+  'razer gold usa': 'RGU-USA',
+  'roblox robux': 'ROBLOX-USA',
+  'fortnite v-bucks usa': 'FORNITE-USA',
 };
 
-function generateSkuPrefix(name: string): string {
-  const lower = name.toLowerCase();
+// Fuzzy keyword-based fallback mapping for products not in the exact map
+const KEYWORD_SKU_MAP: { keywords: string[]; prefix: string }[] = [
+  { keywords: ['playstation', 'psn'], prefix: 'PSN' },
+  { keywords: ['itunes', 'apple'], prefix: 'ITUNES' },
+  { keywords: ['google play'], prefix: 'GOOGLE' },
+  { keywords: ['steam'], prefix: 'STEAM' },
+  { keywords: ['xbox'], prefix: 'XBOX' },
+  { keywords: ['nintendo', 'eshop'], prefix: 'NINTENDO' },
+  { keywords: ['roblox'], prefix: 'ROBLOX' },
+  { keywords: ['fortnite', 'v-bucks', 'vbucks'], prefix: 'FORNITE' },
+  { keywords: ['pubg'], prefix: 'PUBG' },
+  { keywords: ['netflix'], prefix: 'NETFLIX' },
+  { keywords: ['spotify'], prefix: 'SPOTIFY' },
+  { keywords: ['amazon'], prefix: 'AMAZON' },
+  { keywords: ['razer'], prefix: 'RAZER' },
+  { keywords: ['nord vpn', 'nordvpn'], prefix: 'NVS' },
+  { keywords: ['office', 'msoffice'], prefix: 'MOPP' },
+  { keywords: ['windows'], prefix: 'WPK' },
+];
 
-  // Check if any known brand keyword appears in the name
-  for (const [keyword, abbr] of Object.entries(BRAND_ABBREVIATIONS)) {
-    if (lower.includes(keyword)) {
-      return abbr;
+function resolveProductSkuBase(name: string, region: string): string {
+  const lower = name.toLowerCase().trim();
+
+  // 1. Exact match against the user-defined map
+  if (PRODUCT_SKU_MAP[lower]) {
+    return PRODUCT_SKU_MAP[lower];
+  }
+
+  // 2. Keyword-based fallback
+  for (const entry of KEYWORD_SKU_MAP) {
+    if (entry.keywords.some((kw) => lower.includes(kw))) {
+      const regionCode = (region || 'GLO').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'GLO';
+      return `${entry.prefix}-${regionCode}`;
     }
   }
 
-  // Fallback: use first letters of each word, max 4 chars
+  // 3. Generic fallback: first letters of each word + region
   const words = name.toUpperCase().replace(/[^A-Z\s]/g, '').split(/\s+/).filter(Boolean);
+  const regionCode = (region || 'GLO').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'GLO';
   if (words.length === 1) {
-    return words[0].slice(0, 6);
+    return `${words[0].slice(0, 4)}-${regionCode}`;
   }
-  return words.map((w) => w[0]).join('').slice(0, 4);
+  return `${words.map((w) => w[0]).join('').slice(0, 4)}-${regionCode}`;
 }
 
 @Controller('admin')
@@ -648,9 +670,11 @@ export class AdminController {
   @Post('products/auto-generate-skus')
   @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
   async autoGenerateSkus() {
+    // Fetch ALL products with their denominations (not just ones without SKU)
+    // because we need to generate per-denomination SKUs too
     const products = await this.prisma.product.findMany({
-      where: { sku: null },
-      include: { denominations: true },
+      include: { denominations: { orderBy: { faceValue: 'asc' } } },
+      orderBy: { name: 'asc' },
     });
 
     // Build a set of existing SKUs to avoid collisions
@@ -659,62 +683,68 @@ export class AdminController {
     for (const p of allProducts) {
       if (p.sku) existingSkus.add(p.sku.toUpperCase());
     }
+    const allDenoms = await this.prisma.denomination.findMany({ select: { sku: true } });
+    for (const d of allDenoms) {
+      if (d.sku) existingSkus.add(d.sku.toUpperCase());
+    }
 
-    const updated: { id: string; name: string; sku: string }[] = [];
+    const updated: { id: string; name: string; sku: string; denominationSkus: { id: string; faceValue: number; sku: string }[] }[] = [];
     const skipped: { id: string; name: string; reason: string }[] = [];
 
     for (const product of products) {
-      // Generate a prefix from the product name
-      // e.g. "PlayStation USA Digital Code" -> "PSN", "iTunes Gift Card" -> "ITUNES"
-      const prefix = generateSkuPrefix(product.name);
-      const region = (product.region || 'USA').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'USA';
+      const baseSku = resolveProductSkuBase(product.name, product.region);
 
-      if (product.denominations.length === 0) {
-        // No denominations — generate a product-level SKU
-        const sku = `${prefix}-${region}`;
-        if (existingSkus.has(sku.toUpperCase())) {
-          // Add a numeric suffix
+      // Generate or update product-level SKU
+      if (!product.sku) {
+        let productSku = baseSku;
+        // Ensure uniqueness with numeric suffix if needed
+        if (existingSkus.has(productSku.toUpperCase())) {
           let suffix = 1;
-          let uniqueSku = `${prefix}-${region}-${suffix}`;
-          while (existingSkus.has(uniqueSku.toUpperCase())) {
+          while (existingSkus.has(`${baseSku}-${suffix}`.toUpperCase())) {
             suffix++;
-            uniqueSku = `${prefix}-${region}-${suffix}`;
           }
-          existingSkus.add(uniqueSku.toUpperCase());
-          await this.prisma.product.update({ where: { id: product.id }, data: { sku: uniqueSku } });
-          updated.push({ id: product.id, name: product.name, sku: uniqueSku });
-        } else {
-          existingSkus.add(sku.toUpperCase());
-          await this.prisma.product.update({ where: { id: product.id }, data: { sku } });
-          updated.push({ id: product.id, name: product.name, sku });
+          productSku = `${baseSku}-${suffix}`;
         }
+        existingSkus.add(productSku.toUpperCase());
+        await this.prisma.product.update({ where: { id: product.id }, data: { sku: productSku } });
       } else {
-        // Has denominations — generate SKU per denomination value
-        // Product SKU uses the first denomination or a generic one
-        const denomValues = product.denominations
-          .map((d) => Number(d.faceValue))
-          .sort((a, b) => a - b);
+        existingSkus.add(product.sku.toUpperCase());
+      }
 
-        if (denomValues.length === 1) {
-          const sku = `${prefix}-${region}-${denomValues[0]}`;
-          if (!existingSkus.has(sku.toUpperCase())) {
-            existingSkus.add(sku.toUpperCase());
-            await this.prisma.product.update({ where: { id: product.id }, data: { sku } });
-            updated.push({ id: product.id, name: product.name, sku });
-          } else {
-            skipped.push({ id: product.id, name: product.name, reason: `SKU ${sku} already exists` });
-          }
-        } else {
-          // Multiple denominations — use a generic product SKU
-          const sku = `${prefix}-${region}`;
-          if (!existingSkus.has(sku.toUpperCase())) {
-            existingSkus.add(sku.toUpperCase());
-            await this.prisma.product.update({ where: { id: product.id }, data: { sku } });
-            updated.push({ id: product.id, name: product.name, sku });
-          } else {
-            skipped.push({ id: product.id, name: product.name, reason: `SKU ${sku} already exists` });
-          }
+      const productSku = product.sku || baseSku;
+      const denominationSkus: { id: string; faceValue: number; sku: string }[] = [];
+
+      // Generate per-denomination SKUs: PREFIX-REGION-FACEVALUE (e.g. PSN-KSA-10)
+      for (const denom of product.denominations) {
+        const faceValue = Number(denom.faceValue);
+        const denomSku = `${baseSku}-${faceValue}`;
+
+        if (denom.sku) {
+          // Already has a SKU — skip
+          existingSkus.add(denom.sku.toUpperCase());
+          denominationSkus.push({ id: denom.id, faceValue, sku: denom.sku });
+          continue;
         }
+
+        // Ensure uniqueness
+        let finalDenomSku = denomSku;
+        if (existingSkus.has(denomSku.toUpperCase())) {
+          let suffix = 1;
+          while (existingSkus.has(`${denomSku}-${suffix}`.toUpperCase())) {
+            suffix++;
+          }
+          finalDenomSku = `${denomSku}-${suffix}`;
+        }
+
+        existingSkus.add(finalDenomSku.toUpperCase());
+        await this.prisma.denomination.update({ where: { id: denom.id }, data: { sku: finalDenomSku } });
+        denominationSkus.push({ id: denom.id, faceValue, sku: finalDenomSku });
+      }
+
+      if (denominationSkus.length > 0 || !product.sku) {
+        updated.push({ id: product.id, name: product.name, sku: productSku, denominationSkus });
+      } else {
+        skipped.push({ id: product.id, name: product.name, reason: 'Product and all denominations already have SKUs' });
       }
     }
 
@@ -748,7 +778,7 @@ export class AdminController {
         id: d.id,
         faceValue: Number(d.faceValue),
         currency: d.currency,
-        sku: p.sku ? `${p.sku}-${Number(d.faceValue)}` : '',
+        sku: d.sku || '',
       })),
     }));
 

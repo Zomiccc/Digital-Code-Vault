@@ -341,10 +341,15 @@ function SkuExportModal({ open, onClose }: { open: boolean; onClose: () => void 
 
   const downloadCsv = () => {
     if (!skuData?.items) return;
-    const rows = [['Product Name', 'Region', 'SKU', 'Denominations']];
+    const rows = [['Product Name', 'Region', 'Product SKU', 'Denomination FaceValue', 'Denomination SKU']];
     for (const item of skuData.items) {
-      const denoms = item.denominations.map((d: any) => `$${d.faceValue}`).join(', ');
-      rows.push([item.name, item.region, item.sku, denoms]);
+      if (item.denominations.length === 0) {
+        rows.push([item.name, item.region, item.sku, '', '']);
+      } else {
+        for (const d of item.denominations) {
+          rows.push([item.name, item.region, item.sku, String(d.faceValue), d.sku || '']);
+        }
+      }
     }
     const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -373,11 +378,18 @@ function SkuExportModal({ open, onClose }: { open: boolean; onClose: () => void 
 
         {genResult && (
           <div className="rounded-lg bg-muted/50 p-3 text-sm">
-            <p className="font-medium">Generated: {genResult.generated} | Skipped: {genResult.skipped}</p>
+            <p className="font-medium">Generated: {genResult.generated} | Skipped: {genResult.skipped_count}</p>
             {genResult.updated?.length > 0 && (
-              <div className="mt-2 space-y-1">
+              <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
                 {genResult.updated.map((u: any) => (
-                  <div key={u.id} className="text-xs text-muted-foreground">{u.name} → <span className="font-mono text-primary">{u.sku}</span></div>
+                  <div key={u.id} className="text-xs text-muted-foreground">
+                    {u.name} → <span className="font-mono text-primary">{u.sku}</span>
+                    {u.denominationSkus?.length > 0 && (
+                      <span className="ml-2">
+                        ({u.denominationSkus.map((ds: any) => ds.sku).join(', ')})
+                      </span>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
@@ -392,8 +404,8 @@ function SkuExportModal({ open, onClose }: { open: boolean; onClose: () => void 
               <tr>
                 <Th>Product</Th>
                 <Th>Region</Th>
-                <Th>SKU</Th>
-                <Th>Denominations</Th>
+                <Th>Product SKU</Th>
+                <Th>Denomination SKUs</Th>
               </tr>
             </thead>
             <tbody>
@@ -402,7 +414,20 @@ function SkuExportModal({ open, onClose }: { open: boolean; onClose: () => void 
                   <Td className="font-medium text-sm">{item.name}</Td>
                   <Td className="text-sm">{item.region}</Td>
                   <Td className="font-mono text-xs">{item.sku || <span className="text-muted-foreground">—</span>}</Td>
-                  <Td className="text-xs text-muted-foreground">{item.denominations.map((d: any) => `$${d.faceValue}`).join(', ') || '—'}</Td>
+                  <Td className="text-xs">
+                    {item.denominations.length > 0 ? (
+                      <div className="space-y-0.5">
+                        {item.denominations.map((d: any) => (
+                          <div key={d.id} className="font-mono">
+                            <span className="text-muted-foreground">${d.faceValue}</span> →{' '}
+                            <span className={d.sku ? 'text-primary' : 'text-muted-foreground'}>{d.sku || '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </Td>
                 </tr>
               ))}
             </tbody>
