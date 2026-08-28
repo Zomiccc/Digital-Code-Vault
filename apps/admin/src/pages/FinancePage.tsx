@@ -13,14 +13,19 @@ export function FinancePage() {
   const [approveModal, setApproveModal] = useState<any>(null);
   const [rejectModal, setRejectModal] = useState<any>(null);
   const [adminNote, setAdminNote] = useState('');
+  const [editedAmount, setEditedAmount] = useState('');
   const [tab, setTab] = useState<'overview' | 'funding' | 'reconciliation' | 'transactions'>('overview');
-  const [fundModal, setFundModal] = useState(false);
-  const [fundAmount, setFundAmount] = useState('');
-  const [fundDesc, setFundDesc] = useState('');
+  const [displayCurrency, setDisplayCurrency] = useState<'USD' | 'PKR'>('USD');
+  const [rateInput, setRateInput] = useState('');
 
   const { data: wallet, isLoading } = useQuery({
     queryKey: ['admin-wallet'],
     queryFn: api.getAdminWallet,
+  });
+
+  const { data: financeOverview } = useQuery({
+    queryKey: ['platform-finance-overview'],
+    queryFn: api.getPlatformFinanceOverview,
   });
 
   const { data: reconciliation } = useQuery({
@@ -30,12 +35,13 @@ export function FinancePage() {
   });
 
   const approveMutation = useMutation({
-    mutationFn: (id: string) => api.approveFundingRequest(id, adminNote || undefined),
+    mutationFn: (id: string) => api.approveFundingRequest(id, adminNote || undefined, editedAmount ? parseFloat(editedAmount) : undefined),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-wallet'] });
       queryClient.invalidateQueries({ queryKey: ['reconciliation'] });
       setApproveModal(null);
       setAdminNote('');
+      setEditedAmount('');
     },
   });
 
@@ -48,13 +54,11 @@ export function FinancePage() {
     },
   });
 
-  const fundMutation = useMutation({
-    mutationFn: () => api.initializeAdminWallet(parseFloat(fundAmount), fundDesc || undefined),
+  const rateMutation = useMutation({
+    mutationFn: (rate: number) => api.updateExchangeRate(rate),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-wallet'] });
-      setFundModal(false);
-      setFundAmount('');
-      setFundDesc('');
+      queryClient.invalidateQueries({ queryKey: ['platform-finance-overview'] });
+      setRateInput('');
     },
   });
 
@@ -95,23 +99,70 @@ export function FinancePage() {
 
       {tab === 'overview' && (
         <>
+          {/* Currency toggle + exchange rate */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Display currency:</span>
+              <div className="flex gap-1 rounded-lg border border-border bg-card p-1">
+                {(['USD', 'PKR'] as const).map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setDisplayCurrency(c)}
+                    className={`rounded-md px-3 py-1 text-sm font-medium transition-all ${
+                      displayCurrency === c ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">USD→PKR:</span>
+              <input
+                type="number"
+                value={rateInput || financeOverview?.usd_to_pkr_rate || ''}
+                onChange={(e) => setRateInput(e.target.value)}
+                className="w-24 border rounded px-2 py-1 bg-background text-sm"
+                placeholder={String(financeOverview?.usd_to_pkr_rate || 280)}
+              />
+              <Button size="sm" variant="outline" onClick={() => rateMutation.mutate(parseFloat(rateInput))} disabled={rateMutation.isPending || !rateInput}>
+                Update
+              </Button>
+            </div>
+          </div>
+
           {/* Stats */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="Admin Wallet Balance" value={formatCurrency(wallet?.balance || 0)} icon={Wallet} color="text-primary" />
-            <StatCard label="Fulfillment Revenue" value={formatCurrency(wallet?.fulfillment_revenue || 0)} icon={TrendingUp} color="text-emerald-400" />
-            <StatCard label="Funding Disbursed" value={formatCurrency(wallet?.funding_disbursed || 0)} icon={TrendingDown} color="text-amber-400" />
-            <StatCard label="Total Merchant Balances" value={formatCurrency(wallet?.total_merchant_balances || 0)} icon={DollarSign} color="text-blue-400" />
+            <StatCard
+              label={`Total Merchant Balances (${displayCurrency})`}
+              value={formatCurrency(
+                displayCurrency === 'USD'
+                  ? (financeOverview?.total_usd_balance || 0) + (financeOverview?.total_eur_balance || 0)
+                  : ((financeOverview?.total_usd_balance || 0) + (financeOverview?.total_eur_balance || 0)) * (financeOverview?.usd_to_pkr_rate || 280) + (financeOverview?.total_pkr_balance || 0)
+              )}
+              icon={DollarSign}
+              color="text-blue-400"
+            />
+            <StatCard label="Cost Basis (USDT)" value={formatCurrency(financeOverview?.cost_basis_usdt || 0)} icon={TrendingDown} color="text-amber-400" />
+            <StatCard label="Fulfillment Revenue" value={formatCurrency(financeOverview?.fulfillment_revenue || 0)} icon={TrendingUp} color="text-emerald-400" />
+            <StatCard label="Funding Disbursed" value={formatCurrency(financeOverview?.funding_disbursed || 0)} icon={TrendingDown} color="text-amber-400" />
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <StatCard label="Total Platform Funds" value={formatCurrency(wallet?.total_platform_funds || 0)} icon={Wallet} />
-            <StatCard label="Total Credits" value={formatCurrency(wallet?.total_credits || 0)} icon={TrendingUp} color="text-emerald-400" />
-          </div>
-
-          <div className="flex justify-end">
-            <Button onClick={() => setFundModal(true)}>
-              <Wallet className="mr-2 h-4 w-4" /> Fund Admin Wallet
-            </Button>
+          {/* Currency breakdown */}
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Card>
+              <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">USD Balances</div>
+              <p className="mt-2 text-2xl font-semibold text-primary">{formatCurrency(financeOverview?.total_usd_balance || 0)}</p>
+            </Card>
+            <Card>
+              <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">PKR Balances</div>
+              <p className="mt-2 text-2xl font-semibold text-primary">{formatCurrency(financeOverview?.total_pkr_balance || 0)}</p>
+            </Card>
+            <Card>
+              <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">EUR Balances</div>
+              <p className="mt-2 text-2xl font-semibold text-primary">{formatCurrency(financeOverview?.total_eur_balance || 0)}</p>
+            </Card>
           </div>
 
           {/* Recent transactions */}
@@ -190,7 +241,7 @@ export function FinancePage() {
                     <Td>
                       {r.status === 'PENDING' && (
                         <div className="flex gap-2">
-                          <Button size="sm" onClick={() => { setApproveModal(r); setAdminNote(''); }}>
+                          <Button size="sm" onClick={() => { setApproveModal(r); setAdminNote(''); setEditedAmount(''); }}>
                             <Check className="h-3.5 w-3.5" /> Approve
                           </Button>
                           <Button size="sm" variant="destructive" onClick={() => { setRejectModal(r); setAdminNote(''); }}>
@@ -270,7 +321,7 @@ export function FinancePage() {
         <div className="space-y-4">
           <div className="rounded-lg bg-muted/50 p-3">
             <p className="text-sm"><span className="text-muted-foreground">Merchant:</span> {approveModal?.merchant?.name}</p>
-            <p className="text-sm"><span className="text-muted-foreground">Amount:</span> <span className="font-semibold">{formatCurrency(approveModal?.amount)}</span></p>
+            <p className="text-sm"><span className="text-muted-foreground">Requested Amount:</span> <span className="font-semibold">{formatCurrency(approveModal?.amount)}</span></p>
             <p className="text-sm"><span className="text-muted-foreground">Note:</span> {approveModal?.note || '—'}</p>
             {approveModal?.screenshot && (
               <a href={approveModal.screenshot} target="_blank" rel="noreferrer">
@@ -279,11 +330,12 @@ export function FinancePage() {
               </a>
             )}
           </div>
+          <Input label="Edit Amount (optional — leave blank to approve as requested)" type="number" value={editedAmount} onChange={(e: any) => setEditedAmount(e.target.value)} placeholder={String(approveModal?.amount || '')} />
           <Input label="Admin Note (optional)" value={adminNote} onChange={(e: any) => setAdminNote(e.target.value)} placeholder="Approval note..." />
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setApproveModal(null)}>Cancel</Button>
             <Button onClick={() => approveMutation.mutate(approveModal?.id)} disabled={approveMutation.isPending}>
-              <Check className="h-4 w-4" /> Approve
+              <Check className="h-4 w-4" /> Approve{editedAmount && parseFloat(editedAmount) !== approveModal?.amount ? ` (${formatCurrency(parseFloat(editedAmount))})` : ''}
             </Button>
           </div>
         </div>
@@ -303,18 +355,6 @@ export function FinancePage() {
               <X className="h-4 w-4" /> Reject
             </Button>
           </div>
-        </div>
-      </Modal>
-
-      {/* Fund Admin Wallet Modal */}
-      <Modal open={fundModal} onClose={() => setFundModal(false)} title="Fund Admin Wallet">
-        <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">Add funds to the platform admin wallet. This is an admin-only operation.</p>
-          <Input label="Amount (USD)" type="number" value={fundAmount} onChange={(e) => setFundAmount(e.target.value)} placeholder="10000" />
-          <Input label="Description (optional)" value={fundDesc} onChange={(e) => setFundDesc(e.target.value)} placeholder="Demo funding" />
-          <Button onClick={() => fundMutation.mutate()} disabled={fundMutation.isPending || !fundAmount || parseFloat(fundAmount) <= 0}>
-            {fundMutation.isPending ? 'Funding...' : 'Fund Wallet'}
-          </Button>
         </div>
       </Modal>
     </div>

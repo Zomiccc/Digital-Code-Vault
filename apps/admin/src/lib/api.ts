@@ -186,12 +186,15 @@ export const api = {
 
   // Admin wallet / finance
   getAdminWallet: () => apiFetch('/admin/wallet'),
+  getPlatformFinanceOverview: () => apiFetch('/admin/finance/overview'),
+  updateExchangeRate: (rate: number) =>
+    apiFetch('/admin/finance/exchange-rate', { method: 'PATCH', body: JSON.stringify({ rate }) }),
   getAdminWalletTransactions: (limit = 50, offset = 0) =>
     apiFetch(`/admin/wallet/transactions?limit=${limit}&offset=${offset}`),
   listFundingRequests: (status?: string) =>
     apiFetch(`/admin/wallet/funding-requests${status ? `?status=${status}` : ''}`),
-  approveFundingRequest: (id: string, note?: string) =>
-    apiFetch(`/admin/wallet/funding-requests/${id}/approve`, { method: 'POST', body: JSON.stringify({ note }) }),
+  approveFundingRequest: (id: string, note?: string, editedAmount?: number) =>
+    apiFetch(`/admin/wallet/funding-requests/${id}/approve`, { method: 'POST', body: JSON.stringify({ note, editedAmount }) }),
   rejectFundingRequest: (id: string, note?: string) =>
     apiFetch(`/admin/wallet/funding-requests/${id}/reject`, { method: 'POST', body: JSON.stringify({ note }) }),
   getReconciliationReport: (limit = 100, offset = 0) =>
@@ -201,6 +204,8 @@ export const api = {
 
   // Merchant endpoints
   getWallet: () => apiFetch('/merchant/dashboard/wallet'),
+  updateMyCurrency: (currency: string) =>
+    apiFetch('/merchant/dashboard/currency', { method: 'PATCH', body: JSON.stringify({ currency }) }),
   listMyFundingRequests: () => apiFetch('/merchant/dashboard/funding-requests'),
   createFundingRequest: (data: { amount: number; note?: string; screenshot: string }) =>
     apiFetch('/merchant/dashboard/funding-requests', { method: 'POST', body: JSON.stringify(data) }),
@@ -382,6 +387,8 @@ export const api = {
     apiFetch(`/admin/connected-products/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   adminDeleteConnectedProduct: (id: string) =>
     apiFetch(`/admin/connected-products/${id}`, { method: 'DELETE' }),
+  adminUpdateMerchantCurrency: (id: string, currency: string) =>
+    apiFetch(`/admin/merchants/${id}/currency`, { method: 'PATCH', body: JSON.stringify({ currency }) }),
   adminListEmailLogs: (params?: { limit?: number; status?: string; recipient?: string }) => {
     const qs = new URLSearchParams();
     if (params?.limit) qs.set('limit', String(params.limit));
@@ -390,4 +397,8 @@ export const api = {
     const s = qs.toString();
     return apiFetch(`/admin/email-logs${s ? `?${s}` : ''}`);
   },
+  adminAutoGenerateSkus: () =>
+    apiFetch('/admin/products/auto-generate-skus', { method: 'POST' }),
+  adminExportSkus: () =>
+    apiFetch('/admin/products/sku-export'),
 };

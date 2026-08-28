@@ -26,6 +26,11 @@ export function MerchantWalletPage() {
     enabled: showAddFunds && step >= 2,
   });
 
+  const currencyMutation = useMutation({
+    mutationFn: (currency: string) => api.updateMyCurrency(currency),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['wallet'] }),
+  });
+
   const resetWizard = () => {
     setShowAddFunds(false);
     setStep(1);
@@ -102,7 +107,19 @@ export function MerchantWalletPage() {
             <Wallet className="h-3.5 w-3.5" /> Current Balance
           </div>
           <p className="mt-2 text-3xl font-semibold text-primary">{formatCurrency(wallet?.balance || 0)}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{wallet?.currency}</p>
+          <div className="mt-2 flex items-center gap-2">
+            <select
+              value={wallet?.currency || 'USD'}
+              onChange={(e) => currencyMutation.mutate(e.target.value)}
+              disabled={currencyMutation.isPending}
+              className="border rounded px-2 py-1 bg-background text-xs"
+            >
+              <option value="USD">USD</option>
+              <option value="PKR">PKR</option>
+              <option value="EUR">EUR</option>
+            </select>
+            {currencyMutation.isPending && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+          </div>
         </Card>
         <Card>
           <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">

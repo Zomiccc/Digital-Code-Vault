@@ -219,6 +219,10 @@ export class FundingRequestActionDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @IsOptional()
+  @IsNumber()
+  editedAmount?: number;
 }
 
 // ─── Catalog DTOs ───

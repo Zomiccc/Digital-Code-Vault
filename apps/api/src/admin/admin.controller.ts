@@ -24,6 +24,58 @@ import {
   FundingRequestActionDto,
 } from '../dto';
 
+// Common brand abbreviations for SKU generation
+const BRAND_ABBREVIATIONS: Record<string, string> = {
+  'playstation': 'PSN',
+  'psn': 'PSN',
+  'playstationnetwork': 'PSN',
+  'itunes': 'ITUNES',
+  'apple': 'APPLE',
+  'appstore': 'APPLE',
+  'googleplay': 'GOOGLE',
+  'google': 'GOOGLE',
+  'steam': 'STEAM',
+  'amazon': 'AMAZON',
+  'netflix': 'NETFLIX',
+  'spotify': 'SPOTIFY',
+  'xbox': 'XBOX',
+  'nintendo': 'NINTENDO',
+  'eshop': 'NINTENDO',
+  'roblox': 'ROBLOX',
+  'fortnite': 'FORNITE',
+  'vbucks': 'VBUX',
+  'pubg': 'PUBG',
+  'freefire': 'FREEFIRE',
+  'valorant': 'VALORANT',
+  'leagueoflegends': 'LOL',
+  'riot': 'RIOT',
+  'paypal': 'PAYPAL',
+  'visa': 'VISA',
+  'mastercard': 'MASTERCARD',
+  'crypto': 'CRYPTO',
+  'usdt': 'USDT',
+  'usdc': 'USDC',
+  'binance': 'BINANCE',
+};
+
+function generateSkuPrefix(name: string): string {
+  const lower = name.toLowerCase();
+
+  // Check if any known brand keyword appears in the name
+  for (const [keyword, abbr] of Object.entries(BRAND_ABBREVIATIONS)) {
+    if (lower.includes(keyword)) {
+      return abbr;
+    }
+  }
+
+  // Fallback: use first letters of each word, max 4 chars
+  const words = name.toUpperCase().replace(/[^A-Z\s]/g, '').split(/\s+/).filter(Boolean);
+  if (words.length === 1) {
+    return words[0].slice(0, 6);
+  }
+  return words.map((w) => w[0]).join('').slice(0, 4);
+}
+
 @Controller('admin')
 @UseGuards(JwtAuthGuard, AdminAuthGuard)
 export class AdminController {
@@ -71,11 +123,29 @@ export class AdminController {
     return this.merchantsService.addWalletCredit(id, body.amount, user.id, req.ip);
   }
 
+  @Patch('merchants/:id/currency')
+  @Roles('SUPER_ADMIN', 'FINANCE')
+  async updateMerchantCurrency(@Param('id') id: string, @Body() body: { currency: string }) {
+    return this.merchantsService.updateMerchantCurrency(id, body.currency);
+  }
+
   // ─── Admin Wallet / Finance ───
 
   @Get('wallet')
   async getAdminWallet() {
     return this.walletService.getAdminWallet();
+  }
+
+  @Get('finance/overview')
+  @Roles('SUPER_ADMIN', 'FINANCE')
+  async getPlatformFinanceOverview() {
+    return this.walletService.getPlatformFinanceOverview();
+  }
+
+  @Patch('finance/exchange-rate')
+  @Roles('SUPER_ADMIN', 'FINANCE')
+  async updateExchangeRate(@Body() body: { rate: number }, @CurrentUser() user: any) {
+    return this.walletService.updateExchangeRate(body.rate, user.id);
   }
 
   @Get('wallet/transactions')
@@ -99,7 +169,7 @@ export class AdminController {
     @CurrentUser() user: any,
     @Req() req: any,
   ) {
-    return this.walletService.approveFundingRequest(id, user.id, body.note, req.ip);
+    return this.walletService.approveFundingRequest(id, user.id, body.note, req.ip, body.editedAmount);
   }
 
   @Post('wallet/funding-requests/:id/reject')
@@ -571,5 +641,117 @@ export class AdminController {
     ]);
 
     return { items, total };
+  }
+
+  // ─── SKU Auto-Generation ───
+
+  @Post('products/auto-generate-skus')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async autoGenerateSkus() {
+    const products = await this.prisma.product.findMany({
+      where: { sku: null },
+      include: { denominations: true },
+    });
+
+    // Build a set of existing SKUs to avoid collisions
+    const existingSkus = new Set<string>();
+    const allProducts = await this.prisma.product.findMany({ select: { sku: true } });
+    for (const p of allProducts) {
+      if (p.sku) existingSkus.add(p.sku.toUpperCase());
+    }
+
+    const updated: { id: string; name: string; sku: string }[] = [];
+    const skipped: { id: string; name: string; reason: string }[] = [];
+
+    for (const product of products) {
+      // Generate a prefix from the product name
+      // e.g. "PlayStation USA Digital Code" -> "PSN", "iTunes Gift Card" -> "ITUNES"
+      const prefix = generateSkuPrefix(product.name);
+      const region = (product.region || 'USA').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'USA';
+
+      if (product.denominations.length === 0) {
+        // No denominations — generate a product-level SKU
+        const sku = `${prefix}-${region}`;
+        if (existingSkus.has(sku.toUpperCase())) {
+          // Add a numeric suffix
+          let suffix = 1;
+          let uniqueSku = `${prefix}-${region}-${suffix}`;
+          while (existingSkus.has(uniqueSku.toUpperCase())) {
+            suffix++;
+            uniqueSku = `${prefix}-${region}-${suffix}`;
+          }
+          existingSkus.add(uniqueSku.toUpperCase());
+          await this.prisma.product.update({ where: { id: product.id }, data: { sku: uniqueSku } });
+          updated.push({ id: product.id, name: product.name, sku: uniqueSku });
+        } else {
+          existingSkus.add(sku.toUpperCase());
+          await this.prisma.product.update({ where: { id: product.id }, data: { sku } });
+          updated.push({ id: product.id, name: product.name, sku });
+        }
+      } else {
+        // Has denominations — generate SKU per denomination value
+        // Product SKU uses the first denomination or a generic one
+        const denomValues = product.denominations
+          .map((d) => Number(d.faceValue))
+          .sort((a, b) => a - b);
+
+        if (denomValues.length === 1) {
+          const sku = `${prefix}-${region}-${denomValues[0]}`;
+          if (!existingSkus.has(sku.toUpperCase())) {
+            existingSkus.add(sku.toUpperCase());
+            await this.prisma.product.update({ where: { id: product.id }, data: { sku } });
+            updated.push({ id: product.id, name: product.name, sku });
+          } else {
+            skipped.push({ id: product.id, name: product.name, reason: `SKU ${sku} already exists` });
+          }
+        } else {
+          // Multiple denominations — use a generic product SKU
+          const sku = `${prefix}-${region}`;
+          if (!existingSkus.has(sku.toUpperCase())) {
+            existingSkus.add(sku.toUpperCase());
+            await this.prisma.product.update({ where: { id: product.id }, data: { sku } });
+            updated.push({ id: product.id, name: product.name, sku });
+          } else {
+            skipped.push({ id: product.id, name: product.name, reason: `SKU ${sku} already exists` });
+          }
+        }
+      }
+    }
+
+    return {
+      generated: updated.length,
+      skipped_count: skipped.length,
+      updated,
+      skipped,
+    };
+  }
+
+  @Get('products/sku-export')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER', 'SUPPORT', 'FINANCE')
+  async exportSkus() {
+    const products = await this.prisma.product.findMany({
+      where: { status: 'ACTIVE' },
+      include: {
+        denominations: {
+          orderBy: { faceValue: 'asc' },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    const items = products.map((p) => ({
+      id: p.id,
+      name: p.name,
+      region: p.region,
+      sku: p.sku || '',
+      denominations: p.denominations.map((d) => ({
+        id: d.id,
+        faceValue: Number(d.faceValue),
+        currency: d.currency,
+        sku: p.sku ? `${p.sku}-${Number(d.faceValue)}` : '',
+      })),
+    }));
+
+    return { items, total: items.length };
   }
 }

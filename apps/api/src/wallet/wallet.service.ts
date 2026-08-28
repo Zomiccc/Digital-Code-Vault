@@ -181,13 +181,15 @@ export class WalletService {
     }
 
     const adminWalletId = await this.getOrCreateAdminWallet();
+    const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
+    if (!merchant) throw new NotFoundException('Merchant not found');
 
     const request = await this.prisma.fundingRequest.create({
       data: {
         merchantId,
         adminWalletId,
         amount,
-        currency: 'USD',
+        currency: merchant.currency || 'USD',
         note,
         screenshot,
         status: 'PENDING',
@@ -235,7 +237,7 @@ export class WalletService {
     }));
   }
 
-  async approveFundingRequest(requestId: string, adminId: string, adminNote?: string, ip?: string) {
+  async approveFundingRequest(requestId: string, adminId: string, adminNote?: string, ip?: string, editedAmount?: number) {
     const request = await this.prisma.fundingRequest.findUnique({
       where: { id: requestId },
       include: { merchant: true },
@@ -249,71 +251,44 @@ export class WalletService {
       throw new BadRequestException(`Funding request already ${request.status}`);
     }
 
+    // Admin can edit the amount before approving
+    const finalAmount = editedAmount !== undefined && editedAmount > 0 ? editedAmount : Number(request.amount);
+
+    // Admin wallet ID still needed for FK, but no balance check or debit
     const adminWalletId = await this.getOrCreateAdminWallet();
-    const adminWallet = await this.prisma.adminWallet.findUnique({ where: { id: adminWalletId } });
 
-    if (!adminWallet) {
-      throw new NotFoundException('Admin wallet not found');
-    }
-
-    if (Number(adminWallet.balance) < Number(request.amount)) {
-      throw new BadRequestException({
-        error: 'INSUFFICIENT_ADMIN_WALLET',
-        code: 'INSUFFICIENT_ADMIN_WALLET',
-        message: `Admin wallet has insufficient balance. Required: ${request.amount}, Available: ${adminWallet.balance}`,
-      });
-    }
-
-    // Atomic: debit admin wallet + credit merchant wallet + create both transaction records + update funding request
+    // Atomic: credit merchant wallet + create transaction + update funding request
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Debit admin wallet
-      const updatedAdminWallet = await tx.adminWallet.update({
-        where: { id: adminWalletId },
-        data: { balance: { decrement: request.amount } },
-      });
-
-      // 2. Create admin wallet transaction
-      await tx.adminWalletTransaction.create({
-        data: {
-          adminWalletId,
-          type: 'DEBIT',
-          amount: request.amount,
-          balanceAfter: updatedAdminWallet.balance,
-          referenceId: requestId,
-          source: 'FUNDING',
-          description: `Funding approved for ${request.merchant.name}`,
-        },
-      });
-
-      // 3. Credit merchant wallet
+      // 1. Credit merchant wallet
       const updatedMerchant = await tx.merchant.update({
         where: { id: request.merchantId },
-        data: { walletBalance: { increment: request.amount } },
+        data: { walletBalance: { increment: finalAmount } },
       });
 
-      // 4. Create merchant wallet transaction
+      // 2. Create merchant wallet transaction
       await tx.walletTransaction.create({
         data: {
           merchantId: request.merchantId,
           type: 'CREDIT',
-          amount: request.amount,
+          amount: finalAmount,
           balanceAfter: updatedMerchant.walletBalance,
           referenceId: requestId,
         },
       });
 
-      // 5. Update funding request
+      // 3. Update funding request with final amount
       const updatedRequest = await tx.fundingRequest.update({
         where: { id: requestId },
         data: {
           status: 'APPROVED',
-          adminNote,
+          amount: finalAmount,
+          adminNote: adminNote || (editedAmount !== undefined && editedAmount !== Number(request.amount) ? `Amount edited from ${request.amount} to ${finalAmount}` : undefined),
           reviewedBy: adminId,
           reviewedAt: new Date(),
         },
       });
 
-      return { updatedRequest, updatedAdminWallet, updatedMerchant };
+      return { updatedRequest, updatedMerchant };
     });
 
     // Audit log
@@ -325,22 +300,23 @@ export class WalletService {
       entityId: requestId,
       metadata: {
         merchantId: request.merchantId,
-        amount: request.amount,
-        adminWalletBalanceAfter: result.updatedAdminWallet.balance,
+        originalAmount: Number(request.amount),
+        finalAmount,
+        edited: editedAmount !== undefined && editedAmount !== Number(request.amount),
         merchantBalanceAfter: result.updatedMerchant.walletBalance,
       },
       ip,
     });
 
-    this.logger.log(`Funding request ${requestId} approved. Merchant ${request.merchantId} credited ${request.amount}`);
+    this.logger.log(`Funding request ${requestId} approved. Merchant ${request.merchantId} credited ${finalAmount}`);
 
     return {
       id: result.updatedRequest.id,
       status: result.updatedRequest.status,
+      amount: result.updatedRequest.amount,
       admin_note: result.updatedRequest.adminNote,
       reviewed_at: result.updatedRequest.reviewedAt,
       merchant_new_balance: result.updatedMerchant.walletBalance,
-      admin_wallet_new_balance: result.updatedAdminWallet.balance,
     };
   }
 
@@ -386,6 +362,70 @@ export class WalletService {
   }
 
   // ─── Reconciliation ───
+
+  async getPlatformFinanceOverview() {
+    // Get admin-configured exchange rate (USD to PKR)
+    const rateSetting = await this.prisma.platformSetting.findUnique({ where: { key: 'USD_TO_PKR_RATE' } });
+    const usdToPkrRate = rateSetting ? parseFloat(rateSetting.value) : 280; // default 280
+
+    // Aggregate merchant balances grouped by currency
+    const merchants = await this.prisma.merchant.findMany({
+      where: { status: 'ACTIVE' },
+      select: { walletBalance: true, currency: true },
+    });
+
+    const balancesByCurrency: Record<string, number> = {};
+    for (const m of merchants) {
+      const cur = m.currency || 'USD';
+      if (!balancesByCurrency[cur]) balancesByCurrency[cur] = 0;
+      balancesByCurrency[cur] += Number(m.walletBalance);
+    }
+
+    // Cost basis in USDT: sum of all fulfilled order costs (from wallet debits for fulfilled orders)
+    const fulfilledDebits = await this.prisma.walletTransaction.aggregate({
+      where: { type: 'DEBIT' },
+      _sum: { amount: true },
+    });
+
+    // Total fulfillment revenue (from admin wallet credits)
+    const adminWalletId = await this.getOrCreateAdminWallet();
+    const fulfillmentRevenue = await this.prisma.adminWalletTransaction.aggregate({
+      where: { adminWalletId, type: 'CREDIT', source: 'FULFILLMENT' },
+      _sum: { amount: true },
+    });
+
+    // Total funding disbursed
+    const fundingDisbursed = await this.prisma.adminWalletTransaction.aggregate({
+      where: { adminWalletId, type: 'DEBIT', source: 'FUNDING' },
+      _sum: { amount: true },
+    });
+
+    // Count active merchants
+    const activeMerchantCount = merchants.length;
+
+    return {
+      balances_by_currency: balancesByCurrency,
+      total_usd_balance: balancesByCurrency['USD'] || 0,
+      total_pkr_balance: balancesByCurrency['PKR'] || 0,
+      total_eur_balance: balancesByCurrency['EUR'] || 0,
+      cost_basis_usdt: Number(fulfilledDebits._sum.amount) || 0,
+      fulfillment_revenue: Number(fulfillmentRevenue._sum.amount) || 0,
+      funding_disbursed: Number(fundingDisbursed._sum.amount) || 0,
+      active_merchant_count: activeMerchantCount,
+      usd_to_pkr_rate: usdToPkrRate,
+    };
+  }
+
+  async updateExchangeRate(rate: number, adminId: string) {
+    if (rate <= 0) throw new BadRequestException('Exchange rate must be greater than 0');
+    await this.prisma.platformSetting.upsert({
+      where: { key: 'USD_TO_PKR_RATE' },
+      create: { key: 'USD_TO_PKR_RATE', value: String(rate) },
+      update: { value: String(rate) },
+    });
+    this.logger.log(`USD to PKR rate updated to ${rate} by admin ${adminId}`);
+    return { key: 'USD_TO_PKR_RATE', value: String(rate) };
+  }
 
   async getReconciliationReport(limit = 100, offset = 0) {
     const [fulfillments, total] = await Promise.all([

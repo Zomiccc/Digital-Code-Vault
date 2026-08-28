@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, Req, Res, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Req, Res, UseGuards, BadRequestException } from '@nestjs/common';
 import { Response } from 'express';
 import { MerchantsService } from './merchants.service';
 import { SupportService } from './support.service';
@@ -29,6 +29,12 @@ export class MerchantDashboardController {
   @UseGuards(JwtAuthGuard)
   async getWallet(@Req() req: any) {
     return this.merchantsService.getWallet(req.user.merchantId);
+  }
+
+  @Patch('dashboard/currency')
+  @UseGuards(JwtAuthGuard)
+  async updateMyCurrency(@Body() body: { currency: string }, @Req() req: any) {
+    return this.merchantsService.updateMerchantCurrency(req.user.merchantId, body.currency);
   }
 
   @Get('dashboard/funding-requests')

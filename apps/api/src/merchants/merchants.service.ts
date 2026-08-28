@@ -135,6 +135,16 @@ export class MerchantsService {
     return { success: true };
   }
 
+  async updateMerchantCurrency(id: string, currency: string) {
+    const validCurrencies = ['USD', 'PKR', 'EUR'];
+    const upper = currency.toUpperCase();
+    if (!validCurrencies.includes(upper)) {
+      throw new BadRequestException(`Invalid currency. Must be one of: ${validCurrencies.join(', ')}`);
+    }
+    const updated = await this.prisma.merchant.update({ where: { id }, data: { currency: upper } });
+    return { id: updated.id, currency: updated.currency };
+  }
+
   async getWebhookSecret(merchantId: string) {
     const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
     if (!merchant) throw new NotFoundException('Merchant not found');

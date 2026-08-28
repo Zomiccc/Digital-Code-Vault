@@ -68,8 +68,8 @@ export class FulfillmentService {
     const exactDenominationId = params.denominationId || null;
     const variantId = params.variantId || null;
 
-    // Validate amount
-    if (amount <= 0) {
+    // Validate amount — skip when denomination is explicitly mapped (amount is derived from denomination)
+    if (amount <= 0 && !exactDenominationId) {
       throw new BadRequestException({
         error: 'INVALID_REQUEST',
         code: 'INVALID_AMOUNT',
@@ -373,18 +373,15 @@ export class FulfillmentService {
     // admin-configured Essentials bundle.
     if (!combination && !essentialsConfigured) {
       if (exactDenominationId) {
+        // Denomination is explicitly mapped — use it directly, ignore order amount.
+        // The amount passed in should already match the denomination faceValue (set by webhook),
+        // but we use the denomination's actual faceValue as the source of truth.
         const exactDenom = activeStock.find((d) => d.denominationId === exactDenominationId);
         if (exactDenom && exactDenom.availableCount > 0) {
-          const remainder = amount % exactDenom.faceValue;
-          if (remainder === 0) {
-            const count = amount / exactDenom.faceValue;
-            if (count <= exactDenom.availableCount) {
-              combination = [{ denominationId: exactDenominationId, faceValue: exactDenom.faceValue, count }];
-            }
-          }
+          combination = [{ denominationId: exactDenominationId, faceValue: exactDenom.faceValue, count: 1 }];
         }
         if (!combination) {
-          this.logger.warn(`[Fulfillment] Exact denomination ${exactDenominationId} not available or does not evenly divide ${amount} — falling back to combination search.`);
+          this.logger.warn(`[Fulfillment] Exact denomination ${exactDenominationId} has no available stock — falling back to combination search.`);
         }
       }
 
@@ -451,7 +448,8 @@ export class FulfillmentService {
     let totalCost = combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
 
     // Validate combination total exactly matches the requested amount
-    if (totalCost !== amount) {
+    // Skip this check when denomination is explicitly mapped (amount is derived from denomination)
+    if (totalCost !== amount && !exactDenominationId) {
       this.logger.error(`[Fulfillment] Combination total ${totalCost} does not match requested amount ${amount}`);
       const failedReq = await this.prisma.fulfillmentRequest.create({
         data: {

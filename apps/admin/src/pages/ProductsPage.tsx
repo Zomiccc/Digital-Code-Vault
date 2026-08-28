@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo } from 'react';
-import { Plus, Settings2, Package } from 'lucide-react';
+import { Plus, Settings2, Package, Tags, Download } from 'lucide-react';
 import { api } from '@/lib/api';
-import { Card, Button, Input, Select, Modal, Badge } from '@/components/ui';
+import { Card, Button, Input, Select, Modal, Badge, Table, Th, Td } from '@/components/ui';
 import { statusColor } from '@/lib/utils';
 
 function EssentialsBundleDialog({ product, onClose }: { product: any; onClose: () => void }) {
@@ -145,6 +145,8 @@ export function ProductsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showDenom, setShowDenom] = useState<any>(null);
   const [showEssentials, setShowEssentials] = useState<any>(null);
+  const [showSkuExport, setShowSkuExport] = useState(false);
+  const [skuGenResult, setSkuGenResult] = useState<any>(null);
   const [form, setForm] = useState({ name: '', region: '', supplierId: '', product_type: 'NORMAL', category_id: '', sku: '' });
   const [denomValue, setDenomValue] = useState('');
 
@@ -187,9 +189,14 @@ export function ProductsPage() {
           <h1 className="text-3xl font-semibold tracking-tight">Products</h1>
           <p className="text-sm text-muted-foreground">Manage products, denominations, and Essentials configurations</p>
         </div>
-        <Button onClick={() => setShowCreate(true)}>
-          <Plus className="mr-2 h-4 w-4" /> Add Product
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowSkuExport(true)}>
+            <Tags className="mr-2 h-4 w-4" /> SKU Export
+          </Button>
+          <Button onClick={() => setShowCreate(true)}>
+            <Plus className="mr-2 h-4 w-4" /> Add Product
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -306,7 +313,105 @@ export function ProductsPage() {
       {showEssentials && (
         <EssentialsBundleDialog product={showEssentials} onClose={() => setShowEssentials(null)} />
       )}
+
+      {/* SKU Export Modal */}
+      <SkuExportModal open={showSkuExport} onClose={() => setShowSkuExport(false)} />
     </div>
+  );
+}
+
+function SkuExportModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [genResult, setGenResult] = useState<any>(null);
+
+  const { data: skuData, isLoading } = useQuery({
+    queryKey: ['sku-export'],
+    queryFn: api.adminExportSkus,
+    enabled: open,
+  });
+
+  const generateMutation = useMutation({
+    mutationFn: api.adminAutoGenerateSkus,
+    onSuccess: (result) => {
+      setGenResult(result);
+      queryClient.invalidateQueries({ queryKey: ['sku-export'] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+    },
+  });
+
+  const downloadCsv = () => {
+    if (!skuData?.items) return;
+    const rows = [['Product Name', 'Region', 'SKU', 'Denominations']];
+    for (const item of skuData.items) {
+      const denoms = item.denominations.map((d: any) => `$${d.faceValue}`).join(', ');
+      rows.push([item.name, item.region, item.sku, denoms]);
+    }
+    const csv = rows.map((r) => r.map((c) => `"${c}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'dcv-skus.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="SKU Export & Auto-Generation">
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">Generate SKUs for products that don't have one, or export the full list.</p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={downloadCsv} disabled={!skuData?.items?.length}>
+              <Download className="h-3.5 w-3.5" /> CSV
+            </Button>
+            <Button size="sm" onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending}>
+              <Tags className="h-3.5 w-3.5" /> {generateMutation.isPending ? 'Generating...' : 'Auto-Generate'}
+            </Button>
+          </div>
+        </div>
+
+        {genResult && (
+          <div className="rounded-lg bg-muted/50 p-3 text-sm">
+            <p className="font-medium">Generated: {genResult.generated} | Skipped: {genResult.skipped}</p>
+            {genResult.updated?.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {genResult.updated.map((u: any) => (
+                  <div key={u.id} className="text-xs text-muted-foreground">{u.name} → <span className="font-mono text-primary">{u.sku}</span></div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        ) : skuData?.items?.length > 0 ? (
+          <Table>
+            <thead>
+              <tr>
+                <Th>Product</Th>
+                <Th>Region</Th>
+                <Th>SKU</Th>
+                <Th>Denominations</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {skuData.items.map((item: any) => (
+                <tr key={item.id}>
+                  <Td className="font-medium text-sm">{item.name}</Td>
+                  <Td className="text-sm">{item.region}</Td>
+                  <Td className="font-mono text-xs">{item.sku || <span className="text-muted-foreground">—</span>}</Td>
+                  <Td className="text-xs text-muted-foreground">{item.denominations.map((d: any) => `$${d.faceValue}`).join(', ') || '—'}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        ) : (
+          <p className="text-sm text-muted-foreground">No products found</p>
+        )}
+      </div>
+    </Modal>
   );
 }
 

@@ -77,7 +77,7 @@ export function MerchantsPage() {
                 <Td className="font-medium">{m.name}</Td>
                 <Td className="text-muted-foreground">{m.email}</Td>
                 <Td><AddressWithMapsLink address={m.address} /></Td>
-                <Td className="font-medium">{formatCurrency(m.walletBalance)}</Td>
+                <Td className="font-medium">{formatCurrency(m.walletBalance)} <span className="text-xs text-muted-foreground">{m.currency || 'USD'}</span></Td>
                 <Td><Badge className={statusColor(m.status)}>{m.status}</Badge></Td>
                 <Td className="text-muted-foreground">{formatDate(m.createdAt)}</Td>
                 <Td className="text-right">

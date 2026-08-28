@@ -867,18 +867,62 @@ export class WebhookService implements OnModuleDestroy {
       this.logger.log(`[WEBHOOK] Product found: ${product.id} - ${product.name}`);
 
       // Use FulfillmentService for proper order processing
+      // Currency-agnostic: the order amount/currency from the webhook is irrelevant.
+      // The denomination is determined by the ConnectedProduct mapping, not the order amount.
       const webhookAmount = webhook.amount ? Number(webhook.amount) : 0;
       const rawCurrency = (webhook.currency || 'USD').toUpperCase();
 
-      // Force USD: all denomination face values and wallet balances are in USD.
-      // WooCommerce stores may be configured with a local currency (e.g. PKR) but
-      // price products at the USD numeric value (e.g. "50" meaning $50). We treat
-      // the amount as USD regardless of the webhook's currency field.
       if (rawCurrency !== 'USD') {
-        this.logger.warn(`[WEBHOOK] Incoming currency is ${rawCurrency}, forcing USD for fulfillment (amount: ${webhookAmount})`);
+        this.logger.log(`[WEBHOOK] Incoming currency is ${rawCurrency}, amount ${webhookAmount} — denomination will be determined by product mapping, not order amount`);
       }
 
-      this.logger.log(`[WEBHOOK] Creating fulfillment via FulfillmentService for merchant ${merchantId} (amount: ${webhookAmount} USD)`);
+      // Determine the fulfillment amount from the mapped denomination, not the order amount
+      let fulfillmentAmount = webhookAmount;
+
+      if (cpMapping?.dcvDenominationId) {
+        const mappedDenom = await this.prisma.denomination.findUnique({
+          where: { id: cpMapping.dcvDenominationId },
+        });
+        if (mappedDenom) {
+          fulfillmentAmount = Number(mappedDenom.faceValue);
+          this.logger.log(`[WEBHOOK] Using mapped denomination face value: ${fulfillmentAmount} (denomination ID: ${cpMapping.dcvDenominationId})`);
+        }
+      } else if (cpMapping?.dcvProductId && product) {
+        // No specific denomination mapped — use the product's first/only denomination
+        const productDenoms = await this.prisma.denomination.findMany({
+          where: { productId: product.id },
+          orderBy: { faceValue: 'asc' },
+        });
+        if (productDenoms.length === 1) {
+          fulfillmentAmount = Number(productDenoms[0].faceValue);
+          this.logger.log(`[WEBHOOK] Product has single denomination: ${fulfillmentAmount}`);
+        } else if (productDenoms.length > 1) {
+          // Multiple denominations — try to match by order amount first, fall back to smallest
+          const matchByAmount = productDenoms.find((d) => Number(d.faceValue) === webhookAmount);
+          if (matchByAmount) {
+            fulfillmentAmount = Number(matchByAmount.faceValue);
+            this.logger.log(`[WEBHOOK] Matched denomination by amount: ${fulfillmentAmount}`);
+          } else {
+            fulfillmentAmount = Number(productDenoms[0].faceValue);
+            this.logger.warn(`[WEBHOOK] Product has multiple denominations, no exact amount match for ${webhookAmount}. Using smallest: ${fulfillmentAmount}. Admin should map a specific denomination.`);
+          }
+        }
+      }
+
+      if (fulfillmentAmount <= 0) {
+        const errMsg = `Could not determine fulfillment amount for product "${product?.name}". ` +
+          `No denomination mapped and order amount is ${webhookAmount} ${rawCurrency}. ` +
+          `Admin must map a denomination in the Connected Products dashboard.`;
+        this.logger.warn(`[WEBHOOK] ${errMsg}`);
+
+        await this.prisma.incomingWebhook.update({
+          where: { id: webhookId },
+          data: { merchantId, processingStatus: 'REJECTED', errorMessage: errMsg, processedAt: new Date() },
+        });
+        return;
+      }
+
+      this.logger.log(`[WEBHOOK] Creating fulfillment via FulfillmentService for merchant ${merchantId} (fulfillment amount: ${fulfillmentAmount} USD, order amount: ${webhookAmount} ${rawCurrency})`);
 
       let fulfillmentResult: any;
       const MAX_WEBHOOK_RETRIES = 3;
@@ -887,7 +931,7 @@ export class WebhookService implements OnModuleDestroy {
           fulfillmentResult = await this.fulfillmentService.createFulfillment({
             merchantId,
             productId: product.id,
-            amount: webhookAmount,
+            amount: fulfillmentAmount,
             currency: 'USD',
             referenceId: webhook.orderId || undefined,
             idempotencyKey: `webhook-${webhook.eventId}`,
