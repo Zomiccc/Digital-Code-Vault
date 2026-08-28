@@ -868,48 +868,17 @@ export class WebhookService implements OnModuleDestroy {
 
       // Use FulfillmentService for proper order processing
       const webhookAmount = webhook.amount ? Number(webhook.amount) : 0;
-      const webhookCurrency = (webhook.currency || 'USD').toUpperCase();
-      this.logger.log(`[WEBHOOK] Creating fulfillment via FulfillmentService for merchant ${merchantId} (amount: ${webhookAmount} ${webhookCurrency})`);
+      const rawCurrency = (webhook.currency || 'USD').toUpperCase();
 
-      // Currency guard: denomination face values are in USD. Fulfilling a non-USD
-      // amount as if it were USD would charge the wrong wallet amount (e.g. 50 PKR
-      // treated as $50 USD). Reject with a clear error until multi-currency support
-      // is implemented.
-      if (webhookCurrency !== 'USD') {
-        const errMsg = `Webhook currency "${webhookCurrency}" is not supported. ` +
-          `Order amount ${webhookAmount} ${webhookCurrency} cannot be mapped to USD denominations. ` +
-          `Fulfillment rejected — no wallet debit, no inventory allocation. ` +
-          `Configure WooCommerce to use USD or contact platform admin.`;
-        this.logger.warn(`[WEBHOOK] ${errMsg}`);
-
-        await this.prisma.incomingWebhook.update({
-          where: { id: webhookId },
-          data: {
-            merchantId,
-            processingStatus: 'REJECTED',
-            errorMessage: errMsg,
-            processedAt: new Date(),
-          },
-        });
-
-        await this.prisma.auditLog.create({
-          data: {
-            actorType: 'SYSTEM',
-            actorId: 'webhook-processor',
-            action: 'webhook.unsupported_currency',
-            entity: 'IncomingWebhook',
-            entityId: webhookId,
-            metadata: JSON.stringify({
-              merchantId,
-              currency: webhookCurrency,
-              amount: webhookAmount,
-              orderId: webhook.orderId,
-            }),
-          },
-        });
-
-        return;
+      // Force USD: all denomination face values and wallet balances are in USD.
+      // WooCommerce stores may be configured with a local currency (e.g. PKR) but
+      // price products at the USD numeric value (e.g. "50" meaning $50). We treat
+      // the amount as USD regardless of the webhook's currency field.
+      if (rawCurrency !== 'USD') {
+        this.logger.warn(`[WEBHOOK] Incoming currency is ${rawCurrency}, forcing USD for fulfillment (amount: ${webhookAmount})`);
       }
+
+      this.logger.log(`[WEBHOOK] Creating fulfillment via FulfillmentService for merchant ${merchantId} (amount: ${webhookAmount} USD)`);
 
       let fulfillmentResult: any;
       const MAX_WEBHOOK_RETRIES = 3;
@@ -919,7 +888,7 @@ export class WebhookService implements OnModuleDestroy {
             merchantId,
             productId: product.id,
             amount: webhookAmount,
-            currency: webhook.currency || 'USD',
+            currency: 'USD',
             referenceId: webhook.orderId || undefined,
             idempotencyKey: `webhook-${webhook.eventId}`,
             customerEmail: webhook.customerEmail || undefined,
