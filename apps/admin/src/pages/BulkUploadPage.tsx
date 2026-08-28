@@ -36,6 +36,8 @@ export function BulkUploadPage() {
       setResult(data);
       queryClient.invalidateQueries({ queryKey: ['codes'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['cost-basis'] });
+      queryClient.invalidateQueries({ queryKey: ['platform-finance-overview'] });
     },
     onError: (err: any) => setResult({ error: err.message }),
   });

@@ -118,6 +118,12 @@ export class MerchantDashboardController {
     return this.merchantsService.createApiKey(req.user.merchantId, body.scopes);
   }
 
+  @Delete('dashboard/api-keys/:id')
+  @UseGuards(JwtAuthGuard)
+  async revokeApiKey(@Param('id') id: string, @Req() req: any) {
+    return this.merchantsService.revokeApiKey(req.user.merchantId, id);
+  }
+
   // ─── Dashboard Fulfillment (JWT-guarded, no HMAC needed) ───
 
   @Post('dashboard/fulfillment')

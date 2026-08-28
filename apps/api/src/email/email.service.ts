@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import PDFDocument from 'pdfkit';
 const PDFKit = require('pdfkit');
 import * as nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -13,6 +13,7 @@ export class EmailService {
   private readonly fromName: string;
   private readonly provider: string;
   private smtpTransport: nodemailer.Transporter | null = null;
+  private resendClient: Resend | null = null;
 
   constructor(
     private configService: ConfigService,
@@ -47,6 +48,11 @@ export class EmailService {
       this.apiKey = this.configService.get<string>('RESEND_API_KEY') || '';
       this.fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL') || 'onboarding@resend.dev';
       this.fromName = 'CodeHub';
+      if (this.apiKey) {
+        this.resendClient = new Resend(this.apiKey);
+      } else {
+        this.logger.error('EMAIL_PROVIDER=resend but RESEND_API_KEY is not set. Email sending will fail.');
+      }
     }
   }
 
@@ -174,32 +180,36 @@ export class EmailService {
     html: string,
     options?: { text?: string; attachments?: Array<{ filename: string; content: Buffer | string; contentType?: string }> },
   ): Promise<Response> {
-    const body: any = {
-      from: this.fromEmail,
+    if (!this.resendClient) {
+      throw new Error('Resend client not initialized — RESEND_API_KEY is missing');
+    }
+
+    const emailData: any = {
+      from: `${this.fromName} <${this.fromEmail}>`,
       to,
       subject,
       html,
     };
 
-    if (options?.text) body.text = options.text;
+    if (options?.text) emailData.text = options.text;
 
     if (options?.attachments && options.attachments.length > 0) {
-      body.attachments = options.attachments.map((att) => ({
+      emailData.attachments = options.attachments.map((att) => ({
         filename: att.filename,
         content: att.content.toString('base64'),
-        content_type: att.contentType || 'application/octet-stream',
       }));
     }
 
-    return fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15000),
-    });
+    const { data, error } = await this.resendClient.emails.send(emailData);
+
+    if (error) {
+      this.logger.error(`Resend SDK error: ${error.message}`);
+      throw new Error(error.message);
+    }
+
+    // Return a mock Response object so the caller's status-check logic works
+    const messageId = data?.id || 'resend-sent';
+    return new Response(JSON.stringify({ id: messageId }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
   private async sendViaSendGrid(

@@ -46,6 +46,8 @@ export function FinancePage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-wallet'] });
       queryClient.invalidateQueries({ queryKey: ['reconciliation'] });
+      queryClient.invalidateQueries({ queryKey: ['platform-finance-overview'] });
+      queryClient.invalidateQueries({ queryKey: ['cost-basis'] });
       setApproveModal(null);
       setAdminNote('');
       setEditedAmount('');
@@ -56,6 +58,8 @@ export function FinancePage() {
     mutationFn: (id: string) => api.rejectFundingRequest(id, adminNote || undefined),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-wallet'] });
+      queryClient.invalidateQueries({ queryKey: ['reconciliation'] });
+      queryClient.invalidateQueries({ queryKey: ['platform-finance-overview'] });
       setRejectModal(null);
       setAdminNote('');
     },

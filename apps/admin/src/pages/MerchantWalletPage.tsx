@@ -34,6 +34,7 @@ export function MerchantWalletPage() {
     mutationFn: (currency: string) => api.updateMyCurrency(currency),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['wallet'] });
+      queryClient.invalidateQueries({ queryKey: ['my-funding-requests'] });
       setShowCurrencyPrompt(false);
     },
   });
@@ -57,6 +58,7 @@ export function MerchantWalletPage() {
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['my-funding-requests'] });
+      queryClient.invalidateQueries({ queryKey: ['wallet'] });
       queryClient.invalidateQueries({ queryKey: ['support-thread'] });
       setStep(3);
     },
