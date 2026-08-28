@@ -14,6 +14,7 @@ export class EmailService {
   private readonly provider: string;
   private smtpTransport: nodemailer.Transporter | null = null;
   private resendClient: Resend | null = null;
+  private replyTo: string = '';
 
   constructor(
     private configService: ConfigService,
@@ -47,7 +48,8 @@ export class EmailService {
     } else {
       this.apiKey = this.configService.get<string>('RESEND_API_KEY') || '';
       this.fromEmail = this.configService.get<string>('RESEND_FROM_EMAIL') || 'onboarding@resend.dev';
-      this.fromName = 'CodeHub';
+      this.fromName = this.configService.get<string>('RESEND_FROM_NAME') || 'Digital Code Vault';
+      this.replyTo = this.configService.get<string>('RESEND_REPLY_TO') || '';
       if (this.apiKey) {
         this.resendClient = new Resend(this.apiKey);
       } else {
@@ -185,12 +187,13 @@ export class EmailService {
     }
 
     const emailData: any = {
-      from: `${this.fromName} <${this.fromEmail}>`,
+      from: this.fromEmail.includes('<') ? this.fromEmail : `${this.fromName} <${this.fromEmail}>`,
       to,
       subject,
       html,
     };
 
+    if (this.replyTo) emailData.replyTo = this.replyTo;
     if (options?.text) emailData.text = options.text;
 
     if (options?.attachments && options.attachments.length > 0) {
