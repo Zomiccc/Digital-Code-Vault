@@ -348,6 +348,7 @@ export class MerchantsService {
         amount: r.amount,
         currency: r.currency,
         status: r.status,
+        failure_reason: (r as any).failureReason,
         reference_id: r.referenceId,
         created_at: r.createdAt,
         customer_name: r.customerName,

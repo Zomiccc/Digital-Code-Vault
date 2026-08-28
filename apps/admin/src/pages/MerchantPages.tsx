@@ -58,7 +58,12 @@ export function MerchantDashboardPage() {
               <tr key={o.id}>
                 <Td>{o.product}</Td>
                 <Td>{formatCurrency(o.amount, o.currency)}</Td>
-                <Td><Badge className={statusColor(o.status)}>{o.status}</Badge></Td>
+                <Td>
+                  <Badge className={statusColor(o.status)}>{o.status}</Badge>
+                  {o.status === 'FAILED' && o.failure_reason && (
+                    <p className="mt-1 text-xs text-red-400/80 max-w-xs">{o.failure_reason}</p>
+                  )}
+                </Td>
                 <Td>{formatDate(o.created_at)}</Td>
               </tr>
             ))}
@@ -87,7 +92,12 @@ export function MerchantOrdersPage() {
               <tr key={o.id}>
                 <Td>{o.product}</Td>
                 <Td>{formatCurrency(o.amount, o.currency)}</Td>
-                <Td><Badge className={statusColor(o.status)}>{o.status}</Badge></Td>
+                <Td>
+                  <Badge className={statusColor(o.status)}>{o.status}</Badge>
+                  {o.status === 'FAILED' && o.failure_reason && (
+                    <p className="mt-1 text-xs text-red-400/80 max-w-xs">{o.failure_reason}</p>
+                  )}
+                </Td>
                 <Td><AddressWithMapsLink address={o.customer_address} /></Td>
                 <Td className="font-mono text-xs">{o.reference_id?.slice(0, 16) || '—'}</Td>
                 <Td>{o.revealed ? '✅' : '—'}</Td>
