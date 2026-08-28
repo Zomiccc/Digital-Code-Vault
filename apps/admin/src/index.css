@@ -61,3 +61,31 @@
     background-clip: text;
   }
 }
+
+@layer base {
+  /* Ensure native select dropdowns are always visible above modals */
+  select {
+    z-index: 1;
+  }
+  /* Prevent iOS zoom on input focus */
+  @media (max-width: 640px) {
+    input, select, textarea {
+      font-size: 16px !important;
+    }
+  }
+  /* Smooth scrolling for modals on mobile */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}

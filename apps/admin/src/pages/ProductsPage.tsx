@@ -90,8 +90,9 @@ function EssentialsBundleDialog({ product, onClose }: { product: any; onClose: (
                 const denom = denominations.find((d: any) => d.id === row.denominationId);
                 const available = denom?.availableCount ?? 0;
                 return (
-                  <div key={idx} className="flex items-center gap-2">
+                  <div key={idx} className="flex flex-col sm:flex-row sm:items-center gap-2">
                     <Select
+                      className="flex-1"
                       value={row.denominationId}
                       onChange={(e) => updateRow(idx, { denominationId: e.target.value })}
                       options={[
@@ -103,7 +104,7 @@ function EssentialsBundleDialog({ product, onClose }: { product: any; onClose: (
                     />
                     <div className="flex items-center gap-1">
                       <Button variant="outline" size="sm" onClick={() => updateRow(idx, { quantity: Math.max(1, row.quantity - 1) })}>-</Button>
-                      <Input type="number" value={String(row.quantity)} onChange={(e) => updateRow(idx, { quantity: Math.max(1, parseInt(e.target.value) || 1) })} />
+                      <Input className="w-16 text-center" type="number" value={String(row.quantity)} onChange={(e) => updateRow(idx, { quantity: Math.max(1, parseInt(e.target.value) || 1) })} />
                       <Button variant="outline" size="sm" onClick={() => updateRow(idx, { quantity: row.quantity + 1 })}>+</Button>
                     </div>
                     <span className={`w-20 text-right text-xs ${available < row.quantity ? 'text-red-600 font-semibold' : 'text-muted-foreground'}`}>{available}</span>

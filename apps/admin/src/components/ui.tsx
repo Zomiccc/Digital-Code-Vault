@@ -90,7 +90,7 @@ export function Button({
 }
 
 export function Input({
-  label, type = 'text', value, onChange, placeholder, required, leftIcon,
+  label, type = 'text', value, onChange, placeholder, required, leftIcon, className,
 }: {
   label?: string;
   type?: string;
@@ -99,6 +99,7 @@ export function Input({
   placeholder?: string;
   required?: boolean;
   leftIcon?: ReactNode;
+  className?: string;
 }) {
   return (
     <div className="space-y-2">
@@ -116,9 +117,10 @@ export function Input({
           placeholder={placeholder}
           required={required}
           className={cn(
-            'w-full rounded-lg border border-input bg-background py-2.5 text-sm outline-none transition-all duration-200 placeholder:text-muted-foreground/50 focus:border-primary focus:ring-1 focus:ring-primary/30',
+            'w-full rounded-lg border border-input bg-background py-2.5 text-sm outline-none transition-all duration-200 placeholder:text-muted-foreground/50 focus:border-primary focus:ring-1 focus:ring-primary/30 min-h-[42px]',
             leftIcon ? 'pl-10' : 'px-3',
             'pr-3',
+            className,
           )}
         />
       </div>
@@ -127,12 +129,13 @@ export function Input({
 }
 
 export function Select({
-  label, value, onChange, options,
+  label, value, onChange, options, className,
 }: {
   label?: string;
   value?: string;
   onChange?: (e: any) => void;
   options: { value: string; label: string }[];
+  className?: string;
 }) {
   return (
     <div className="space-y-2">
@@ -141,7 +144,10 @@ export function Select({
         <select
           value={value}
           onChange={onChange}
-          className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-2.5 pr-8 text-sm outline-none transition-all duration-200 focus:border-primary focus:ring-1 focus:ring-primary/30"
+          className={cn(
+            'w-full appearance-none rounded-lg border border-input bg-background px-3 py-2.5 pr-9 text-sm outline-none transition-all duration-200 focus:border-primary focus:ring-1 focus:ring-primary/30 cursor-pointer min-h-[42px]',
+            className,
+          )}
         >
           {options.map((opt) => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -159,8 +165,8 @@ export function Select({
 
 export function Table({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
-      <table className="w-full text-sm">{children}</table>
+    <div className="overflow-x-auto rounded-lg border border-border -mx-4 px-4 sm:mx-0 sm:px-0">
+      <table className="w-full text-sm min-w-[500px]">{children}</table>
     </div>
   );
 }
@@ -188,23 +194,38 @@ export function Td({ children, className, colSpan }: { children: ReactNode; clas
 
 export function Modal({
   open, onClose, title, children, size = 'md',
-}: { open: boolean; onClose: () => void; title: string; children: ReactNode; size?: 'sm' | 'md' | 'lg' }) {
+}: { open: boolean; onClose: () => void; title: string; children: ReactNode; size?: 'sm' | 'md' | 'lg' | 'xl' }) {
   if (!open) return null;
-  const sizes = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-2xl' };
+  const sizes = {
+    sm: 'max-w-sm',
+    md: 'max-w-lg',
+    lg: 'max-w-2xl',
+    xl: 'max-w-4xl',
+  };
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+      className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 p-3 sm:p-4 sm:items-center"
       onClick={onClose}
     >
       <div
         className={cn(
-          'w-full rounded-[var(--radius)] border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200',
+          'relative w-full rounded-[var(--radius)] border border-border bg-card shadow-2xl animate-in zoom-in-95 duration-200 my-4 sm:my-8',
           sizes[size],
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
-        <div className="mt-4">{children}</div>
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card px-4 py-3 sm:px-6 sm:py-4 rounded-t-[var(--radius)]">
+          <h2 className="text-base sm:text-lg font-semibold tracking-tight pr-4">{title}</h2>
+          <button
+            onClick={onClose}
+            className="shrink-0 rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="px-4 py-4 sm:px-6 sm:py-5 max-h-[calc(100vh-8rem)] overflow-y-auto">{children}</div>
       </div>
     </div>
   );

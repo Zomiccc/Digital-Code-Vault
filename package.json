@@ -23,6 +23,7 @@
     "build:copy": "node -e \"const fs=require('fs');const p=require('path');function copyDir(src,dest){if(!fs.existsSync(dest))fs.mkdirSync(dest,{recursive:true});for(const e of fs.readdirSync(src,{withFileTypes:true})){const s=p.join(src,e.name),d=p.join(dest,e.name);if(e.isDirectory())copyDir(s,d);else fs.copyFileSync(s,d)}}copyDir('apps/api/dist','dist');console.log('Copied apps/api/dist to dist/')\"",
     "db:migrate": "cd apps/api && npm run prisma:migrate",
     "db:migrate:deploy": "cd apps/api && npm run prisma:migrate:deploy",
+    "db:push": "cd apps/api && npx prisma db push --schema=prisma/schema.prisma",
     "db:generate": "cd apps/api && npm run prisma:generate",
     "db:seed": "cd apps/api && npm run seed",
     "db:studio": "cd apps/api && npm run prisma:set-provider && npx prisma studio",

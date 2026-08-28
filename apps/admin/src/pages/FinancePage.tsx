@@ -83,7 +83,7 @@ export function FinancePage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 rounded-lg border border-border bg-card p-1">
+      <div className="flex gap-1 rounded-lg border border-border bg-card p-1 overflow-x-auto">
         {(['overview', 'funding', 'reconciliation', 'transactions'] as const).map((t) => (
           <button
             key={t}
@@ -100,7 +100,7 @@ export function FinancePage() {
       {tab === 'overview' && (
         <>
           {/* Currency toggle + exchange rate */}
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Display currency:</span>
               <div className="flex gap-1 rounded-lg border border-border bg-card p-1">
