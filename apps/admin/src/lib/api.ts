@@ -382,4 +382,12 @@ export const api = {
     apiFetch(`/admin/connected-products/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   adminDeleteConnectedProduct: (id: string) =>
     apiFetch(`/admin/connected-products/${id}`, { method: 'DELETE' }),
+  adminListEmailLogs: (params?: { limit?: number; status?: string; recipient?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.status) qs.set('status', params.status);
+    if (params?.recipient) qs.set('recipient', params.recipient);
+    const s = qs.toString();
+    return apiFetch(`/admin/email-logs${s ? `?${s}` : ''}`);
+  },
 };

@@ -16,6 +16,7 @@ import { MerchantChatWidget } from '@/components/MerchantChatWidget';
 import { FinancePage } from '@/pages/FinancePage';
 import { MerchantWalletPage } from '@/pages/MerchantWalletPage';
 import { AuditLogsPage } from '@/pages/AuditLogsPage';
+import { EmailLogsPage } from '@/pages/EmailLogsPage';
 import { StaffPage } from '@/pages/StaffPage';
 import { MerchantApplicationsPage } from '@/pages/MerchantApplicationsPage';
 import {
@@ -71,6 +72,7 @@ function ProtectedRoutes() {
             <Route path="/admin/finance" element={<FinancePage />} />
             <Route path="/admin/applications" element={<MerchantApplicationsPage />} />
             <Route path="/admin/audit" element={<AuditLogsPage />} />
+            <Route path="/admin/email-logs" element={<EmailLogsPage />} />
             <Route path="/admin/staff" element={<StaffPage />} />
             <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
           </>

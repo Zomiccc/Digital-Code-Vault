@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Package, Database, Upload, FileText,
   ScrollText, UserCog, LogOut, Menu, X, Shield, ChevronRight,
   Wallet, Key, ShoppingCart, Webhook, Store, Gift, Plug, Layers, FolderTree,
-  MessagesSquare, Tags,
+  MessagesSquare, Tags, Mail,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { cn } from '@/lib/utils';
@@ -23,6 +23,7 @@ const adminNav = [
   { to: '/admin/finance', label: 'Finance', icon: Wallet },
   { to: '/admin/support', label: 'Support Inbox', icon: MessagesSquare },
   { to: '/admin/audit', label: 'Audit Logs', icon: ScrollText },
+  { to: '/admin/email-logs', label: 'Email Logs', icon: Mail },
   { to: '/admin/staff', label: 'Staff', icon: UserCog },
 ];
 

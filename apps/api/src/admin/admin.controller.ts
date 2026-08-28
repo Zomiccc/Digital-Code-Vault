@@ -536,4 +536,40 @@ export class AdminController {
     await this.prisma.connectedProduct.delete({ where: { id } });
     return { id, deleted: true };
   }
+
+  @Get('email-logs')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER', 'SUPPORT', 'FINANCE')
+  async getEmailLogs(
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+    @Query('recipient') recipient?: string,
+  ) {
+    const take = Math.min(Number(limit) || 50, 200);
+    const where: any = {};
+    if (status) where.status = status.toUpperCase();
+    if (recipient) where.recipient = { contains: recipient, mode: 'insensitive' };
+
+    const [items, total] = await Promise.all([
+      this.prisma.emailLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take,
+        select: {
+          id: true,
+          recipient: true,
+          subject: true,
+          template: true,
+          status: true,
+          errorMessage: true,
+          providerResponse: true,
+          retryCount: true,
+          createdAt: true,
+          sentAt: true,
+        },
+      }),
+      this.prisma.emailLog.count({ where }),
+    ]);
+
+    return { items, total };
+  }
 }

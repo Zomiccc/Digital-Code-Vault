@@ -109,10 +109,31 @@ async function main() {
   if (reqs.length > 0) {
     const merchant = await prisma.merchant.findUnique({
       where: { id: reqs[0].merchantId },
-      select: { id: true, name: true, walletBalance: true, status: true },
+      select: { id: true, name: true, walletBalance: true, status: true, email: true },
     });
     console.log('\n=== Merchant state ===');
     console.log(merchant);
+  }
+
+  // 6. Check email logs for this merchant's recent orders
+  const recentEmails = await prisma.emailLog.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+  });
+  console.log('\n=== Recent EmailLog entries (last 20) ===');
+  for (const e of recentEmails) {
+    console.log({
+      id: e.id,
+      recipient: e.recipient,
+      subject: e.subject,
+      template: e.template,
+      status: e.status,
+      errorMessage: e.errorMessage,
+      providerResponse: e.providerResponse,
+      retryCount: e.retryCount,
+      createdAt: e.createdAt,
+      sentAt: e.sentAt,
+    });
   }
 
   await prisma.$disconnect();
