@@ -579,15 +579,22 @@ export class WebhookService implements OnModuleDestroy {
         return null;
       }
 
-      // Check if connected product already exists
+      // Check if connected product already exists.
+      // IMPORTANT: When a SKU is available, search ONLY by SKU.
+      // WooCommerce variable products share the same parent product_id across
+      // all variations (e.g. PSN-USA-10, PSN-USA-50, PSN-USA-100 all have the
+      // same product_id). Using OR with platformProductId would cause all
+      // variations to share a single ConnectedProduct record, so the first
+      // variation's auto-persisted denomination would be applied to ALL
+      // subsequent variation orders.
       const whereClause: any = {
         merchantId,
         platform: webhook.platform,
       };
-      if (platformProductId) {
-        whereClause.OR = [{ platformProductId }, ...(platformSku ? [{ platformSku }] : [])];
-      } else if (platformSku) {
+      if (platformSku) {
         whereClause.platformSku = platformSku;
+      } else if (platformProductId) {
+        whereClause.platformProductId = platformProductId;
       }
 
       const existing = await this.prisma.connectedProduct.findFirst({
@@ -764,7 +771,12 @@ export class WebhookService implements OnModuleDestroy {
         if (cpMapping?.dcvProductId) matchedVia = `SKU: ${searchSku}`;
       }
 
-      if (!cpMapping?.dcvProductId && merchantId && searchId) {
+      // Only fall back to platformProductId when no SKU was available.
+      // WooCommerce variable products share the same parent product_id across
+      // all variations, so looking up by platformProductId when a SKU exists
+      // but has no mapping would find a DIFFERENT variation's ConnectedProduct
+      // — returning the wrong denomination.
+      if (!cpMapping?.dcvProductId && merchantId && searchId && !searchSku) {
         cpMapping = await this.prisma.connectedProduct.findFirst({
           where: { merchantId, platform: webhook.platform, platformProductId: searchId },
         });
@@ -972,11 +984,23 @@ export class WebhookService implements OnModuleDestroy {
           where: { productId: product.id },
           orderBy: { faceValue: 'asc' },
         });
-        if (productDenoms.length === 1) {
+        if (exactDenominationId) {
+          // Strategy 2b already matched a specific denomination from the SKU
+          // (e.g. PSN-USA-100 → $100 denomination). Use it directly.
+          const exactDenom = productDenoms.find((d) => d.id === exactDenominationId);
+          if (exactDenom) {
+            fulfillmentAmount = Number(exactDenom.faceValue) * orderQuantity;
+            fulfillmentDenominationId = exactDenom.id;
+            this.logger.log(`[WEBHOOK] Using exact denomination from SKU match: $${Number(exactDenom.faceValue)} × ${orderQuantity} qty = $${fulfillmentAmount}`);
+          } else {
+            this.logger.warn(`[WEBHOOK] exactDenominationId ${exactDenominationId} not found in product denominations — falling back`);
+          }
+        }
+        if (fulfillmentAmount <= 0 && productDenoms.length === 1) {
           fulfillmentAmount = Number(productDenoms[0].faceValue) * orderQuantity;
           fulfillmentDenominationId = productDenoms[0].id;
           this.logger.log(`[WEBHOOK] Product matched via SKU/name, single denomination: $${Number(productDenoms[0].faceValue)} × ${orderQuantity} qty = $${fulfillmentAmount}`);
-        } else if (productDenoms.length > 1) {
+        } else if (fulfillmentAmount <= 0 && productDenoms.length > 1) {
           if (rawCurrency === 'USD' && webhookAmount > 0) {
             const matchByAmount = productDenoms.find((d) => Number(d.faceValue) === webhookAmount);
             if (matchByAmount) {
