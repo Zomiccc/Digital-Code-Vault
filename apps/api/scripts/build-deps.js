@@ -95,7 +95,55 @@ if (!fs.existsSync(prismaClientDest)) {
   }
 }
 
-// 4. Verify dotenv exists
+// 4. Build and copy frontends into dist/public/
+const frontends = ['admin', 'merchant', 'portal'];
+const publicDir = path.resolve(distDir, 'public');
+fs.mkdirSync(publicDir, { recursive: true });
+
+// First build the shared package (frontends depend on it)
+console.log('build-deps: building shared package...');
+try {
+  execSync('npm run build', {
+    cwd: path.resolve(rootDir, 'packages', 'shared'),
+    stdio: 'inherit',
+    timeout: 60000,
+  });
+  console.log('build-deps: shared package built');
+} catch (err) {
+  console.warn('build-deps: shared package build failed (continuing):', err.message);
+}
+
+for (const name of frontends) {
+  const feDir = path.resolve(rootDir, 'apps', name);
+  const feDist = path.resolve(feDir, 'dist');
+  if (!fs.existsSync(feDir)) {
+    console.warn(`build-deps: apps/${name} not found — skipping`);
+    continue;
+  }
+
+  console.log(`build-deps: building frontend ${name}...`);
+  try {
+    execSync('npm run build', {
+      cwd: feDir,
+      stdio: 'inherit',
+      timeout: 120000,
+    });
+    console.log(`build-deps: ${name} built`);
+  } catch (err) {
+    console.warn(`build-deps: ${name} build failed (continuing):`, err.message);
+    continue;
+  }
+
+  if (fs.existsSync(feDist)) {
+    const dest = path.resolve(publicDir, name);
+    copyDir(feDist, dest);
+    console.log(`build-deps: copied ${name} → dist/public/${name}`);
+  } else {
+    console.warn(`build-deps: ${name}/dist not found after build — skipping copy`);
+  }
+}
+
+// 5. Verify dotenv exists
 const dotenvPath = path.resolve(distDir, 'node_modules', 'dotenv');
 if (fs.existsSync(dotenvPath)) {
   console.log('build-deps: OK — dotenv found in dist/node_modules/');
