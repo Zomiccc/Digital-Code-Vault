@@ -18,9 +18,10 @@
     "build:merchant": "cd apps/merchant && npm run build",
     "build:portal": "cd apps/portal && npm run build",
     "prebuild": "cd apps/api && node prisma/set-provider.js && npx prisma generate --schema=prisma/schema.prisma",
-    "build": "npm run build:shared && npm run build:api && npm run build:admin && npm run build:merchant && npm run build:portal && npm run build:launcher",
+    "build": "npm run build:shared && npm run build:api && npm run build:admin && npm run build:merchant && npm run build:portal && npm run build:launcher && npm run build:copy && npm run postbuild",
     "build:launcher": "node scripts/create-launcher.js",
     "build:copy": "node -e \"const fs=require('fs');const p=require('path');function copyDir(src,dest){if(!fs.existsSync(dest))fs.mkdirSync(dest,{recursive:true});for(const e of fs.readdirSync(src,{withFileTypes:true})){const s=p.join(src,e.name),d=p.join(dest,e.name);if(e.isDirectory())copyDir(s,d);else fs.copyFileSync(s,d)}}copyDir('apps/api/dist','dist');console.log('Copied apps/api/dist to dist/')\"",
+    "postbuild": "node scripts/copy-deps.js",
     "db:migrate": "cd apps/api && npm run prisma:migrate",
     "db:migrate:deploy": "cd apps/api && npm run prisma:migrate:deploy",
     "db:push": "cd apps/api && npx prisma db push --schema=prisma/schema.prisma",
@@ -29,7 +30,7 @@
     "db:studio": "cd apps/api && npm run prisma:set-provider && npx prisma studio",
     "deploy:prepare": "powershell -ExecutionPolicy Bypass -File prepare-deploy.ps1",
     "deploy:build": "bash apps/api/deploy-build.sh",
-    "start": "node apps/api/dist/main.js"
+    "start": "node dist/main.js"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
