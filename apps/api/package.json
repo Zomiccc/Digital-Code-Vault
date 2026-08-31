@@ -5,7 +5,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && npm run build:deps",
+    "build:deps": "node scripts/build-deps.js",
     "postinstall": "node prisma/set-provider.js && npx prisma generate",
     "start": "node dist/main",
     "start:dev": "nest start --watch",
