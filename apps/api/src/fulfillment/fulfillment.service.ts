@@ -374,11 +374,18 @@ export class FulfillmentService {
     if (!combination && !essentialsConfigured) {
       if (exactDenominationId) {
         // Denomination is explicitly mapped — use it directly, ignore order amount.
-        // The amount passed in should already match the denomination faceValue (set by webhook),
-        // but we use the denomination's actual faceValue as the source of truth.
+        // The amount is (denomination faceValue × quantity) as set by the webhook.
+        // Calculate count = amount / faceValue to support multi-quantity orders.
         const exactDenom = activeStock.find((d) => d.denominationId === exactDenominationId);
         if (exactDenom && exactDenom.availableCount > 0) {
-          combination = [{ denominationId: exactDenominationId, faceValue: exactDenom.faceValue, count: 1 }];
+          const count = Math.round(amount / exactDenom.faceValue);
+          if (count > 0 && exactDenom.availableCount >= count) {
+            combination = [{ denominationId: exactDenominationId, faceValue: exactDenom.faceValue, count }];
+            this.logger.log(`[Fulfillment] Exact denomination $${exactDenom.faceValue} × ${count} codes (amount $${amount})`);
+          } else if (count > 0 && exactDenom.availableCount > 0) {
+            // Not enough stock for full quantity — try partial, then fall back to combination search
+            this.logger.warn(`[Fulfillment] Exact denomination $${exactDenom.faceValue} needs ${count} codes but only ${exactDenom.availableCount} available — falling back to combination search.`);
+          }
         }
         if (!combination) {
           this.logger.warn(`[Fulfillment] Exact denomination ${exactDenominationId} has no available stock — falling back to combination search.`);

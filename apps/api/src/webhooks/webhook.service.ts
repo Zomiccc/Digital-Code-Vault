@@ -920,35 +920,75 @@ export class WebhookService implements OnModuleDestroy {
         this.logger.log(`[WEBHOOK] Incoming currency is ${rawCurrency}, amount ${webhookAmount} — denomination will be determined by product mapping, not order amount`);
       }
 
-      // Determine the fulfillment amount from the mapped denomination, not the order amount
-      let fulfillmentAmount = webhookAmount;
+      // Determine the fulfillment amount from the mapped denomination, not the order amount.
+      // The order amount/currency from the webhook may be in PKR or another non-USD currency,
+      // so we must NEVER use it directly for denomination matching unless it's USD and matches.
+      const orderQuantity = (webhook as any).quantity ? Number((webhook as any).quantity) : 1;
+      let fulfillmentAmount = 0;
+      let fulfillmentDenominationId: string | null = exactDenominationId;
 
       if (cpMapping?.dcvDenominationId) {
+        // Explicit denomination mapping — use it directly × quantity
         const mappedDenom = await this.prisma.denomination.findUnique({
           where: { id: cpMapping.dcvDenominationId },
         });
         if (mappedDenom) {
-          fulfillmentAmount = Number(mappedDenom.faceValue);
-          this.logger.log(`[WEBHOOK] Using mapped denomination face value: ${fulfillmentAmount} (denomination ID: ${cpMapping.dcvDenominationId})`);
+          fulfillmentAmount = Number(mappedDenom.faceValue) * orderQuantity;
+          fulfillmentDenominationId = mappedDenom.id;
+          this.logger.log(`[WEBHOOK] Using mapped denomination: $${Number(mappedDenom.faceValue)} × ${orderQuantity} qty = $${fulfillmentAmount} (denomination ID: ${cpMapping.dcvDenominationId})`);
         }
       } else if (cpMapping?.dcvProductId && product) {
-        // No specific denomination mapped — use the product's first/only denomination
+        // No specific denomination mapped — use the product's denominations
         const productDenoms = await this.prisma.denomination.findMany({
           where: { productId: product.id },
           orderBy: { faceValue: 'asc' },
         });
         if (productDenoms.length === 1) {
-          fulfillmentAmount = Number(productDenoms[0].faceValue);
-          this.logger.log(`[WEBHOOK] Product has single denomination: ${fulfillmentAmount}`);
+          // Single denomination — use it × quantity
+          fulfillmentAmount = Number(productDenoms[0].faceValue) * orderQuantity;
+          fulfillmentDenominationId = productDenoms[0].id;
+          this.logger.log(`[WEBHOOK] Product has single denomination: $${Number(productDenoms[0].faceValue)} × ${orderQuantity} qty = $${fulfillmentAmount}`);
         } else if (productDenoms.length > 1) {
-          // Multiple denominations — try to match by order amount first, fall back to smallest
-          const matchByAmount = productDenoms.find((d) => Number(d.faceValue) === webhookAmount);
-          if (matchByAmount) {
-            fulfillmentAmount = Number(matchByAmount.faceValue);
-            this.logger.log(`[WEBHOOK] Matched denomination by amount: ${fulfillmentAmount}`);
-          } else {
-            fulfillmentAmount = Number(productDenoms[0].faceValue);
-            this.logger.warn(`[WEBHOOK] Product has multiple denominations, no exact amount match for ${webhookAmount}. Using smallest: ${fulfillmentAmount}. Admin should map a specific denomination.`);
+          // Multiple denominations — only try amount match if currency is USD
+          if (rawCurrency === 'USD' && webhookAmount > 0) {
+            const matchByAmount = productDenoms.find((d) => Number(d.faceValue) === webhookAmount);
+            if (matchByAmount) {
+              fulfillmentAmount = Number(matchByAmount.faceValue) * orderQuantity;
+              fulfillmentDenominationId = matchByAmount.id;
+              this.logger.log(`[WEBHOOK] Matched denomination by USD amount: $${Number(matchByAmount.faceValue)} × ${orderQuantity} qty = $${fulfillmentAmount}`);
+            }
+          }
+          if (fulfillmentAmount <= 0) {
+            // Non-USD currency or no USD amount match — use quantity × smallest denomination
+            // Admin should map a specific denomination to avoid this fallback
+            fulfillmentAmount = Number(productDenoms[0].faceValue) * orderQuantity;
+            fulfillmentDenominationId = productDenoms[0].id;
+            this.logger.warn(`[WEBHOOK] Product has multiple denominations, could not match by amount (${webhookAmount} ${rawCurrency}). Using smallest: $${Number(productDenoms[0].faceValue)} × ${orderQuantity} qty = $${fulfillmentAmount}. Admin should map a specific denomination.`);
+          }
+        }
+      } else if (product) {
+        // Product matched via Strategy 2/3/4 (SKU or name) — no ConnectedProduct mapping
+        const productDenoms = await this.prisma.denomination.findMany({
+          where: { productId: product.id },
+          orderBy: { faceValue: 'asc' },
+        });
+        if (productDenoms.length === 1) {
+          fulfillmentAmount = Number(productDenoms[0].faceValue) * orderQuantity;
+          fulfillmentDenominationId = productDenoms[0].id;
+          this.logger.log(`[WEBHOOK] Product matched via SKU/name, single denomination: $${Number(productDenoms[0].faceValue)} × ${orderQuantity} qty = $${fulfillmentAmount}`);
+        } else if (productDenoms.length > 1) {
+          if (rawCurrency === 'USD' && webhookAmount > 0) {
+            const matchByAmount = productDenoms.find((d) => Number(d.faceValue) === webhookAmount);
+            if (matchByAmount) {
+              fulfillmentAmount = Number(matchByAmount.faceValue) * orderQuantity;
+              fulfillmentDenominationId = matchByAmount.id;
+              this.logger.log(`[WEBHOOK] Product matched via SKU/name, denomination by USD amount: $${Number(matchByAmount.faceValue)} × ${orderQuantity} qty = $${fulfillmentAmount}`);
+            }
+          }
+          if (fulfillmentAmount <= 0) {
+            fulfillmentAmount = Number(productDenoms[0].faceValue) * orderQuantity;
+            fulfillmentDenominationId = productDenoms[0].id;
+            this.logger.warn(`[WEBHOOK] Product matched via SKU/name, multiple denominations, using smallest: $${Number(productDenoms[0].faceValue)} × ${orderQuantity} qty = $${fulfillmentAmount}`);
           }
         }
       }
@@ -984,7 +1024,7 @@ export class WebhookService implements OnModuleDestroy {
             actorType: 'SYSTEM',
             actorId: 'webhook-processor',
             inventorySource,
-            denominationId: exactDenominationId || undefined,
+            denominationId: fulfillmentDenominationId || undefined,
             variantId: cpMapping?.dcvVariantId || undefined,
           });
           break;
