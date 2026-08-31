@@ -1077,6 +1077,10 @@ export class WebhookService implements OnModuleDestroy {
           this.logger.log(`[WEBHOOK] Order has ${allLineItems.length} line items — processing remaining ${allLineItems.length - 1} item(s)`);
 
           for (let liIndex = 1; liIndex < allLineItems.length; liIndex++) {
+            // Each line item gets its own error boundary so that one failure
+            // (out of stock, unmapped product, ...) does not prevent the
+            // remaining items in the order from being fulfilled.
+            try {
             const li = allLineItems[liIndex];
             const liSku = li?.sku || '';
             const liName = li?.name || li?.title || '';
@@ -1220,6 +1224,11 @@ export class WebhookService implements OnModuleDestroy {
               productName: liProduct.name,
               customerEmail: webhook.customerEmail,
             });
+            } catch (itemError) {
+              this.logger.error(
+                `[WEBHOOK] Line item ${liIndex + 1} failed: ${(itemError as Error).message} — continuing with remaining items.`,
+              );
+            }
           }
         }
       } catch (multiError) {

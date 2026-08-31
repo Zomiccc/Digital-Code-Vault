@@ -9,9 +9,14 @@ export class LoginRateLimitGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const ip = request.ip || request.connection?.remoteAddress || 'unknown';
     const email = request.body?.email || '';
-    const key = `login:${ip}:${email}`;
 
-    // 20 attempts per 60 seconds per IP+email combination
+    // Scope the bucket to the specific endpoint. The unified login flow in the
+    // frontend probes admin -> merchant -> customer in sequence, so a shared
+    // key would burn three slots for a single user-initiated login attempt.
+    const route = request.route?.path || request.url || 'unknown';
+    const key = `login:${route}:${ip}:${email}`;
+
+    // 20 attempts per 60 seconds per endpoint+IP+email combination
     const result = await this.redisService.rateLimit(key, 20, 60);
 
     if (!result.allowed) {
