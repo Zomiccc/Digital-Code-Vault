@@ -11,6 +11,10 @@ export class RedisService implements OnModuleDestroy {
   private readonly redisUrl: string;
   private redis: any = null;
   private connected = false;
+  private redisErrorCount = 0;
+  private redisRetryAt = 0;
+  private readonly redisErrorThreshold = 3;
+  private readonly redisRetryCooldownMs = 60000; // 1 minute
 
   // Fallback in-memory stores
   private readonly memStore = new Map<string, { value: string; expiresAt?: number }>();
@@ -54,7 +58,7 @@ export class RedisService implements OnModuleDestroy {
       });
 
       this.redis.on('error', (err: Error) => {
-        this.connected = false;
+        this.handleRedisError(err);
         if (!errorLogged) {
           this.logger.warn(`Redis unavailable: ${err.message}. Using in-memory fallback.`);
           errorLogged = true;
@@ -74,6 +78,34 @@ export class RedisService implements OnModuleDestroy {
     }
   }
 
+  private isRedisAvailable(): boolean {
+    if (!this.connected || !this.redis) return false;
+    if (this.redisRetryAt > 0 && Date.now() < this.redisRetryAt) return false;
+    return true;
+  }
+
+  private handleRedisError(err: Error): void {
+    this.redisErrorCount++;
+    if (this.redisErrorCount >= this.redisErrorThreshold) {
+      this.connected = false;
+      this.redisRetryAt = Date.now() + this.redisRetryCooldownMs;
+      this.logger.warn(
+        `Redis circuit breaker tripped after ${this.redisErrorCount} errors. ` +
+        `Falling back to in-memory for ${this.redisRetryCooldownMs / 1000}s. ` +
+        `Last error: ${err.message}`,
+      );
+    }
+  }
+
+  private maybeResetCircuit(): void {
+    if (this.redisErrorCount > 0 && this.redisRetryAt > 0 && Date.now() >= this.redisRetryAt) {
+      this.redisErrorCount = 0;
+      this.redisRetryAt = 0;
+      this.connected = true;
+      this.logger.log('Redis circuit breaker reset — retrying Redis connection.');
+    }
+  }
+
   private cleanup() {
     const now = Date.now();
     for (const [key, entry] of this.memStore) {
@@ -84,13 +116,18 @@ export class RedisService implements OnModuleDestroy {
   }
 
   async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
-    if (this.connected && this.redis) {
-      if (ttlSeconds) {
-        await this.redis.set(key, value, 'EX', ttlSeconds);
-      } else {
-        await this.redis.set(key, value);
+    this.maybeResetCircuit();
+    if (this.isRedisAvailable()) {
+      try {
+        if (ttlSeconds) {
+          await this.redis.set(key, value, 'EX', ttlSeconds);
+        } else {
+          await this.redis.set(key, value);
+        }
+        return;
+      } catch (err: any) {
+        this.handleRedisError(err);
       }
-      return;
     }
     this.memStore.set(key, {
       value,
@@ -99,8 +136,13 @@ export class RedisService implements OnModuleDestroy {
   }
 
   async get(key: string): Promise<string | null> {
-    if (this.connected && this.redis) {
-      return this.redis.get(key);
+    this.maybeResetCircuit();
+    if (this.isRedisAvailable()) {
+      try {
+        return await this.redis.get(key);
+      } catch (err: any) {
+        this.handleRedisError(err);
+      }
     }
     const entry = this.memStore.get(key);
     if (!entry) return null;
@@ -112,26 +154,41 @@ export class RedisService implements OnModuleDestroy {
   }
 
   async del(key: string): Promise<void> {
-    if (this.connected && this.redis) {
-      await this.redis.del(key);
-      return;
+    this.maybeResetCircuit();
+    if (this.isRedisAvailable()) {
+      try {
+        await this.redis.del(key);
+        return;
+      } catch (err: any) {
+        this.handleRedisError(err);
+      }
     }
     this.memStore.delete(key);
   }
 
   async exists(key: string): Promise<boolean> {
-    if (this.connected && this.redis) {
-      const result = await this.redis.exists(key);
-      return result === 1;
+    this.maybeResetCircuit();
+    if (this.isRedisAvailable()) {
+      try {
+        const result = await this.redis.exists(key);
+        return result === 1;
+      } catch (err: any) {
+        this.handleRedisError(err);
+      }
     }
     const val = await this.get(key);
     return val !== null;
   }
 
   async setNx(key: string, value: string, ttlSeconds: number): Promise<boolean> {
-    if (this.connected && this.redis) {
-      const result = await this.redis.set(key, value, 'NX', 'EX', ttlSeconds);
-      return result === 'OK';
+    this.maybeResetCircuit();
+    if (this.isRedisAvailable()) {
+      try {
+        const result = await this.redis.set(key, value, 'NX', 'EX', ttlSeconds);
+        return result === 'OK';
+      } catch (err: any) {
+        this.handleRedisError(err);
+      }
     }
     const existing = await this.get(key);
     if (existing) return false;
@@ -148,18 +205,23 @@ export class RedisService implements OnModuleDestroy {
     const windowStart = now - windowSeconds * 1000;
     const rateLimitKey = `ratelimit:${key}`;
 
-    if (this.connected && this.redis) {
-      const pipe = this.redis.pipeline();
-      pipe.zremrangebyscore(rateLimitKey, 0, windowStart);
-      pipe.zadd(rateLimitKey, now, `${now}`);
-      pipe.zcount(rateLimitKey, windowStart, now);
-      pipe.pexpire(rateLimitKey, windowSeconds * 1000);
-      const results = await pipe.exec();
-      const count = results[2][1] as number;
-      const allowed = count <= limit;
-      const remaining = Math.max(0, limit - count);
-      const resetAt = now + windowSeconds * 1000;
-      return { allowed, remaining, resetAt };
+    this.maybeResetCircuit();
+    if (this.isRedisAvailable()) {
+      try {
+        const pipe = this.redis.pipeline();
+        pipe.zremrangebyscore(rateLimitKey, 0, windowStart);
+        pipe.zadd(rateLimitKey, now, `${now}`);
+        pipe.zcount(rateLimitKey, windowStart, now);
+        pipe.pexpire(rateLimitKey, windowSeconds * 1000);
+        const results = await pipe.exec();
+        const count = results[2][1] as number;
+        const allowed = count <= limit;
+        const remaining = Math.max(0, limit - count);
+        const resetAt = now + windowSeconds * 1000;
+        return { allowed, remaining, resetAt };
+      } catch (err: any) {
+        this.handleRedisError(err);
+      }
     }
 
     // In-memory fallback
