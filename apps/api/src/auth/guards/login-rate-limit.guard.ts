@@ -16,8 +16,8 @@ export class LoginRateLimitGuard implements CanActivate {
     const route = request.route?.path || request.url || 'unknown';
     const key = `login:${route}:${ip}:${email}`;
 
-    // 20 attempts per 60 seconds per endpoint+IP+email combination
-    const result = await this.redisService.rateLimit(key, 20, 60);
+    // 100 attempts per 60 seconds per endpoint+IP+email combination
+    const result = await this.redisService.rateLimit(key, 100, 60);
 
     if (!result.allowed) {
       throw new HttpException(
