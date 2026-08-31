@@ -4,6 +4,14 @@ export interface DetectedProvider {
   confidence: number;
 }
 
+export interface NormalizedLineItem {
+  productId: string | null;
+  productName: string | null;
+  productSku: string | null;
+  quantity: number;
+  variationId: string | null;
+}
+
 export interface NormalizedWebhookPayload {
   provider: string;
   platform: string;
@@ -21,6 +29,7 @@ export interface NormalizedWebhookPayload {
   paymentStatus: string | null;
   orderStatus: string | null;
   imageUrl: string | null;
+  lineItems: NormalizedLineItem[];
 }
 
 export class ProviderDetector {
@@ -72,7 +81,8 @@ export class ProviderDetector {
     // Shopify order/paid event
     if (detected.provider === 'shopify') {
       const order = p.order || p;
-      const lineItem = order?.line_items?.[0] || {};
+      const lineItems = order?.line_items || [];
+      const lineItem = lineItems[0] || {};
       const customer = order?.customer || {};
       const shipping = order?.shipping_address || order?.billing_address || {};
       return {
@@ -92,13 +102,21 @@ export class ProviderDetector {
         paymentStatus: order?.financial_status === 'paid' ? 'paid' : order?.financial_status || null,
         orderStatus: order?.fulfillment_status || order?.financial_status || null,
         imageUrl: lineItem?.image?.src || null,
+        lineItems: lineItems.map((li: any) => ({
+          productId: String(li?.product_id || '') || null,
+          productName: li?.title || li?.name || null,
+          productSku: li?.sku || null,
+          quantity: li?.quantity || 1,
+          variationId: String(li?.variant_id || '') || null,
+        })),
       };
     }
 
     // WooCommerce order event
     if (detected.provider === 'woocommerce') {
       const order = p.order || p;
-      const lineItem = order?.line_items?.[0] || {};
+      const lineItems = order?.line_items || [];
+      const lineItem = lineItems[0] || {};
       return {
         provider: detected.provider,
         platform: detected.platform,
@@ -116,6 +134,13 @@ export class ProviderDetector {
         paymentStatus: order?.status === 'completed' || order?.status === 'processing' ? 'paid' : order?.status || p.payment_status || p.paymentStatus || null,
         orderStatus: order?.status || p.order_status || p.orderStatus || null,
         imageUrl: lineItem?.image?.src || p.image_url || p.imageUrl || null,
+        lineItems: lineItems.map((li: any) => ({
+          productId: String(li?.product_id || '') || null,
+          productName: li?.name || li?.title || null,
+          productSku: li?.sku || null,
+          quantity: li?.quantity || 1,
+          variationId: String(li?.variation_id || '') || null,
+        })),
       };
     }
 
@@ -140,31 +165,40 @@ export class ProviderDetector {
         paymentStatus: data?.status === 'succeeded' ? 'paid' : data?.status || null,
         orderStatus: data?.status || null,
         imageUrl: null,
+        lineItems: [],
       };
     }
 
     // PayPal payment event
     if (detected.provider === 'paypal') {
       const resource = p?.resource || p;
+      const items = resource?.items || [];
       return {
         provider: detected.provider,
         platform: detected.platform,
         eventId: p?.id || resource?.id || null,
         orderId: resource?.invoice_id || resource?.id || null,
         productId: null,
-        productName: resource?.items?.[0]?.name || null,
-        productSku: resource?.items?.[0]?.sku || null,
+        productName: items[0]?.name || null,
+        productSku: items[0]?.sku || null,
         productCategory: null,
         customerName: resource?.payer?.name?.given_name
           ? `${resource?.payer?.name?.given_name} ${resource?.payer?.name?.surname || ''}`.trim()
           : null,
         customerEmail: resource?.payer?.email_address || null,
-        quantity: Number(resource?.items?.[0]?.quantity || 1),
+        quantity: Number(items[0]?.quantity || 1),
         amount: Number(resource?.amount?.value || resource?.total || 0),
         currency: resource?.amount?.currency_code || 'USD',
         paymentStatus: resource?.status === 'COMPLETED' || resource?.status === 'completed' ? 'paid' : resource?.status || null,
         orderStatus: resource?.status || null,
         imageUrl: null,
+        lineItems: items.map((item: any) => ({
+          productId: null,
+          productName: item?.name || null,
+          productSku: item?.sku || null,
+          quantity: Number(item?.quantity || 1),
+          variationId: null,
+        })),
       };
     }
 
@@ -186,6 +220,7 @@ export class ProviderDetector {
       paymentStatus: p.payment_status || p.status || p.state || p.payment_state || null,
       orderStatus: p.order_status || p.status || p.state || null,
       imageUrl: p.image_url || p.imageUrl || p.image || null,
+      lineItems: [],
     };
   }
 }
