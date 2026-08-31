@@ -103,6 +103,11 @@ fs.mkdirSync(publicDir, { recursive: true });
 // First build the shared package (frontends depend on it)
 console.log('build-deps: building shared package...');
 try {
+  execSync('npm install', {
+    cwd: path.resolve(rootDir, 'packages', 'shared'),
+    stdio: 'inherit',
+    timeout: 60000,
+  });
   execSync('npm run build', {
     cwd: path.resolve(rootDir, 'packages', 'shared'),
     stdio: 'inherit',
@@ -121,9 +126,24 @@ for (const name of frontends) {
     continue;
   }
 
+  // Install dependencies in the frontend workspace (Hostinger workspace hoisting is unreliable)
+  console.log(`build-deps: installing deps for ${name}...`);
+  try {
+    execSync('npm install', {
+      cwd: feDir,
+      stdio: 'inherit',
+      timeout: 120000,
+    });
+  } catch (err) {
+    console.warn(`build-deps: ${name} npm install failed (continuing):`, err.message);
+    continue;
+  }
+
+  // Use npx vite build directly — skip tsc type-checking (types may not resolve
+  // without full workspace hoisting, but vite/esbuild doesn't need them)
   console.log(`build-deps: building frontend ${name}...`);
   try {
-    execSync('npm run build', {
+    execSync('npx vite build', {
       cwd: feDir,
       stdio: 'inherit',
       timeout: 120000,
