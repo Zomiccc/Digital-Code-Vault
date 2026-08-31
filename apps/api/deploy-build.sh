@@ -83,6 +83,34 @@ for dir in apps/api/dist apps/admin/dist apps/merchant/dist apps/portal/dist; do
   fi
 done
 
+# Step 6b: Copy node_modules to dist/ so the deployed app can resolve dependencies.
+# Hostinger's GitHub auto-deploy only copies the output directory (dist/), not the
+# root node_modules/. Without this, the app crashes with "Cannot find module 'dotenv'".
+echo "--- Copying node_modules to dist/ ---"
+cd apps/api
+if [ -d node_modules ]; then
+  cp -r node_modules dist/node_modules
+  echo "OK: copied apps/api/node_modules to dist/"
+elif [ -d ../../node_modules ]; then
+  cp -r ../../node_modules dist/node_modules
+  echo "OK: copied root node_modules to dist/"
+else
+  echo "WARNING: no node_modules found to copy"
+fi
+cd ../..
+
+# Step 6c: Copy Prisma client to dist/
+echo "--- Copying Prisma client to dist/ ---"
+if [ -d apps/api/node_modules/.prisma ]; then
+  mkdir -p apps/api/dist/node_modules/.prisma
+  cp -r apps/api/node_modules/.prisma apps/api/dist/node_modules/.prisma
+  echo "OK: copied .prisma client to dist/"
+elif [ -d node_modules/.prisma ]; then
+  mkdir -p apps/api/dist/node_modules/.prisma
+  cp -r node_modules/.prisma apps/api/dist/node_modules/.prisma
+  echo "OK: copied root .prisma client to dist/"
+fi
+
 # Step 7: Copy WordPress plugin ZIP into apps/api/dist/
 echo "--- Copying WordPress plugin ZIP ---"
 if [ -f "apps/merchant/public/dcv-webhook-plugin.zip" ]; then
