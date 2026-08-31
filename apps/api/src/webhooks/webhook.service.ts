@@ -1124,7 +1124,8 @@ export class WebhookService implements OnModuleDestroy {
                 where: { merchantId, platform: webhook.platform, platformSku: liSku },
               });
             }
-            if (!liCpMapping?.dcvProductId && merchantId && liProductId) {
+            // Only fall back to platformProductId when no SKU was available
+            if (!liCpMapping?.dcvProductId && merchantId && liProductId && !liSku) {
               liCpMapping = await this.prisma.connectedProduct.findFirst({
                 where: { merchantId, platform: webhook.platform, platformProductId: liProductId },
               });
