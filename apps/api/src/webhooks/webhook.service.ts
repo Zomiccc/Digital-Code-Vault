@@ -670,23 +670,30 @@ export class WebhookService implements OnModuleDestroy {
         return;
       }
 
-      // Deduplicate by orderId: if another webhook for the same order was already COMPLETED, skip
+      // Deduplicate by orderId + productSku: if another webhook for the same order
+      // AND same product SKU was already COMPLETED, skip. But allow different products
+      // in the same order — WooCommerce may send separate webhooks per line item.
       if (webhook.orderId && webhook.merchantId) {
+        const dedupeWhere: any = {
+          orderId: webhook.orderId,
+          merchantId: webhook.merchantId,
+          processingStatus: 'COMPLETED',
+          id: { not: webhookId },
+        };
+        // If this webhook has a productSku, only dedupe against webhooks with the same productSku
+        if (webhook.productSku) {
+          dedupeWhere.productSku = webhook.productSku;
+        }
         const existingFulfilled = await this.prisma.incomingWebhook.findFirst({
-          where: {
-            orderId: webhook.orderId,
-            merchantId: webhook.merchantId,
-            processingStatus: 'COMPLETED',
-            id: { not: webhookId },
-          },
+          where: dedupeWhere,
         });
         if (existingFulfilled) {
-          this.logger.log(`[WEBHOOK] Order ${webhook.orderId} already fulfilled via webhook ${existingFulfilled.id}, skipping duplicate`);
+          this.logger.log(`[WEBHOOK] Order ${webhook.orderId} product "${webhook.productSku || webhook.productName}" already fulfilled via webhook ${existingFulfilled.id}, skipping duplicate`);
           await this.prisma.incomingWebhook.update({
             where: { id: webhookId },
             data: {
               processingStatus: 'DUPLICATE_ORDER',
-              errorMessage: `Order ${webhook.orderId} already fulfilled via webhook ${existingFulfilled.id}`,
+              errorMessage: `Order ${webhook.orderId} product "${webhook.productSku || webhook.productName}" already fulfilled via webhook ${existingFulfilled.id}`,
               processedAt: new Date(),
             },
           });
@@ -1096,6 +1103,8 @@ export class WebhookService implements OnModuleDestroy {
         const rawPayload = JSON.parse(webhook.rawPayload || '{}');
         const order = rawPayload.order || rawPayload;
         const allLineItems = order?.line_items || [];
+
+        this.logger.log(`[WEBHOOK] Multi-line-item check: rawPayload keys=[${Object.keys(rawPayload).join(',')}] order keys=[${Object.keys(order || {}).join(',')}] line_items count=${allLineItems.length}`);
 
         if (allLineItems.length > 1) {
           this.logger.log(`[WEBHOOK] Order has ${allLineItems.length} line items — processing remaining ${allLineItems.length - 1} item(s)`);
