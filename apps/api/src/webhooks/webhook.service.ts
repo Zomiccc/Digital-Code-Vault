@@ -482,7 +482,12 @@ export class WebhookService implements OnModuleDestroy {
     }
 
     // Extract or generate event ID for duplicate detection
-    const eventId = normalized.eventId || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    // For platforms like WooCommerce that may send separate webhooks per line item,
+    // all with the same order ID, we append the productSku/productId to make the
+    // eventId unique per line item while still deduplicating re-delivered webhooks.
+    const baseEventId = normalized.eventId || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const productComponent = normalized.productSku || normalized.productId || '';
+    const eventId = productComponent ? `${baseEventId}-${productComponent}` : baseEventId;
     this.logger.log(`[WEBHOOK] Event ID: ${eventId}`);
 
     // Check for duplicate
@@ -1142,11 +1147,15 @@ export class WebhookService implements OnModuleDestroy {
             if (liCpMapping?.dcvProductId) {
               liProduct = await this.prisma.product.findUnique({ where: { id: liCpMapping.dcvProductId } });
               if (liCpMapping.dcvDenominationId) liExactDenominationId = liCpMapping.dcvDenominationId;
+              this.logger.log(`[WEBHOOK] Line item ${liIndex + 1}: Strategy 1 matched product via ConnectedProduct (SKU: ${liSku})`);
+            } else {
+              this.logger.log(`[WEBHOOK] Line item ${liIndex + 1}: Strategy 1 no ConnectedProduct mapping for SKU: ${liSku}`);
             }
 
             // Strategy 2: Exact SKU match
             if (!liProduct && liSku) {
               liProduct = await this.prisma.product.findFirst({ where: { sku: liSku, status: 'ACTIVE' } });
+              if (liProduct) this.logger.log(`[WEBHOOK] Line item ${liIndex + 1}: Strategy 2 matched product by exact SKU: ${liSku}`);
             }
 
             // Strategy 2b: Denomination SKU match (e.g. PSN-USA-100 → product PSN-USA, denom $100)
@@ -1161,11 +1170,17 @@ export class WebhookService implements OnModuleDestroy {
                     include: { denominations: { orderBy: { faceValue: 'asc' } } },
                   });
                   if (prefixProduct) {
+                    this.logger.log(`[WEBHOOK] Line item ${liIndex + 1}: Strategy 2b found product by prefix SKU "${prefixSku}" — looking for denomination $${faceValueNum}`);
                     const matchedDenom = prefixProduct.denominations.find((d: any) => Number(d.faceValue) === faceValueNum);
                     if (matchedDenom) {
                       liProduct = prefixProduct;
                       liExactDenominationId = matchedDenom.id;
+                      this.logger.log(`[WEBHOOK] Line item ${liIndex + 1}: Strategy 2b matched denomination $${faceValueNum} → product "${prefixProduct.name}"`);
+                    } else {
+                      this.logger.warn(`[WEBHOOK] Line item ${liIndex + 1}: Strategy 2b found product "${prefixProduct.name}" but no denomination with faceValue $${faceValueNum}. Available: [${prefixProduct.denominations.map((d: any) => d.faceValue).join(', ')}]`);
                     }
+                  } else {
+                    this.logger.warn(`[WEBHOOK] Line item ${liIndex + 1}: Strategy 2b no product found with SKU prefix "${prefixSku}"`);
                   }
                 }
               }
@@ -1174,6 +1189,7 @@ export class WebhookService implements OnModuleDestroy {
             // Strategy 3: Exact name match
             if (!liProduct && liName) {
               liProduct = await this.prisma.product.findFirst({ where: { name: { equals: liName } } }) || null;
+              if (liProduct) this.logger.log(`[WEBHOOK] Line item ${liIndex + 1}: Strategy 3 matched product by name: "${liName}"`);
             }
 
             if (!liProduct) {
