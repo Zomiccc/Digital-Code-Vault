@@ -629,25 +629,41 @@ export class WebhookService implements OnModuleDestroy {
         this.logger.log(`[WEBHOOK] Updated ConnectedProduct: ${existing.id}`);
         return { id: existing.id, inventorySource: existing.inventorySource };
       } else {
-        // Create new
-        const created = await this.prisma.connectedProduct.create({
-          data: {
-            merchantId,
-            platform: webhook.platform,
-            provider: webhook.provider || null,
-            platformProductId,
-            platformSku,
-            name: webhook.productName || 'Unknown Product',
-            sku: platformSku,
-            category: webhook.productCategory,
-            price: webhook.amount ? Number(webhook.amount) : null,
-            currency: webhook.currency,
-            status: 'ACTIVE',
-            lastSyncedAt: new Date(),
-          },
-        });
-        this.logger.log(`[WEBHOOK] Created ConnectedProduct for ${webhook.platform}: ${created.id}`);
-        return { id: created.id, inventorySource: created.inventorySource };
+        // Create new — use upsert to handle race conditions where another
+        // concurrent request creates the same record between our findFirst and create
+        try {
+          const created = await this.prisma.connectedProduct.create({
+            data: {
+              merchantId,
+              platform: webhook.platform,
+              provider: webhook.provider || null,
+              platformProductId,
+              platformSku,
+              name: webhook.productName || 'Unknown Product',
+              sku: platformSku,
+              category: webhook.productCategory,
+              price: webhook.amount ? Number(webhook.amount) : null,
+              currency: webhook.currency,
+              status: 'ACTIVE',
+              lastSyncedAt: new Date(),
+            },
+          });
+          this.logger.log(`[WEBHOOK] Created ConnectedProduct for ${webhook.platform}: ${created.id}`);
+          return { id: created.id, inventorySource: created.inventorySource };
+        } catch (createErr: any) {
+          // Unique constraint violation — record was created by a concurrent request
+          // Re-fetch it and return it instead of failing
+          if (createErr?.code === 'P2002') {
+            this.logger.log(`[WEBHOOK] ConnectedProduct already exists (race condition), re-fetching`);
+            const existingRetry = await this.prisma.connectedProduct.findFirst({
+              where: whereClause,
+            });
+            if (existingRetry) {
+              return { id: existingRetry.id, inventorySource: existingRetry.inventorySource };
+            }
+          }
+          throw createErr;
+        }
       }
     } catch (error) {
       this.logger.error(`[WEBHOOK] Error syncing ConnectedProduct: ${(error as Error).message}`);

@@ -66,7 +66,11 @@ async function bootstrap() {
       if (isWildcard || !origin || allowedOrigins.includes(normalizedOrigin)) {
         callback(null, true);
       } else {
-        callback(new Error(`Origin ${origin} not allowed by CORS`));
+        // Don't throw an error — just reject the CORS header but let the request
+        // continue. Throwing causes NestJS to log scary errors for webhook
+        // requests (WooCommerce, Shopify, etc.) that include an Origin header
+        // but are server-to-server and don't actually need CORS.
+        callback(null, false);
       }
     },
     credentials: true,
