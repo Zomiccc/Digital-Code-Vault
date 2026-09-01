@@ -441,6 +441,14 @@ export class WebhookService implements OnModuleDestroy {
   async processIncomingWebhook(payload: any, headers: any, sourceIp?: string) {
     this.logger.log(`[WEBHOOK] Received incoming webhook`);
 
+    // Log raw payload structure for debugging multi-item issues
+    try {
+      const p = payload || {};
+      const pKeys = Object.keys(p);
+      const li = p?.line_items || p?.order?.line_items || p?.data?.line_items || [];
+      this.logger.log(`[WEBHOOK] Incoming payload keys: [${pKeys.join(',')}] line_items count: ${li.length}`);
+    } catch (e) { /* ignore */ }
+
     // ─── Authenticate the webhook by verifying the merchant's webhook secret ───
     const webhookSecret =
       headers['x-webhook-secret'] ||
@@ -750,10 +758,16 @@ export class WebhookService implements OnModuleDestroy {
       // the existing single-item code path below.
       try {
         const rawPayload = JSON.parse(webhook.rawPayload || '{}');
-        const order = rawPayload.order || rawPayload;
+        this.logger.log(`[WEBHOOK] Raw payload top-level keys: [${Object.keys(rawPayload).join(',')}]`);
+
+        // Handle all possible WooCommerce payload structures:
+        // 1. Direct order: { id, line_items, ... }  (most common)
+        // 2. Wrapped: { order: { id, line_items, ... } }
+        // 3. Delivery wrapper: { action: "...", data: { id, line_items, ... } }
+        const order = rawPayload.order || rawPayload.data || rawPayload;
         const allLineItems = order?.line_items || [];
 
-        this.logger.log(`[WEBHOOK] Line item check: ${allLineItems.length} item(s) found in raw payload`);
+        this.logger.log(`[WEBHOOK] Line item check: ${allLineItems.length} item(s) found. Order keys: [${Object.keys(order || {}).join(',')}]`);
 
         if (allLineItems.length > 1) {
           this.logger.log(`[WEBHOOK] Multi-item order detected (${allLineItems.length} items) — processing ALL items in unified loop`);
@@ -1320,15 +1334,16 @@ export class WebhookService implements OnModuleDestroy {
         customerEmail: webhook.customerEmail,
       });
 
-      // ─── Multi-line-item processing ───
-      // Re-parse the raw payload to extract ALL line items, not just the first.
-      // The first line item was already processed above; process the rest now.
+      // ─── Multi-line-item processing (FALLBACK) ───
+      // This only runs if the unified multi-item detection at the top didn't trigger
+      // (e.g. payload structure wasn't detected). The first line item was already
+      // processed above; try to process the rest now.
       try {
         const rawPayload = JSON.parse(webhook.rawPayload || '{}');
-        const order = rawPayload.order || rawPayload;
+        const order = rawPayload.order || rawPayload.data || rawPayload;
         const allLineItems = order?.line_items || [];
 
-        this.logger.log(`[WEBHOOK] Multi-line-item check: rawPayload keys=[${Object.keys(rawPayload).join(',')}] order keys=[${Object.keys(order || {}).join(',')}] line_items count=${allLineItems.length}`);
+        this.logger.log(`[WEBHOOK] Multi-line-item fallback check: rawPayload keys=[${Object.keys(rawPayload).join(',')}] order keys=[${Object.keys(order || {}).join(',')}] line_items count=${allLineItems.length}`);
 
         if (allLineItems.length > 1) {
           this.logger.log(`[WEBHOOK] Order has ${allLineItems.length} line items — processing remaining ${allLineItems.length - 1} item(s)`);
