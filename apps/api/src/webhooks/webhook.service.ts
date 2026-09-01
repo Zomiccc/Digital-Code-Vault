@@ -637,7 +637,13 @@ export class WebhookService implements OnModuleDestroy {
               merchantId,
               platform: webhook.platform,
               provider: webhook.provider || null,
-              platformProductId,
+              // When a SKU is available, set platformProductId to null to avoid
+              // unique constraint conflicts. WooCommerce variable products share
+              // the same parent product_id across all variations (PSN-USA-10,
+              // PSN-USA-50, etc.), so creating separate records per SKU would
+              // violate @@unique([merchantId, platform, platformProductId]).
+              // PostgreSQL treats NULLs as distinct, so no conflict.
+              platformProductId: platformSku ? null : platformProductId,
               platformSku,
               name: webhook.productName || 'Unknown Product',
               sku: platformSku,
@@ -660,6 +666,15 @@ export class WebhookService implements OnModuleDestroy {
             });
             if (existingRetry) {
               return { id: existingRetry.id, inventorySource: existingRetry.inventorySource };
+            }
+            // If still not found by primary whereClause, try by platformProductId only
+            if (platformProductId) {
+              const fallback = await this.prisma.connectedProduct.findFirst({
+                where: { merchantId, platform: webhook.platform, platformProductId },
+              });
+              if (fallback) {
+                return { id: fallback.id, inventorySource: fallback.inventorySource };
+              }
             }
           }
           throw createErr;
