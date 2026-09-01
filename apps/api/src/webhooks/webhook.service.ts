@@ -744,6 +744,225 @@ export class WebhookService implements OnModuleDestroy {
         }
       }
 
+      // ─── Multi-line-item detection ───
+      // Parse the raw payload to check if this order has multiple line items.
+      // If so, process ALL items in a unified loop. Otherwise, fall through to
+      // the existing single-item code path below.
+      try {
+        const rawPayload = JSON.parse(webhook.rawPayload || '{}');
+        const order = rawPayload.order || rawPayload;
+        const allLineItems = order?.line_items || [];
+
+        this.logger.log(`[WEBHOOK] Line item check: ${allLineItems.length} item(s) found in raw payload`);
+
+        if (allLineItems.length > 1) {
+          this.logger.log(`[WEBHOOK] Multi-item order detected (${allLineItems.length} items) — processing ALL items in unified loop`);
+
+          let successCount = 0;
+          let failCount = 0;
+
+          for (let liIndex = 0; liIndex < allLineItems.length; liIndex++) {
+            try {
+              const li = allLineItems[liIndex];
+              const liSku = li?.sku || '';
+              const liName = li?.name || li?.title || '';
+              const liProductId = String(li?.product_id || '');
+              const liQuantity = li?.quantity || 1;
+              const liVariationId = String(li?.variation_id || '');
+
+              this.logger.log(`[WEBHOOK] Processing line item ${liIndex + 1}/${allLineItems.length}: SKU=${liSku}, name=${liName}, qty=${liQuantity}, variationId=${liVariationId}`);
+
+              // Sync ConnectedProduct for this line item
+              const liSyncData = {
+                platform: webhook.platform,
+                provider: webhook.provider,
+                productId: liProductId,
+                productName: liName,
+                productSku: liSku,
+                productCategory: null,
+                amount: null,
+                currency: webhook.currency,
+              };
+              const liConnectedProduct = await this.syncConnectedProduct(liSyncData, merchantId);
+              const liInventorySource = liConnectedProduct?.inventorySource || 'AUTO';
+
+              // Product matching — same strategies as single-item path
+              let liProduct = null;
+              let liExactDenominationId: string | null = null;
+
+              // Strategy 1: ConnectedProduct by SKU
+              let liCpMapping: any = null;
+              if (merchantId && liSku) {
+                liCpMapping = await this.prisma.connectedProduct.findFirst({
+                  where: { merchantId, platform: webhook.platform, platformSku: liSku },
+                });
+              }
+              if (!liCpMapping?.dcvProductId && merchantId && liProductId && !liSku) {
+                liCpMapping = await this.prisma.connectedProduct.findFirst({
+                  where: { merchantId, platform: webhook.platform, platformProductId: liProductId },
+                });
+              }
+              if (liCpMapping?.dcvProductId) {
+                liProduct = await this.prisma.product.findUnique({ where: { id: liCpMapping.dcvProductId } });
+                if (liCpMapping.dcvDenominationId) liExactDenominationId = liCpMapping.dcvDenominationId;
+                this.logger.log(`[WEBHOOK] Item ${liIndex + 1}: Strategy 1 matched via ConnectedProduct (SKU: ${liSku})`);
+              } else {
+                this.logger.log(`[WEBHOOK] Item ${liIndex + 1}: Strategy 1 no mapping for SKU: ${liSku}`);
+              }
+
+              // Strategy 2: Exact SKU match
+              if (!liProduct && liSku) {
+                liProduct = await this.prisma.product.findFirst({ where: { sku: liSku, status: 'ACTIVE' } });
+                if (liProduct) this.logger.log(`[WEBHOOK] Item ${liIndex + 1}: Strategy 2 matched by exact SKU: ${liSku}`);
+              }
+
+              // Strategy 2b: Denomination SKU match (PSN-USA-150 → product PSN-USA, denom $150)
+              if (!liProduct && liSku) {
+                const lastDash = liSku.lastIndexOf('-');
+                if (lastDash > 0) {
+                  const prefixSku = liSku.substring(0, lastDash);
+                  const faceValueNum = parseFloat(liSku.substring(lastDash + 1));
+                  if (!isNaN(faceValueNum) && faceValueNum > 0) {
+                    const prefixProduct = await this.prisma.product.findFirst({
+                      where: { sku: prefixSku, status: 'ACTIVE' },
+                      include: { denominations: { orderBy: { faceValue: 'asc' } } },
+                    });
+                    if (prefixProduct) {
+                      this.logger.log(`[WEBHOOK] Item ${liIndex + 1}: Strategy 2b found product by prefix "${prefixSku}" — looking for $${faceValueNum}`);
+                      const matchedDenom = prefixProduct.denominations.find((d: any) => Number(d.faceValue) === faceValueNum);
+                      if (matchedDenom) {
+                        liProduct = prefixProduct;
+                        liExactDenominationId = matchedDenom.id;
+                        this.logger.log(`[WEBHOOK] Item ${liIndex + 1}: Strategy 2b matched denomination $${faceValueNum}`);
+                      } else {
+                        this.logger.warn(`[WEBHOOK] Item ${liIndex + 1}: Strategy 2b no denomination $${faceValueNum}. Available: [${prefixProduct.denominations.map((d: any) => d.faceValue).join(', ')}]`);
+                      }
+                    } else {
+                      this.logger.warn(`[WEBHOOK] Item ${liIndex + 1}: Strategy 2b no product with SKU prefix "${prefixSku}"`);
+                    }
+                  }
+                }
+              }
+
+              // Strategy 3: Exact name match
+              if (!liProduct && liName) {
+                liProduct = await this.prisma.product.findFirst({ where: { name: { equals: liName } } }) || null;
+                if (liProduct) this.logger.log(`[WEBHOOK] Item ${liIndex + 1}: Strategy 3 matched by name: "${liName}"`);
+              }
+
+              if (!liProduct) {
+                this.logger.warn(`[WEBHOOK] Item ${liIndex + 1}: No product mapping found for SKU "${liSku}" or name "${liName}". Skipping.`);
+                failCount++;
+                continue;
+              }
+
+              // Determine fulfillment amount
+              let liFulfillmentAmount = 0;
+              let liFulfillmentDenominationId: string | null = liExactDenominationId;
+
+              if (liCpMapping?.dcvDenominationId) {
+                const mappedDenom = await this.prisma.denomination.findUnique({ where: { id: liCpMapping.dcvDenominationId } });
+                if (mappedDenom) {
+                  liFulfillmentAmount = Number(mappedDenom.faceValue) * liQuantity;
+                  liFulfillmentDenominationId = mappedDenom.id;
+                }
+              } else if (liProduct) {
+                const liDenoms = await this.prisma.denomination.findMany({ where: { productId: liProduct.id }, orderBy: { faceValue: 'asc' } });
+                if (liExactDenominationId) {
+                  const exactDenom = liDenoms.find((d: any) => d.id === liExactDenominationId);
+                  if (exactDenom) {
+                    liFulfillmentAmount = Number(exactDenom.faceValue) * liQuantity;
+                    liFulfillmentDenominationId = exactDenom.id;
+                  }
+                }
+                if (liFulfillmentAmount <= 0 && liDenoms.length === 1) {
+                  liFulfillmentAmount = Number(liDenoms[0].faceValue) * liQuantity;
+                  liFulfillmentDenominationId = liDenoms[0].id;
+                } else if (liFulfillmentAmount <= 0 && liDenoms.length > 1) {
+                  liFulfillmentAmount = Number(liDenoms[0].faceValue) * liQuantity;
+                  liFulfillmentDenominationId = liDenoms[0].id;
+                  this.logger.warn(`[WEBHOOK] Item ${liIndex + 1}: multiple denominations, using smallest: $${Number(liDenoms[0].faceValue)} × ${liQuantity}`);
+                }
+              }
+
+              if (liFulfillmentAmount <= 0) {
+                this.logger.warn(`[WEBHOOK] Item ${liIndex + 1}: Could not determine fulfillment amount for "${liProduct.name}". Skipping.`);
+                failCount++;
+                continue;
+              }
+
+              this.logger.log(`[WEBHOOK] Item ${liIndex + 1}: Creating fulfillment for "${liProduct.name}" — $${liFulfillmentAmount} USD`);
+
+              // Create fulfillment with retry
+              let liFulfillmentResult: any;
+              const MAX_RETRIES = 3;
+              for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                try {
+                  liFulfillmentResult = await this.fulfillmentService.createFulfillment({
+                    merchantId,
+                    productId: liProduct.id,
+                    amount: liFulfillmentAmount,
+                    currency: 'USD',
+                    referenceId: webhook.orderId || undefined,
+                    idempotencyKey: `webhook-${webhook.eventId}-item-${liIndex}`,
+                    customerEmail: webhook.customerEmail || undefined,
+                    customerName: webhook.customerName || undefined,
+                    actorType: 'SYSTEM',
+                    actorId: 'webhook-processor',
+                    inventorySource: liInventorySource,
+                    denominationId: liFulfillmentDenominationId || undefined,
+                    variantId: liCpMapping?.dcvVariantId || undefined,
+                  });
+                  break;
+                } catch (err: any) {
+                  const isRetryable = err?.response?.code === 'STOCK_CONFLICT' ||
+                    err?.response?.code === 'INSUFFICIENT_STOCK' ||
+                    err?.message?.includes('Transaction already closed');
+                  if (isRetryable && attempt < MAX_RETRIES) {
+                    this.logger.warn(`[WEBHOOK] Item ${liIndex + 1}: Fulfillment conflict on attempt ${attempt}, retrying...`);
+                    await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+                    continue;
+                  }
+                  throw err;
+                }
+              }
+
+              this.logger.log(`[WEBHOOK] Item ${liIndex + 1}: Fulfillment created: ${liFulfillmentResult.fulfillment_id}`);
+              successCount++;
+
+              this.queueWebhookEvent(merchantId, 'order.fulfilled', {
+                orderId: webhook.orderId,
+                fulfillmentId: liFulfillmentResult.fulfillment_id,
+                productId: liProduct.id,
+                productName: liProduct.name,
+                customerEmail: webhook.customerEmail,
+              });
+            } catch (itemError) {
+              failCount++;
+              this.logger.error(`[WEBHOOK] Item ${liIndex + 1} failed: ${(itemError as Error).message} — continuing with remaining items.`);
+            }
+          }
+
+          // Update webhook status after all items are processed
+          await this.prisma.incomingWebhook.update({
+            where: { id: webhookId },
+            data: {
+              merchantId,
+              processingStatus: successCount > 0 ? 'COMPLETED' : 'FAILED',
+              responseCode: 200,
+              processedAt: new Date(),
+              errorMessage: failCount > 0 ? `${failCount} of ${allLineItems.length} items failed` : null,
+            },
+          });
+
+          this.logger.log(`[WEBHOOK] Multi-item processing complete: ${successCount} succeeded, ${failCount} failed out of ${allLineItems.length} items`);
+          return;
+        }
+      } catch (multiDetectError) {
+        this.logger.warn(`[WEBHOOK] Multi-line-item detection failed: ${(multiDetectError as Error).message} — falling through to single-item processing`);
+      }
+
+      // ─── Single-item processing (existing code path) ───
       // Sync to ConnectedProduct BEFORE product matching
       const syncData = {
         platform: webhook.platform,
