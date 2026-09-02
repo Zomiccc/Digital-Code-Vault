@@ -15,6 +15,17 @@ echo "=== deploy-build.sh starting ==="
 chmod +x node_modules/.bin/* 2>/dev/null || true
 chmod +x apps/api/node_modules/.bin/* 2>/dev/null || true
 
+# Step 0: Generate version.json with git commit hash
+echo "--- Generating version.json ---"
+cd apps/api
+COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILT_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+cat > src/version.json << EOF
+{"commit":"${COMMIT_HASH}","builtAt":"${BUILT_AT}"}
+EOF
+echo "OK: version.json = commit=${COMMIT_HASH}, builtAt=${BUILT_AT}"
+cd ../..
+
 # Step 1: Build shared package
 echo "--- Building shared package ---"
 cd packages/shared
@@ -26,6 +37,9 @@ echo "--- Building API ---"
 cd apps/api
 chmod +x node_modules/.bin/* 2>/dev/null || true
 npx tsc -p tsconfig.build.json
+# Ensure version.json is in dist/ (tsc may not copy it)
+cp src/version.json dist/version.json 2>/dev/null || true
+echo "OK: version.json copied to dist/"
 cd ../..
 
 # Step 3: Set the Prisma provider and generate client
