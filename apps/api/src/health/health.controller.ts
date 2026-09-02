@@ -6,7 +6,7 @@ import * as path from 'path';
 
 function loadVersion(): { commit: string; builtAt: string } {
   try {
-    const vPath = path.join(__dirname, '..', 'version.json');
+    const vPath = path.join(__dirname, 'version.json');
     if (fs.existsSync(vPath)) {
       return JSON.parse(fs.readFileSync(vPath, 'utf-8'));
     }
