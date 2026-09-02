@@ -3,7 +3,7 @@
  * Plugin Name:       Digital Code Vault Webhook Connector
  * Plugin URI:        https://github.com/digitalcodevault/wp-dcv-webhook
  * Description:       Connects WooCommerce and Elementor to the Digital Code Vault platform. Registers webhook endpoints, verifies incoming deliveries, and forwards WooCommerce/Elementor events to the platform.
- * Version:           1.0.0
+ * Version:           1.1.0
  * Author:            Digital Code Vault
  * License:           MIT
  * Text Domain:       dcv-webhook
@@ -21,7 +21,7 @@ if ( version_compare( PHP_VERSION, '5.6.0', '<' ) ) {
     wp_die( esc_html__( 'DCV Webhook Connector requires PHP 5.6 or higher. Please contact your hosting provider to upgrade your PHP version.', 'dcv-webhook' ) );
 }
 
-define( 'DCV_WEBHOOK_VERSION', '1.0.0' );
+define( 'DCV_WEBHOOK_VERSION', '1.1.0' );
 define( 'DCV_WEBHOOK_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'DCV_WEBHOOK_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'DCV_WEBHOOK_OPTION_KEY', 'dcv_webhook_settings' );

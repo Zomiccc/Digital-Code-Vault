@@ -318,6 +318,8 @@ class DCV_Webhook_Settings_Page {
         $webhook_url = rest_url( 'dcv/v1/webhook' );
 
         require DCV_WEBHOOK_PLUGIN_DIR . 'admin/partials/settings-display.php';
+
+        echo '<p class="description" style="margin-top:20px;">DCV Webhook Connector v' . esc_html( DCV_WEBHOOK_VERSION ) . '</p>';
     }
 }
 }
