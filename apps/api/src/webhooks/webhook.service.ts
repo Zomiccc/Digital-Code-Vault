@@ -547,8 +547,10 @@ export class WebhookService implements OnModuleDestroy {
     this.logger.log(`[WEBHOOK] Webhook stored with ID: ${webhook.id}`);
 
     // Process the webhook asynchronously (serialized to prevent concurrent stock conflicts)
+    // Pass the normalized payload (including lineItems) directly so we don't need
+    // to re-parse rawPayload in the async processor.
     this.processingQueue = this.processingQueue
-      .then(() => this.processWebhookAsync(webhook.id))
+      .then(() => this.processWebhookAsync(webhook.id, normalized))
       .catch((err) => {
         this.logger.error(`[WEBHOOK] Failed to process webhook ${webhook.id}: ${err.message}`);
         this.logger.error(`[WEBHOOK] Error stack: ${err.stack}`);
@@ -686,7 +688,7 @@ export class WebhookService implements OnModuleDestroy {
     }
   }
 
-  private async processWebhookAsync(webhookId: string) {
+  private async processWebhookAsync(webhookId: string, normalizedData?: any) {
     this.logger.log(`[WEBHOOK] Processing webhook ${webhookId}`);
     try {
       const webhook = await this.prisma.incomingWebhook.findUnique({
@@ -784,21 +786,22 @@ export class WebhookService implements OnModuleDestroy {
       }
 
       // ─── Multi-line-item detection ───
-      // Parse the raw payload to check if this order has multiple line items.
-      // If so, process ALL items in a unified loop. Otherwise, fall through to
-      // the existing single-item code path below.
+      // Use normalizedData.lineItems if available (passed from processIncomingWebhook),
+      // otherwise fall back to parsing rawPayload.
       try {
-        const rawPayload = JSON.parse(webhook.rawPayload || '{}');
-        this.logger.log(`[WEBHOOK] Raw payload top-level keys: [${Object.keys(rawPayload).join(',')}]`);
+        let allLineItems: any[] = [];
+        if (normalizedData?.lineItems && Array.isArray(normalizedData.lineItems) && normalizedData.lineItems.length > 0) {
+          allLineItems = normalizedData.lineItems;
+          this.logger.log(`[WEBHOOK] Using normalized lineItems: ${allLineItems.length} item(s)`);
+        } else {
+          const rawPayload = JSON.parse(webhook.rawPayload || '{}');
+          this.logger.log(`[WEBHOOK] Raw payload top-level keys: [${Object.keys(rawPayload).join(',')}]`);
+          const order = rawPayload.order || rawPayload.data || rawPayload;
+          allLineItems = order?.line_items || [];
+          this.logger.log(`[WEBHOOK] Parsed from rawPayload: ${allLineItems.length} item(s)`);
+        }
 
-        // Handle all possible WooCommerce payload structures:
-        // 1. Direct order: { id, line_items, ... }  (most common)
-        // 2. Wrapped: { order: { id, line_items, ... } }
-        // 3. Delivery wrapper: { action: "...", data: { id, line_items, ... } }
-        const order = rawPayload.order || rawPayload.data || rawPayload;
-        const allLineItems = order?.line_items || [];
-
-        this.logger.log(`[WEBHOOK] Line item check: ${allLineItems.length} item(s) found. Order keys: [${Object.keys(order || {}).join(',')}]`);
+        this.logger.log(`[WEBHOOK] Line item check: ${allLineItems.length} item(s) found`);
 
         if (allLineItems.length > 1) {
           this.logger.log(`[WEBHOOK] Multi-item order detected (${allLineItems.length} items) — processing ALL items in unified loop`);
@@ -809,11 +812,13 @@ export class WebhookService implements OnModuleDestroy {
           for (let liIndex = 0; liIndex < allLineItems.length; liIndex++) {
             try {
               const li = allLineItems[liIndex];
-              const liSku = li?.sku || '';
-              const liName = li?.name || li?.title || '';
-              const liProductId = String(li?.product_id || '');
+              // Support both normalized format (productSku, productName, productId, variationId)
+              // and raw WooCommerce format (sku, name, product_id, variation_id)
+              const liSku = li?.productSku || li?.sku || '';
+              const liName = li?.productName || li?.name || li?.title || '';
+              const liProductId = String(li?.productId || li?.product_id || '');
               const liQuantity = li?.quantity || 1;
-              const liVariationId = String(li?.variation_id || '');
+              const liVariationId = String(li?.variationId || li?.variation_id || '');
 
               this.logger.log(`[WEBHOOK] Processing line item ${liIndex + 1}/${allLineItems.length}: SKU=${liSku}, name=${liName}, qty=${liQuantity}, variationId=${liVariationId}`);
 
@@ -1385,9 +1390,9 @@ export class WebhookService implements OnModuleDestroy {
             // remaining items in the order from being fulfilled.
             try {
             const li = allLineItems[liIndex];
-            const liSku = li?.sku || '';
-            const liName = li?.name || li?.title || '';
-            const liProductId = String(li?.product_id || '');
+            const liSku = li?.productSku || li?.sku || '';
+            const liName = li?.productName || li?.name || li?.title || '';
+            const liProductId = String(li?.productId || li?.product_id || '');
             const liQuantity = li?.quantity || 1;
 
             this.logger.log(`[WEBHOOK] Processing line item ${liIndex + 1}/${allLineItems.length}: SKU=${liSku}, name=${liName}, qty=${liQuantity}`);
