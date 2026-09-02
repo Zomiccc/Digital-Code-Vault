@@ -77,6 +77,22 @@ export class WebhooksController {
     );
   }
 
+  @Get('debug/order/:orderId')
+  async debugOrderWebhooks(@Param('orderId') orderId: string) {
+    const webhooks = await this.webhookService.listWebhooksByOrderId(orderId);
+    return webhooks.map((w: any) => ({
+      id: w.id,
+      eventId: w.eventId,
+      orderId: w.orderId,
+      productSku: w.productSku,
+      productName: w.productName,
+      processingStatus: w.processingStatus,
+      errorMessage: w.errorMessage,
+      createdAt: w.createdAt,
+      rawPayload: w.rawPayload ? JSON.parse(w.rawPayload) : null,
+    }));
+  }
+
   @Get('statistics')
   @UseGuards(JwtAuthGuard)
   async getWebhookStatistics(@Req() req: any) {

@@ -8,6 +8,7 @@ connectors/webhook-sdk/node_modules/
 
 # Environment files
 .env
+apps/api/src/version.json
 .env.local
 .env.*.local
 apps/api/.env.dev

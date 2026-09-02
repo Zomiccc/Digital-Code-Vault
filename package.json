@@ -17,7 +17,7 @@
     "build:admin": "cd apps/admin && npm run build",
     "build:merchant": "cd apps/merchant && npm run build",
     "build:portal": "cd apps/portal && npm run build",
-    "prebuild": "cd apps/api && node prisma/set-provider.js && npx prisma generate --schema=prisma/schema.prisma",
+    "prebuild": "node -e \"const fs=require('fs'),cp=require('child_process');let hash='unknown';try{hash=cp.execSync('git rev-parse --short HEAD').toString().trim()}catch(e){}const v={commit:hash,builtAt:new Date().toISOString()};fs.writeFileSync('apps/api/src/version.json',JSON.stringify(v,null,2));console.log('Version:',JSON.stringify(v))\" && cd apps/api && node prisma/set-provider.js && npx prisma generate --schema=prisma/schema.prisma",
     "build": "(npm run build:shared || true) && npm run build:api && (npm run build:admin || true) && (npm run build:merchant || true) && (npm run build:portal || true) && npm run build:launcher && npm run build:copy && npm run build:deps",
     "build:launcher": "node scripts/create-launcher.js",
     "build:copy": "node -e \"const fs=require('fs');const p=require('path');function copyDir(src,dest){if(!fs.existsSync(dest))fs.mkdirSync(dest,{recursive:true});for(const e of fs.readdirSync(src,{withFileTypes:true})){const s=p.join(src,e.name),d=p.join(dest,e.name);if(e.isDirectory())copyDir(s,d);else fs.copyFileSync(s,d)}}copyDir('apps/api/dist','dist');fs.copyFileSync('dist-package.json','dist/package.json');console.log('Copied apps/api/dist + package.json to dist/')\"",

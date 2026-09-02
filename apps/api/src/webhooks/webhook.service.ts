@@ -941,52 +941,55 @@ export class WebhookService implements OnModuleDestroy {
                 continue;
               }
 
-              this.logger.log(`[WEBHOOK] Item ${liIndex + 1}: Creating fulfillment for "${liProduct.name}" — $${liFulfillmentAmount} USD`);
+              this.logger.log(`[WEBHOOK] Item ${liIndex + 1}: Creating fulfillment for "${liProduct.name}" — $${liFulfillmentAmount} USD (qty: ${liQuantity})`);
 
-              // Create fulfillment with retry
-              let liFulfillmentResult: any;
-              const MAX_RETRIES = 3;
-              for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-                try {
-                  liFulfillmentResult = await this.fulfillmentService.createFulfillment({
-                    merchantId,
-                    productId: liProduct.id,
-                    amount: liFulfillmentAmount,
-                    currency: 'USD',
-                    referenceId: webhook.orderId || undefined,
-                    idempotencyKey: `webhook-${webhook.eventId}-item-${liIndex}`,
-                    customerEmail: webhook.customerEmail || undefined,
-                    customerName: webhook.customerName || undefined,
-                    actorType: 'SYSTEM',
-                    actorId: 'webhook-processor',
-                    inventorySource: liInventorySource,
-                    denominationId: liFulfillmentDenominationId || undefined,
-                    variantId: liCpMapping?.dcvVariantId || undefined,
-                  });
-                  break;
-                } catch (err: any) {
-                  const isRetryable = err?.response?.code === 'STOCK_CONFLICT' ||
-                    err?.response?.code === 'INSUFFICIENT_STOCK' ||
-                    err?.message?.includes('Transaction already closed');
-                  if (isRetryable && attempt < MAX_RETRIES) {
-                    this.logger.warn(`[WEBHOOK] Item ${liIndex + 1}: Fulfillment conflict on attempt ${attempt}, retrying...`);
-                    await new Promise(resolve => setTimeout(resolve, 500 * attempt));
-                    continue;
+              // Create one fulfillment per quantity unit, each with its own idempotency key.
+              // This ensures quantity > 1 on a single line item produces N separate code allocations.
+              for (let qtyIndex = 0; qtyIndex < liQuantity; qtyIndex++) {
+                let liFulfillmentResult: any;
+                const MAX_RETRIES = 3;
+                for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                  try {
+                    liFulfillmentResult = await this.fulfillmentService.createFulfillment({
+                      merchantId,
+                      productId: liProduct.id,
+                      amount: liFulfillmentAmount / liQuantity,
+                      currency: 'USD',
+                      referenceId: webhook.orderId || undefined,
+                      idempotencyKey: `webhook-${webhook.eventId}-item-${liIndex}-qty-${qtyIndex}`,
+                      customerEmail: webhook.customerEmail || undefined,
+                      customerName: webhook.customerName || undefined,
+                      actorType: 'SYSTEM',
+                      actorId: 'webhook-processor',
+                      inventorySource: liInventorySource,
+                      denominationId: liFulfillmentDenominationId || undefined,
+                      variantId: liCpMapping?.dcvVariantId || undefined,
+                    });
+                    break;
+                  } catch (err: any) {
+                    const isRetryable = err?.response?.code === 'STOCK_CONFLICT' ||
+                      err?.response?.code === 'INSUFFICIENT_STOCK' ||
+                      err?.message?.includes('Transaction already closed');
+                    if (isRetryable && attempt < MAX_RETRIES) {
+                      this.logger.warn(`[WEBHOOK] Item ${liIndex + 1} qty ${qtyIndex + 1}: Fulfillment conflict on attempt ${attempt}, retrying...`);
+                      await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+                      continue;
+                    }
+                    throw err;
                   }
-                  throw err;
                 }
+
+                this.logger.log(`[WEBHOOK] Item ${liIndex + 1} qty ${qtyIndex + 1}/${liQuantity}: Fulfillment created: ${liFulfillmentResult.fulfillment_id}`);
+                successCount++;
+
+                this.queueWebhookEvent(merchantId, 'order.fulfilled', {
+                  orderId: webhook.orderId,
+                  fulfillmentId: liFulfillmentResult.fulfillment_id,
+                  productId: liProduct.id,
+                  productName: liProduct.name,
+                  customerEmail: webhook.customerEmail,
+                });
               }
-
-              this.logger.log(`[WEBHOOK] Item ${liIndex + 1}: Fulfillment created: ${liFulfillmentResult.fulfillment_id}`);
-              successCount++;
-
-              this.queueWebhookEvent(merchantId, 'order.fulfilled', {
-                orderId: webhook.orderId,
-                fulfillmentId: liFulfillmentResult.fulfillment_id,
-                productId: liProduct.id,
-                productName: liProduct.name,
-                customerEmail: webhook.customerEmail,
-              });
             } catch (itemError) {
               failCount++;
               this.logger.error(`[WEBHOOK] Item ${liIndex + 1} failed: ${(itemError as Error).message} — continuing with remaining items.`);
@@ -1311,42 +1314,55 @@ export class WebhookService implements OnModuleDestroy {
         return;
       }
 
-      this.logger.log(`[WEBHOOK] Creating fulfillment via FulfillmentService for merchant ${merchantId} (fulfillment amount: ${fulfillmentAmount} USD, order amount: ${webhookAmount} ${rawCurrency})`);
+      this.logger.log(`[WEBHOOK] Creating fulfillment via FulfillmentService for merchant ${merchantId} (fulfillment amount: ${fulfillmentAmount} USD, order amount: ${webhookAmount} ${rawCurrency}, qty: ${orderQuantity})`);
 
-      let fulfillmentResult: any;
-      const MAX_WEBHOOK_RETRIES = 3;
-      for (let attempt = 1; attempt <= MAX_WEBHOOK_RETRIES; attempt++) {
-        try {
-          fulfillmentResult = await this.fulfillmentService.createFulfillment({
-            merchantId,
-            productId: product.id,
-            amount: fulfillmentAmount,
-            currency: 'USD',
-            referenceId: webhook.orderId || undefined,
-            idempotencyKey: `webhook-${webhook.eventId}`,
-            customerEmail: webhook.customerEmail || undefined,
-            customerName: webhook.customerName || undefined,
-            actorType: 'SYSTEM',
-            actorId: 'webhook-processor',
-            inventorySource,
-            denominationId: fulfillmentDenominationId || undefined,
-            variantId: cpMapping?.dcvVariantId || undefined,
-          });
-          break;
-        } catch (err: any) {
-          const isRetryable = err?.response?.code === 'STOCK_CONFLICT' ||
-            err?.response?.code === 'INSUFFICIENT_STOCK' ||
-            err?.message?.includes('Transaction already closed');
-          if (isRetryable && attempt < MAX_WEBHOOK_RETRIES) {
-            this.logger.warn(`[WEBHOOK] Fulfillment conflict on attempt ${attempt}, retrying in ${500 * attempt}ms...`);
-            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
-            continue;
+      // Create one fulfillment per quantity unit, each with its own idempotency key.
+      const perUnitAmount = fulfillmentAmount / orderQuantity;
+      for (let qtyIndex = 0; qtyIndex < orderQuantity; qtyIndex++) {
+        let fulfillmentResult: any;
+        const MAX_WEBHOOK_RETRIES = 3;
+        for (let attempt = 1; attempt <= MAX_WEBHOOK_RETRIES; attempt++) {
+          try {
+            fulfillmentResult = await this.fulfillmentService.createFulfillment({
+              merchantId,
+              productId: product.id,
+              amount: perUnitAmount,
+              currency: 'USD',
+              referenceId: webhook.orderId || undefined,
+              idempotencyKey: `webhook-${webhook.eventId}-qty-${qtyIndex}`,
+              customerEmail: webhook.customerEmail || undefined,
+              customerName: webhook.customerName || undefined,
+              actorType: 'SYSTEM',
+              actorId: 'webhook-processor',
+              inventorySource,
+              denominationId: fulfillmentDenominationId || undefined,
+              variantId: cpMapping?.dcvVariantId || undefined,
+            });
+            break;
+          } catch (err: any) {
+            const isRetryable = err?.response?.code === 'STOCK_CONFLICT' ||
+              err?.response?.code === 'INSUFFICIENT_STOCK' ||
+              err?.message?.includes('Transaction already closed');
+            if (isRetryable && attempt < MAX_WEBHOOK_RETRIES) {
+              this.logger.warn(`[WEBHOOK] Fulfillment conflict on attempt ${attempt} (qty ${qtyIndex + 1}/${orderQuantity}), retrying in ${500 * attempt}ms...`);
+              await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+              continue;
+            }
+            throw err;
           }
-          throw err;
         }
-      }
 
-      this.logger.log(`[WEBHOOK] Fulfillment created: ${fulfillmentResult.fulfillment_id}`);
+        this.logger.log(`[WEBHOOK] Fulfillment created: ${fulfillmentResult.fulfillment_id} (qty ${qtyIndex + 1}/${orderQuantity})`);
+
+        // Trigger outgoing webhook notification for each fulfillment
+        this.queueWebhookEvent(merchantId, 'order.fulfilled', {
+          orderId: webhook.orderId,
+          fulfillmentId: fulfillmentResult.fulfillment_id,
+          productId: product.id,
+          productName: product.name,
+          customerEmail: webhook.customerEmail,
+        });
+      }
 
       // Update webhook status
       await this.prisma.incomingWebhook.update({
@@ -1359,16 +1375,7 @@ export class WebhookService implements OnModuleDestroy {
         },
       });
 
-      this.logger.log(`[WEBHOOK] Successfully processed webhook ${webhookId} (line item 1)`);
-
-      // Trigger outgoing webhook notification
-      this.queueWebhookEvent(merchantId, 'order.fulfilled', {
-        orderId: webhook.orderId,
-        fulfillmentId: fulfillmentResult.fulfillment_id,
-        productId: product.id,
-        productName: product.name,
-        customerEmail: webhook.customerEmail,
-      });
+      this.logger.log(`[WEBHOOK] Successfully processed webhook ${webhookId} (${orderQuantity} fulfillment(s) for line item 1)`);
 
       // ─── Multi-line-item processing (FALLBACK) ───
       // This only runs if the unified multi-item detection at the top didn't trigger
@@ -1504,6 +1511,7 @@ export class WebhookService implements OnModuleDestroy {
             this.logger.log(`[WEBHOOK] Line item ${liIndex + 1}: Creating fulfillment for "${liProduct.name}" — $${liFulfillmentAmount} USD`);
 
             let liFulfillmentResult: any;
+            const MAX_WEBHOOK_RETRIES = 3;
             for (let attempt = 1; attempt <= MAX_WEBHOOK_RETRIES; attempt++) {
               try {
                 liFulfillmentResult = await this.fulfillmentService.createFulfillment({
@@ -1584,6 +1592,13 @@ export class WebhookService implements OnModuleDestroy {
       where,
       orderBy: { createdAt: 'desc' },
       take: 100,
+    });
+  }
+
+  async listWebhooksByOrderId(orderId: string) {
+    return this.prisma.incomingWebhook.findMany({
+      where: { orderId },
+      orderBy: { createdAt: 'asc' },
     });
   }
 
