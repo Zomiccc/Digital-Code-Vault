@@ -246,6 +246,19 @@ class DCV_Webhook_Hooks {
         $items = $order->get_items();
         $first_item = ! empty( $items ) ? reset( $items ) : null;
 
+        // Build line_items array with ALL items in the order.
+        $line_items = array();
+        foreach ( $items as $item ) {
+            $product = $item->get_product();
+            $line_items[] = array(
+                'product_id'    => strval( $item->get_product_id() ),
+                'name'          => $item->get_name(),
+                'sku'           => $product ? $product->get_sku() : null,
+                'quantity'      => $item->get_quantity(),
+                'variation_id'  => strval( $item->get_variation_id() ),
+            );
+        }
+
         $payload = array(
             'platform'       => 'woocommerce',
             'order_id'       => strval( $order->get_id() ),
@@ -258,6 +271,7 @@ class DCV_Webhook_Hooks {
             'currency'       => $order->get_currency(),
             'payment_status' => $status,
             'order_status'   => $order->get_status(),
+            'line_items'     => $line_items,
         );
 
         // Store reference ID on the order for later matching (platform → WooCommerce).
