@@ -26,7 +26,7 @@ export class CodesService {
     adminId: string,
     supplierId?: string,
     ip?: string,
-    costInfo?: { costPerCode?: number; currency?: string; note?: string },
+    costInfo?: { costPerCode?: number; currency?: string; note?: string; batchName?: string },
   ) {
     // Verify denomination exists
     const denomination = await this.prisma.denomination.findUnique({
@@ -113,6 +113,7 @@ export class CodesService {
       data: {
         id: batchId,
         denominationId,
+        batchName: costInfo?.batchName || null,
         quantity: codes.length,
         supplierId: supplierId || null,
         costPerCode: costInfo?.costPerCode ?? null,
@@ -278,6 +279,116 @@ export class CodesService {
     });
 
     return { success: true };
+  }
+
+  /**
+   * List batches with aggregated stats (available, delivered, voided counts).
+   */
+  async listBatches(options: {
+    denominationId?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const where: Record<string, unknown> = {};
+    if (options.denominationId) where.denominationId = options.denominationId;
+
+    const [batches, total] = await Promise.all([
+      this.prisma.codeBatch.findMany({
+        where,
+        include: {
+          denomination: {
+            include: { product: true },
+          },
+          supplier: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: options.limit || 50,
+        skip: options.offset || 0,
+      }),
+      this.prisma.codeBatch.count({ where }),
+    ]);
+
+    // Get status counts per batch in one query
+    const batchIds = batches.map((b) => b.id);
+    const statusCounts = await this.prisma.codeItem.groupBy({
+      by: ['batchId', 'status'],
+      where: { batchId: { in: batchIds } },
+      _count: true,
+    });
+
+    const countMap: Record<string, Record<string, number>> = {};
+    for (const sc of statusCounts) {
+      const bid = sc.batchId || '';
+      if (!bid) continue;
+      if (!countMap[bid]) countMap[bid] = {};
+      countMap[bid][sc.status] = sc._count;
+    }
+
+    return {
+      items: batches.map((b) => ({
+        id: b.id,
+        batch_name: b.batchName,
+        denomination: {
+          id: b.denomination.id,
+          face_value: b.denomination.faceValue,
+          product: b.denomination.product.name,
+          region: b.denomination.product.region,
+        },
+        quantity: b.quantity,
+        supplier: b.supplier?.name || null,
+        cost_per_code: b.costPerCode,
+        currency: b.currency,
+        note: b.note,
+        created_at: b.createdAt,
+        status_counts: countMap[b.id] || {},
+        available: countMap[b.id]?.['AVAILABLE'] || 0,
+        delivered: countMap[b.id]?.['DELIVERED'] || 0,
+        voided: countMap[b.id]?.['VOIDED'] || 0,
+        reserved: countMap[b.id]?.['RESERVED'] || 0,
+        allocated: countMap[b.id]?.['ALLOCATED'] || 0,
+      })),
+      total,
+    };
+  }
+
+  /**
+   * Get denomination stock summary: total available codes per denomination.
+   */
+  async getDenominationStock() {
+    const denominations = await this.prisma.denomination.findMany({
+      include: {
+        product: true,
+        _count: {
+          select: { codeItems: true },
+        },
+      },
+    });
+
+    // Get available counts per denomination
+    const availCounts = await this.prisma.codeItem.groupBy({
+      by: ['denominationId', 'status'],
+      _count: true,
+    });
+
+    const stockMap: Record<string, Record<string, number>> = {};
+    for (const ac of availCounts) {
+      if (!stockMap[ac.denominationId]) stockMap[ac.denominationId] = {};
+      stockMap[ac.denominationId][ac.status] = ac._count;
+    }
+
+    return denominations.map((d) => ({
+      id: d.id,
+      face_value: d.faceValue,
+      currency: d.currency,
+      product: d.product.name,
+      region: d.product.region,
+      total_codes: d._count.codeItems,
+      available: stockMap[d.id]?.['AVAILABLE'] || 0,
+      delivered: stockMap[d.id]?.['DELIVERED'] || 0,
+      voided: stockMap[d.id]?.['VOIDED'] || 0,
+      reserved: stockMap[d.id]?.['RESERVED'] || 0,
+      allocated: stockMap[d.id]?.['ALLOCATED'] || 0,
+    }));
   }
 
   /**

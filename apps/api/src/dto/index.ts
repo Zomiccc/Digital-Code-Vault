@@ -151,6 +151,10 @@ export class BulkUploadCodesDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @IsOptional()
+  @IsString()
+  batch_name?: string;
 }
 
 export class CreateAdminUserDto {

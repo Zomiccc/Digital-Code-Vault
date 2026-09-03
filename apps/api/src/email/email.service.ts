@@ -353,6 +353,52 @@ export class EmailService {
     });
   }
 
+  // ─── Shared email shell for consistent modern styling ───
+
+  private emailShell(title: string, contentHtml: string, accentColor = '#6366f1'): string {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+</head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;padding:24px 16px;">
+    <div style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+      <!-- Header -->
+      <div style="background:linear-gradient(135deg,${accentColor} 0%,#4f46e5 100%);padding:32px 24px;text-align:center;">
+        <h1 style="margin:0;font-size:22px;color:#ffffff;font-weight:700;letter-spacing:-0.5px;">${title}</h1>
+        <p style="margin:6px 0 0;font-size:13px;color:rgba(255,255,255,0.8);">Digital Code Vault</p>
+      </div>
+      <!-- Content -->
+      <div style="padding:32px 24px;">
+        ${contentHtml}
+      </div>
+      <!-- Footer -->
+      <div style="background:#f8fafc;padding:20px 24px;text-align:center;border-top:1px solid #e2e8f0;">
+        <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.6;">
+          Digital Code Vault — Secure Digital Code Marketplace<br/>
+          This is an automated email. Please do not reply.
+        </p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+  }
+
+  private copyableField(label: string, value: string): string {
+    return `
+    <div style="display:inline-block;width:100%;margin:8px 0;">
+      <p style="margin:0 0 4px;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;">${label}</p>
+      <div style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;cursor:pointer;" onclick="document.execCommand('selectAll',false,this)">
+        <span style="font-family:monospace;font-size:15px;color:#0f172a;font-weight:600;user-select:all;-webkit-user-select:all;-moz-user-select:all;">${value}</span>
+      </div>
+      <p style="margin:3px 0 0;font-size:11px;color:#94a3b8;">Click to select, then Ctrl+C to copy</p>
+    </div>`;
+  }
+
   // ─── Existing email methods ───
 
   async sendCodeEmail(
@@ -365,39 +411,36 @@ export class EmailService {
     const codeRows = codes
       .map(
         (c, i) =>
-          `<tr><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;">${i + 1}</td><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-weight:600;">${c.denomination}</td><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-size:14px;background:#f9fafb;border-radius:4px;">${c.code}</td></tr>`,
+          `<tr><td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;color:#64748b;">${i + 1}</td><td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;font-weight:600;color:#0f172a;">${c.denomination}</td><td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace;font-size:14px;background:#f1f5f9;border-radius:6px;color:#6366f1;font-weight:600;">${c.code}</td></tr>`,
       )
       .join('');
 
-    const html = `
-      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
-        <div style="background:#0f172a;color:#fff;padding:24px;border-radius:8px 8px 0 0;">
-          <h1 style="margin:0;font-size:22px;">Code Vault — Product Codes</h1>
-        </div>
-        <div style="background:#fff;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px;">
-          <p style="color:#374151;font-size:15px;">Hi ${merchantName},</p>
-          <p style="color:#374151;font-size:15px;">
-            Your order for <strong>${productName}</strong> has been fulfilled. Below are your product codes:
-          </p>
-          <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-            <thead>
-              <tr style="background:#f3f4f6;">
-                <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #e5e7eb;">#</th>
-                <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #e5e7eb;">Denomination</th>
-                <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #e5e7eb;">Code</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${codeRows}
-            </tbody>
-          </table>
-          <p style="color:#6b7280;font-size:13px;margin-top:24px;">
-            Fulfillment ID: <span style="font-family:monospace;">${fulfillmentId}</span><br/>
-            Please store these codes safely. This email was sent from Code Vault.
-          </p>
-        </div>
+    const content = `
+      <p style="color:#0f172a;font-size:15px;margin:0 0 16px;">Hi ${merchantName},</p>
+      <p style="color:#475569;font-size:15px;margin:0 0 24px;">
+        Your order for <strong style="color:#0f172a;">${productName}</strong> has been fulfilled. Below are your product codes:
+      </p>
+      <table style="width:100%;border-collapse:collapse;margin:0 0 24px;">
+        <thead>
+          <tr style="background:#f8fafc;">
+            <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #e2e8f0;font-size:13px;color:#64748b;">#</th>
+            <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #e2e8f0;font-size:13px;color:#64748b;">Denomination</th>
+            <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #e2e8f0;font-size:13px;color:#64748b;">Code</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${codeRows}
+        </tbody>
+      </table>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;">
+        <p style="margin:0;font-size:13px;color:#64748b;">
+          Fulfillment ID: <span style="font-family:monospace;color:#0f172a;font-weight:600;">${fulfillmentId}</span><br/>
+          Please store these codes safely.
+        </p>
       </div>
     `;
+
+    const html = this.emailShell('Your Product Codes', content);
 
     const text = `Your ${productName} codes — Code Vault\n\nHi ${merchantName},\n\nYour order for ${productName} has been fulfilled. Fulfillment ID: ${fulfillmentId}\n\nPlease store these codes safely.`;
 
@@ -415,40 +458,23 @@ export class EmailService {
     revealLink: string,
     fulfillmentId: string,
   ): Promise<boolean> {
-    const html = `
-      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
-        <div style="background:#0f172a;color:#fff;padding:24px;border-radius:8px 8px 0 0;">
-          <h1 style="margin:0;font-size:22px;">Your Digital Code is Ready</h1>
-        </div>
-        <div style="background:#fff;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px;">
-          <p style="color:#374151;font-size:15px;">Hello ${customerName},</p>
-          <p style="color:#374151;font-size:15px;">
-            Thank you for your purchase.
-          </p>
-          <p style="color:#374151;font-size:15px;">
-            Your digital code has been securely stored.
-          </p>
-          <p style="color:#374151;font-size:15px;">
-            To reveal your code, click the button below.
-          </p>
-          <div style="text-align:center;margin:24px 0;">
-            <a href="${revealLink}" style="display:inline-block;background:#6366f1;color:#fff;font-weight:600;font-size:16px;padding:14px 32px;border-radius:8px;text-decoration:none;">Reveal My Code</a>
-          </div>
-          <p style="color:#6b7280;font-size:13px;">
-            This link allows you to securely view your code.
-          </p>
-          <p style="color:#6b7280;font-size:13px;margin-top:24px;">
-            Fulfillment ID: <span style="font-family:monospace;">${fulfillmentId}</span><br/>
-            If the button doesn't work, copy and paste this link into your browser:<br/>
-            <span style="font-family:monospace;font-size:12px;color:#6366f1;">${revealLink}</span>
-          </p>
-          <p style="color:#6b7280;font-size:13px;margin-top:24px;">
-            Thank you,<br/>
-            CodeHub
-          </p>
-        </div>
+    const content = `
+      <p style="color:#0f172a;font-size:15px;margin:0 0 16px;">Hello ${customerName},</p>
+      <p style="color:#475569;font-size:15px;margin:0 0 16px;">Thank you for your purchase.</p>
+      <p style="color:#475569;font-size:15px;margin:0 0 24px;">Your digital code has been securely stored. To reveal your code, click the button below.</p>
+      <div style="text-align:center;margin:32px 0;">
+        <a href="${revealLink}" style="display:inline-block;background:#6366f1;color:#fff;font-weight:600;font-size:16px;padding:14px 36px;border-radius:12px;text-decoration:none;box-shadow:0 4px 12px rgba(99,102,241,0.3);">Reveal My Code</a>
+      </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;margin:24px 0;">
+        <p style="margin:0;font-size:13px;color:#64748b;">
+          Fulfillment ID: <span style="font-family:monospace;color:#0f172a;font-weight:600;">${fulfillmentId}</span><br/>
+          If the button doesn't work, copy and paste this link:<br/>
+          <span style="font-family:monospace;font-size:12px;color:#6366f1;word-break:break-all;">${revealLink}</span>
+        </p>
       </div>
     `;
+
+    const html = this.emailShell('Your Digital Code is Ready', content);
 
     const text = `Your Digital Code is Ready\n\nHello ${customerName},\n\nThank you for your purchase.\nYour digital code has been securely stored.\n\nTo reveal your code, click: ${revealLink}\n\nFulfillment ID: ${fulfillmentId}`;
 
@@ -469,75 +495,59 @@ export class EmailService {
     bankDetails: Array<{ bank: string; accountNumber: string; iban: string }>,
     easyPaisa?: { title: string; number: string },
   ): Promise<boolean> {
-    const paymentMethodRows = paymentMethods.map((m) => `<li style="margin:4px 0;">${m}</li>`).join('');
+    const paymentMethodRows = paymentMethods.map((m) => `<li style="margin:6px 0;color:#475569;font-size:14px;">${m}</li>`).join('');
+
     const bankRows = bankDetails
       .map(
         (b) => `
-        <div style="margin:12px 0;">
-          <p style="margin:4px 0;font-weight:600;">${b.bank}</p>
-          <p style="margin:2px 0;font-size:13px;">Account Number: ${b.accountNumber}</p>
-          <p style="margin:2px 0;font-size:13px;">IBAN: ${b.iban}</p>
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:12px 0;">
+          <p style="margin:0 0 12px;font-size:15px;font-weight:700;color:#0f172a;">${b.bank}</p>
+          ${this.copyableField('Account Number', b.accountNumber)}
+          ${this.copyableField('IBAN', b.iban)}
         </div>
       `,
       )
       .join('');
 
     const easyPaisaSection = easyPaisa
-      ? `<div style="margin:12px 0;">
-        <p style="margin:4px 0;font-weight:600;">EasyPaisa / NayaPay</p>
-        <p style="margin:2px 0;font-size:13px;">Account Title: ${easyPaisa.title}</p>
-        <p style="margin:2px 0;font-size:13px;">Account Number: ${easyPaisa.number}</p>
+      ? `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:12px 0;">
+        <p style="margin:0 0 12px;font-size:15px;font-weight:700;color:#0f172a;">EasyPaisa / NayaPay</p>
+        ${this.copyableField('Account Title', easyPaisa.title)}
+        ${this.copyableField('Account Number', easyPaisa.number)}
       </div>`
       : '';
 
-    const html = `
-      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;background:#f8fafc;">
-        <div style="background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-          <div style="background:#0f172a;color:#fff;padding:24px;text-align:center;">
-            <h1 style="margin:0;font-size:22px;">Code Vault</h1>
-            <p style="margin:4px 0;font-size:13px;opacity:0.8;">Digital Code Marketplace</p>
-          </div>
-          <div style="padding:24px;">
-            <h2 style="color:#0f172a;margin:0 0 16px;font-size:20px;">Order #${orderId} Received — Awaiting Payment</h2>
-            <p style="color:#374151;font-size:15px;">Hello from Code Vault!</p>
-            <p style="color:#374151;font-size:15px;margin-top:12px;">
-              Thank you for your order #${orderId}.
-            </p>
-            <p style="color:#374151;font-size:15px;">
-              Your order has been received and is currently awaiting payment confirmation.
-            </p>
+    const content = `
+      <p style="color:#0f172a;font-size:15px;margin:0 0 16px;">Hello!</p>
+      <p style="color:#475569;font-size:15px;margin:0 0 16px;">
+        Thank you for your order <strong style="color:#0f172a;">#${orderId}</strong>. Your order has been received and is currently awaiting payment confirmation.
+      </p>
 
-            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin:20px 0;">
-              <h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Order Details</h3>
-              <p style="margin:4px 0;font-size:13px;"><span style="color:#6b7280;">Product:</span> <strong>${product}</strong></p>
-              <p style="margin:4px 0;font-size:13px;"><span style="color:#6b7280;">Order Date:</span> ${orderDate}</p>
-              <p style="margin:4px 0;font-size:13px;"><span style="color:#6b7280;">Total Payment:</span> <strong>${totalPayment}</strong></p>
-            </div>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:18px;margin:24px 0;">
+        <h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Order Details</h3>
+        <p style="margin:6px 0;font-size:14px;color:#475569;"><span style="color:#94a3b8;">Product:</span> <strong style="color:#0f172a;">${product}</strong></p>
+        <p style="margin:6px 0;font-size:14px;color:#475569;"><span style="color:#94a3b8;">Order Date:</span> ${orderDate}</p>
+        <p style="margin:6px 0;font-size:14px;color:#475569;"><span style="color:#94a3b8;">Total Payment:</span> <strong style="color:#0f172a;">${totalPayment}</strong></p>
+      </div>
 
-            <h3 style="margin:20px 0 12px;font-size:16px;color:#0f172a;">Payment Method</h3>
-            <ul style="color:#374151;font-size:14px;padding-left:20px;">
-              ${paymentMethodRows}
-            </ul>
+      <h3 style="margin:24px 0 12px;font-size:16px;color:#0f172a;">Payment Method</h3>
+      <ul style="padding-left:20px;margin:0 0 24px;">
+        ${paymentMethodRows}
+      </ul>
 
-            <h3 style="margin:20px 0 12px;font-size:16px;color:#0f172a;">Bank Details</h3>
-            ${bankRows}
-            ${easyPaisaSection}
+      <h3 style="margin:24px 0 12px;font-size:16px;color:#0f172a;">Bank Details</h3>
+      <p style="font-size:13px;color:#94a3b8;margin:0 0 12px;">Click on any field below to select it, then press Ctrl+C to copy.</p>
+      ${bankRows}
+      ${easyPaisaSection}
 
-            <div style="background:#eff6ff;border:1px solid #bae6fd;border-radius:8px;padding:16px;margin:20px 0;">
-              <p style="margin:0;font-size:13px;color:#0369a1;">
-                <strong>⚠️ Please reply to this email with your payment screenshot</strong> so we can verify your payment as quickly as possible.
-              </p>
-            </div>
-          </div>
-          <div style="background:#f1f5f9;padding:16px;text-align:center;border-top:1px solid #e5e7eb;">
-            <p style="margin:0;font-size:12px;color:#64748b;">
-              Code Vault — Digital Code Marketplace<br/>
-              noreply@digitalcode.local
-            </p>
-          </div>
-        </div>
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:16px;margin:24px 0;">
+        <p style="margin:0;font-size:14px;color:#1e40af;">
+          <strong>Please reply to this email with your payment screenshot</strong> so we can verify your payment as quickly as possible.
+        </p>
       </div>
     `;
+
+    const html = this.emailShell(`Order #${orderId} Received`, content, '#0ea5e9');
 
     const text = `Order #${orderId} Received - Awaiting Payment\n\nHello from Code Vault!\n\nThank you for your order #${orderId}.\nYour order has been received and is currently awaiting payment confirmation.\n\nProduct: ${product}\nOrder Date: ${orderDate}\nTotal Payment: ${totalPayment}\n\nPlease reply to this email with your payment screenshot so we can verify your payment as quickly as possible.`;
 
@@ -564,58 +574,40 @@ export class EmailService {
     invoiceBuffer?: Buffer,
     revealLink?: string,
   ): Promise<boolean> {
-    const html = `
-      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;background:#f8fafc;">
-        <div style="background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-          <div style="background:#0f172a;color:#fff;padding:24px;text-align:center;">
-            <h1 style="margin:0;font-size:22px;">Code Vault</h1>
-          </div>
-          <div style="padding:24px;">
-            <div style="text-align:center;margin-bottom:24px;">
-              <div style="display:inline-block;background:#dcfce7;border:1px solid #86efac;border-radius:50%;width:60px;height:60px;line-height:60px;font-size:24px;">✓</div>
-            </div>
-            <h2 style="color:#0f172a;margin:0 0 16px;font-size:20px;text-align:center;">Thank You for Your Order!</h2>
-            <p style="color:#374151;font-size:15px;text-align:center;">
-              Your payment has been confirmed and your order is being processed.
-            </p>
-
-            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin:20px 0;">
-              <h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Order Summary</h3>
-              <table style="width:100%;border-collapse:collapse;">
-                <tr><td style="padding:6px 0;font-size:13px;color:#6b7280;">Order Number</td><td style="padding:6px 0;font-size:13px;font-family:monospace;">${orderId}</td></tr>
-                <tr><td style="padding:6px 0;font-size:13px;color:#6b7280;">Order Date</td><td style="padding:6px 0;font-size:13px;">${orderDate}</td></tr>
-                <tr><td style="padding:6px 0;font-size:13px;color:#6b7280;">Product</td><td style="padding:6px 0;font-size:13px;">${product}</td></tr>
-                <tr><td style="padding:6px 0;font-size:13px;color:#6b7280;">Quantity</td><td style="padding:6px 0;font-size:13px;">${quantity}</td></tr>
-                <tr><td style="padding:6px 0;font-size:13px;color:#6b7280;">Price</td><td style="padding:6px 0;font-size:13px;">$${price.toFixed(2)}</td></tr>
-                <tr><td style="padding:6px 0;font-size:13px;color:#6b7280;">Subtotal</td><td style="padding:6px 0;font-size:13px;">$${subtotal.toFixed(2)}</td></tr>
-                <tr><td style="padding:6px 0;font-size:13px;color:#6b7280;">Tax</td><td style="padding:6px 0;font-size:13px;">$${tax.toFixed(2)}</td></tr>
-                <tr><td style="padding:6px 0;font-size:13px;color:#6b7280;">Payment Method</td><td style="padding:6px 0;font-size:13px;">${paymentMethod}</td></tr>
-                <tr><td style="padding:6px 0;font-size:14px;font-weight:600;color:#0f172a;">Total</td><td style="padding:6px 0;font-size:14px;font-weight:600;color:#0f172a;">$${total.toFixed(2)}</td></tr>
-              </table>
-            </div>
-
-            ${billingAddress ? `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin:20px 0;"><h3 style="margin:0 0 8px;font-size:16px;color:#0f172a;">Billing Address</h3><p style="margin:0;font-size:13px;color:#374151;">${billingAddress}</p></div>` : ''}
-
-            <p style="color:#374151;font-size:15px;">
-              A PDF invoice has been attached to this email for your records.
-            </p>
-
-            ${revealLink ? `<div style="text-align:center;margin:24px 0;"><a href="${revealLink}" style="display:inline-block;background:#6366f1;color:#fff;font-weight:600;font-size:16px;padding:14px 32px;border-radius:8px;text-decoration:none;">Reveal My Code</a></div>` : ''}
-          </div>
-          <div style="background:#1e293b;padding:16px;text-align:center;">
-            <div style="display:flex;justify-content:center;gap:16px;margin-bottom:8px;">
-              <a href="#" style="color:#94a3b8;text-decoration:none;">🌐</a>
-              <a href="#" style="color:#94a3b8;text-decoration:none;">📧</a>
-              <a href="#" style="color:#94a3b8;text-decoration:none;">📱</a>
-            </div>
-            <p style="margin:0;font-size:12px;color:#94a3b8;">
-              Code Vault — Digital Code Marketplace<br/>
-              noreply@digitalcode.local
-            </p>
-          </div>
-        </div>
+    const content = `
+      <div style="text-align:center;margin:0 0 24px;">
+        <div style="display:inline-flex;align-items:center;justify-content:center;width:56px;height:56px;background:#dcfce7;border-radius:50%;font-size:28px;">✓</div>
       </div>
+      <h2 style="color:#0f172a;margin:0 0 12px;font-size:20px;text-align:center;">Thank You for Your Order!</h2>
+      <p style="color:#475569;font-size:15px;text-align:center;margin:0 0 24px;">
+        Your payment has been confirmed and your order is being processed.
+      </p>
+
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:18px;margin:24px 0;">
+        <h3 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Order Summary</h3>
+        <table style="width:100%;border-collapse:collapse;">
+          <tr><td style="padding:6px 0;font-size:14px;color:#94a3b8;">Order Number</td><td style="padding:6px 0;font-size:14px;font-family:monospace;color:#0f172a;font-weight:600;">${orderId}</td></tr>
+          <tr><td style="padding:6px 0;font-size:14px;color:#94a3b8;">Order Date</td><td style="padding:6px 0;font-size:14px;color:#475569;">${orderDate}</td></tr>
+          <tr><td style="padding:6px 0;font-size:14px;color:#94a3b8;">Product</td><td style="padding:6px 0;font-size:14px;color:#475569;">${product}</td></tr>
+          <tr><td style="padding:6px 0;font-size:14px;color:#94a3b8;">Quantity</td><td style="padding:6px 0;font-size:14px;color:#475569;">${quantity}</td></tr>
+          <tr><td style="padding:6px 0;font-size:14px;color:#94a3b8;">Price</td><td style="padding:6px 0;font-size:14px;color:#475569;">$${price.toFixed(2)}</td></tr>
+          <tr><td style="padding:6px 0;font-size:14px;color:#94a3b8;">Subtotal</td><td style="padding:6px 0;font-size:14px;color:#475569;">$${subtotal.toFixed(2)}</td></tr>
+          <tr><td style="padding:6px 0;font-size:14px;color:#94a3b8;">Tax</td><td style="padding:6px 0;font-size:14px;color:#475569;">$${tax.toFixed(2)}</td></tr>
+          <tr><td style="padding:6px 0;font-size:14px;color:#94a3b8;">Payment Method</td><td style="padding:6px 0;font-size:14px;color:#475569;">${paymentMethod}</td></tr>
+          <tr><td style="padding:8px 0;font-size:15px;font-weight:700;color:#0f172a;border-top:1px solid #e2e8f0;">Total</td><td style="padding:8px 0;font-size:15px;font-weight:700;color:#0f172a;border-top:1px solid #e2e8f0;">$${total.toFixed(2)}</td></tr>
+        </table>
+      </div>
+
+      ${billingAddress ? `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:18px;margin:24px 0;"><h3 style="margin:0 0 8px;font-size:16px;color:#0f172a;">Billing Address</h3><p style="margin:0;font-size:14px;color:#475569;">${billingAddress}</p></div>` : ''}
+
+      <p style="color:#475569;font-size:15px;margin:24px 0;">
+        A PDF invoice has been attached to this email for your records.
+      </p>
+
+      ${revealLink ? `<div style="text-align:center;margin:32px 0;"><a href="${revealLink}" style="display:inline-block;background:#6366f1;color:#fff;font-weight:600;font-size:16px;padding:14px 36px;border-radius:12px;text-decoration:none;box-shadow:0 4px 12px rgba(99,102,241,0.3);">Reveal My Code</a></div>` : ''}
     `;
+
+    const html = this.emailShell('Payment Confirmed', content, '#10b981');
 
     const text = `Payment Confirmation — Order #${orderId}\n\nHello ${customerName},\n\nYour payment has been confirmed and your order is being processed.\n\nOrder Details:\nOrder Number: ${orderId}\nOrder Date: ${orderDate}\nProduct: ${product}\nQuantity: ${quantity}\nPrice: $${price.toFixed(2)}\nSubtotal: $${subtotal.toFixed(2)}\nTax: $${tax.toFixed(2)}\nTotal: $${total.toFixed(2)}\nPayment Method: ${paymentMethod}\n\nA PDF invoice has been attached to this email.`;
 
@@ -641,52 +633,43 @@ export class EmailService {
     orderStatus: string,
     productRegion?: string,
   ): Promise<boolean> {
-    const html = `
-      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
-        <div style="background:#0f172a;color:#fff;padding:24px;border-radius:8px 8px 0 0;">
-          <h1 style="margin:0;font-size:22px;">New Digital Code Purchase</h1>
-        </div>
-        <div style="background:#fff;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px;">
-          <p style="color:#374151;font-size:15px;">Hello ${merchantName},</p>
-          <p style="color:#374151;font-size:15px;">
-            A customer has successfully purchased one of your digital products.
-          </p>
-          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin:16px 0;">
-            <p style="font-size:13px;color:#6b7280;margin:4px 0;">
-              <span style="font-weight:600;color:#111827;">Order ID:</span>
-              <span style="font-family:monospace;">${orderId}</span>
-            </p>
-            <p style="font-size:13px;color:#6b7280;margin:4px 0;">
-              <span style="font-weight:600;color:#111827;">Product:</span>
-              <span>${productName}${productRegion ? ` (${productRegion})` : ''}</span>
-            </p>
-            <p style="font-size:13px;color:#6b7280;margin:4px 0;">
-              <span style="font-weight:600;color:#111827;">Customer:</span>
-              <span>${customerName}</span>
-            </p>
-            <p style="font-size:13px;color:#6b7280;margin:4px 0;">
-              <span style="font-weight:600;color:#111827;">Customer Email:</span>
-              <span>${customerEmail}</span>
-            </p>
-            <p style="font-size:13px;color:#6b7280;margin:4px 0;">
-              <span style="font-weight:600;color:#111827;">Purchase Date:</span>
-              <span>${new Date(purchaseDate).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-            </p>
-            <p style="font-size:13px;color:#6b7280;margin:4px 0;">
-              <span style="font-weight:600;color:#111827;">Status:</span>
-              <span>${orderStatus}</span>
-            </p>
-          </div>
-          <p style="color:#374151;font-size:15px;">
-            The digital code has been successfully assigned and delivered to the customer through CodeHub.
-          </p>
-          <p style="color:#6b7280;font-size:13px;margin-top:24px;">
-            Thank you,<br/>
-            CodeHub
-          </p>
-        </div>
+    const content = `
+      <p style="color:#0f172a;font-size:15px;margin:0 0 16px;">Hello ${merchantName},</p>
+      <p style="color:#475569;font-size:15px;margin:0 0 24px;">
+        A customer has successfully purchased one of your digital products.
+      </p>
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:18px;margin:0 0 24px;">
+        <p style="margin:8px 0;font-size:14px;color:#475569;">
+          <span style="font-weight:600;color:#0f172a;">Order ID:</span>
+          <span style="font-family:monospace;">${orderId}</span>
+        </p>
+        <p style="margin:8px 0;font-size:14px;color:#475569;">
+          <span style="font-weight:600;color:#0f172a;">Product:</span>
+          <span>${productName}${productRegion ? ` (${productRegion})` : ''}</span>
+        </p>
+        <p style="margin:8px 0;font-size:14px;color:#475569;">
+          <span style="font-weight:600;color:#0f172a;">Customer:</span>
+          <span>${customerName}</span>
+        </p>
+        <p style="margin:8px 0;font-size:14px;color:#475569;">
+          <span style="font-weight:600;color:#0f172a;">Customer Email:</span>
+          <span>${customerEmail}</span>
+        </p>
+        <p style="margin:8px 0;font-size:14px;color:#475569;">
+          <span style="font-weight:600;color:#0f172a;">Purchase Date:</span>
+          <span>${new Date(purchaseDate).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+        </p>
+        <p style="margin:8px 0;font-size:14px;color:#475569;">
+          <span style="font-weight:600;color:#0f172a;">Status:</span>
+          <span style="background:#dcfce7;color:#166534;padding:2px 10px;border-radius:6px;font-size:12px;font-weight:600;">${orderStatus}</span>
+        </p>
       </div>
+      <p style="color:#475569;font-size:15px;margin:0 0 24px;">
+        The digital code has been successfully assigned and delivered to the customer.
+      </p>
     `;
+
+    const html = this.emailShell('New Digital Code Purchase', content, '#f59e0b');
 
     const text = `New Digital Code Purchase\n\nHello ${merchantName},\n\nA customer has successfully purchased one of your digital products.\n\nOrder ID: ${orderId}\nProduct: ${productName}${productRegion ? ` (${productRegion})` : ''}\nCustomer: ${customerName}\nCustomer Email: ${customerEmail}\nPurchase Date: ${purchaseDate}\nStatus: ${orderStatus}\n\nThe digital code has been successfully assigned and delivered to the customer through CodeHub.`;
 
@@ -706,38 +689,33 @@ export class EmailService {
     expiryMinutes?: number,
   ): Promise<boolean> {
     const expiryWarning = expiryMinutes
-      ? `<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px 16px;margin:16px 0;">
-            <p style="color:#92400e;font-size:13px;margin:0;">
-              <strong>⚠️ This link expires in ${expiryMinutes} minutes.</strong> Click it soon to reveal your codes.
+      ? `<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:12px;padding:14px 16px;margin:24px 0;">
+            <p style="color:#92400e;font-size:14px;margin:0;">
+              <strong>This link expires in ${expiryMinutes} minutes.</strong> Click it soon to reveal your codes.
             </p>
           </div>`
       : '';
 
-    const html = `
-      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
-        <div style="background:#0f172a;color:#fff;padding:24px;border-radius:8px 8px 0 0;">
-          <h1 style="margin:0;font-size:22px;">Code Vault — Order Ready</h1>
-        </div>
-        <div style="background:#fff;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px;">
-          <p style="color:#374151;font-size:15px;">Hi ${merchantName},</p>
-          <p style="color:#374151;font-size:15px;">
-            Your order for <strong>${productName}</strong> has been fulfilled and your product codes are ready.
-          </p>
-          <p style="color:#374151;font-size:15px;">
-            Click the button below to reveal your codes:
-          </p>
-          <div style="text-align:center;margin:24px 0;">
-            <a href="${deliveryLink}" style="display:inline-block;background:#6366f1;color:#fff;font-weight:600;font-size:16px;padding:14px 32px;border-radius:8px;text-decoration:none;">Reveal My Codes</a>
-          </div>
-          ${expiryWarning}
-          <p style="color:#6b7280;font-size:13px;margin-top:24px;">
-            Fulfillment ID: <span style="font-family:monospace;">${fulfillmentId}</span><br/>
-            If the button doesn't work, copy and paste this link into your browser:<br/>
-            <span style="font-family:monospace;font-size:12px;color:#6366f1;">${deliveryLink}</span>
-          </p>
-        </div>
+    const content = `
+      <p style="color:#0f172a;font-size:15px;margin:0 0 16px;">Hi ${merchantName},</p>
+      <p style="color:#475569;font-size:15px;margin:0 0 24px;">
+        Your order for <strong style="color:#0f172a;">${productName}</strong> has been fulfilled and your product codes are ready.
+      </p>
+      <p style="color:#475569;font-size:15px;margin:0 0 24px;">Click the button below to reveal your codes:</p>
+      <div style="text-align:center;margin:32px 0;">
+        <a href="${deliveryLink}" style="display:inline-block;background:#6366f1;color:#fff;font-weight:600;font-size:16px;padding:14px 36px;border-radius:12px;text-decoration:none;box-shadow:0 4px 12px rgba(99,102,241,0.3);">Reveal My Codes</a>
+      </div>
+      ${expiryWarning}
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;">
+        <p style="margin:0;font-size:13px;color:#64748b;">
+          Fulfillment ID: <span style="font-family:monospace;color:#0f172a;font-weight:600;">${fulfillmentId}</span><br/>
+          If the button doesn't work, copy and paste this link:<br/>
+          <span style="font-family:monospace;font-size:12px;color:#6366f1;word-break:break-all;">${deliveryLink}</span>
+        </p>
       </div>
     `;
+
+    const html = this.emailShell('Your Codes Are Ready', content);
 
     const text = `Your ${productName} codes are ready — Code Vault\n\nHi ${merchantName},\n\nYour order for ${productName} has been fulfilled and your product codes are ready.\n\nFulfillment ID: ${fulfillmentId}\nDelivery Link: ${deliveryLink}`;
 
@@ -748,28 +726,21 @@ export class EmailService {
    * Sends a verification code email for customer login
    */
   async sendVerificationCodeEmail(to: string, customerName: string, code: string): Promise<boolean> {
-    const html = `
-      <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
-        <div style="background:#0f172a;color:#fff;padding:24px;border-radius:8px 8px 0 0;">
-          <h1 style="margin:0;font-size:22px;">Your Verification Code</h1>
-        </div>
-        <div style="background:#fff;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px;">
-          <p style="color:#374151;font-size:15px;">Hello ${customerName},</p>
-          <p style="color:#374151;font-size:15px;">
-            Your verification code is:
-          </p>
-          <div style="background:#f3f4f6;border:2px solid #6366f1;border-radius:8px;padding:16px;margin:24px 0;text-align:center;">
-            <span style="font-size:32px;font-weight:600;font-family:monospace;letter-spacing:4px;color:#0f172a;">${code}</span>
-          </div>
-          <p style="color:#6b7280;font-size:13px;">
-            This code will expire in 10 minutes. Please do not share this code with anyone.
-          </p>
-          <p style="color:#6b7280;font-size:13px;margin-top:24px;">
-            If you didn't request this code, please ignore this email.
-          </p>
-        </div>
+    const content = `
+      <p style="color:#0f172a;font-size:15px;margin:0 0 16px;">Hello ${customerName},</p>
+      <p style="color:#475569;font-size:15px;margin:0 0 24px;">Your verification code is:</p>
+      <div style="background:#f1f5f9;border:2px solid #6366f1;border-radius:12px;padding:20px;margin:24px 0;text-align:center;">
+        <span style="font-size:32px;font-weight:700;font-family:monospace;letter-spacing:6px;color:#0f172a;">${code}</span>
       </div>
+      <p style="color:#94a3b8;font-size:13px;margin:0 0 8px;">
+        This code will expire in 10 minutes. Please do not share this code with anyone.
+      </p>
+      <p style="color:#94a3b8;font-size:13px;margin:0;">
+        If you didn't request this code, please ignore this email.
+      </p>
     `;
+
+    const html = this.emailShell('Your Verification Code', content);
 
     const text = `Your Verification Code\n\nHello ${customerName},\n\nYour verification code is: ${code}\n\nThis code will expire in 10 minutes. Please do not share this code with anyone.\n\nIf you didn't request this code, please ignore this email.`;
 

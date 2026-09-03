@@ -40,7 +40,7 @@ export async function apiFetch<T = any>(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
 
   let res: Response;
   try {
@@ -158,11 +158,16 @@ export const api = {
     const qs = params ? `?${new URLSearchParams(params)}` : '';
     return apiFetch(`/admin/codes${qs}`);
   },
-  bulkUpload: (denominationId: string, codes: string[], supplierId?: string, costInfo?: { cost_per_code?: number; currency?: string; note?: string }) =>
+  bulkUpload: (denominationId: string, codes: string[], supplierId?: string, costInfo?: { cost_per_code?: number; currency?: string; note?: string; batch_name?: string }) =>
     apiFetch('/admin/codes/bulk-upload', {
       method: 'POST',
       body: JSON.stringify({ denomination_id: denominationId, codes, supplier_id: supplierId, ...costInfo }),
     }),
+  listBatches: (params?: Record<string, string>) => {
+    const qs = params ? `?${new URLSearchParams(params)}` : '';
+    return apiFetch(`/admin/codes/batches${qs}`);
+  },
+  getDenominationStock: () => apiFetch('/admin/codes/denomination-stock'),
   createManualOrder: (data: { productId: string; amount: number; currency?: string; variantId?: string; customerEmail?: string; customerName?: string }) =>
     apiFetch('/admin/orders/create', { method: 'POST', body: JSON.stringify(data) }),
   getEmergencyStop: () => apiFetch('/admin/system/emergency'),

@@ -1,21 +1,40 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo } from 'react';
-import { Eye, Ban, RefreshCw, Search, ShieldAlert, Copy, Check } from 'lucide-react';
+import {
+  Eye, Ban, RefreshCw, Search, ShieldAlert, Copy, Check,
+  ChevronRight, Package, Layers, ArrowLeft,
+} from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Select, Table, Th, Td, Badge, Modal } from '@/components/ui';
 import { formatDate, statusColor } from '@/lib/utils';
 
 export function InventoryPage() {
   const queryClient = useQueryClient();
+  const [view, setView] = useState<'overview' | 'batch'>('overview');
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
   const [revealItem, setRevealItem] = useState<any>(null);
   const [revealedCode, setRevealedCode] = useState('');
   const [copied, setCopied] = useState(false);
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['codes', statusFilter],
-    queryFn: () => api.listCodes(statusFilter ? { status: statusFilter } : undefined),
+  // Denomination stock summary
+  const { data: denomStock, isLoading: stockLoading } = useQuery({
+    queryKey: ['denomination-stock'],
+    queryFn: api.getDenominationStock,
+  });
+
+  // Batches list
+  const { data: batchesData, isLoading: batchesLoading } = useQuery({
+    queryKey: ['batches'],
+    queryFn: () => api.listBatches(),
+  });
+
+  // Codes for selected batch
+  const { data: batchCodes, isLoading: batchCodesLoading } = useQuery({
+    queryKey: ['codes', 'batch', selectedBatchId, statusFilter],
+    queryFn: () => api.listCodes({ batchId: selectedBatchId!, ...(statusFilter ? { status: statusFilter } : {}) }),
+    enabled: !!selectedBatchId,
   });
 
   const revealMutation = useMutation({
@@ -24,6 +43,8 @@ export function InventoryPage() {
       setRevealedCode(data.code);
       queryClient.invalidateQueries({ queryKey: ['codes'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['batches'] });
+      queryClient.invalidateQueries({ queryKey: ['denomination-stock'] });
     },
     onError: () => {
       setRevealedCode('');
@@ -32,21 +53,12 @@ export function InventoryPage() {
 
   const voidMutation = useMutation({
     mutationFn: (id: string) => api.voidCode(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['codes'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['codes'] });
+      queryClient.invalidateQueries({ queryKey: ['batches'] });
+      queryClient.invalidateQueries({ queryKey: ['denomination-stock'] });
+    },
   });
-
-  const filteredItems = useMemo(() => {
-    if (!data?.items) return [];
-    if (!search.trim()) return data.items;
-    const q = search.toLowerCase();
-    return data.items.filter(
-      (item: any) =>
-        item.denomination.product.toLowerCase().includes(q) ||
-        item.denomination.region.toLowerCase().includes(q) ||
-        item.batch_id?.toLowerCase().includes(q) ||
-        item.status.toLowerCase().includes(q),
-    );
-  }, [data?.items, search]);
 
   const handleCopy = async () => {
     if (!revealedCode) return;
@@ -68,39 +80,100 @@ export function InventoryPage() {
     setCopied(false);
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
-        <RefreshCw className="mr-2 h-5 w-5 animate-spin" /> Loading inventory...
-      </div>
+  const openBatch = (batchId: string) => {
+    setSelectedBatchId(batchId);
+    setView('batch');
+    setStatusFilter('');
+  };
+
+  const backToOverview = () => {
+    setView('overview');
+    setSelectedBatchId(null);
+    setStatusFilter('');
+  };
+
+  const filteredBatches = useMemo(() => {
+    if (!batchesData?.items) return [];
+    if (!search.trim()) return batchesData.items;
+    const q = search.toLowerCase();
+    return batchesData.items.filter(
+      (b: any) =>
+        b.denomination.product.toLowerCase().includes(q) ||
+        b.denomination.region.toLowerCase().includes(q) ||
+        b.batch_name?.toLowerCase().includes(q) ||
+        b.id.toLowerCase().includes(q),
     );
-  }
+  }, [batchesData?.items, search]);
 
-  return (
-    <div className="space-y-6 animate-slide-up">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Inventory</h1>
-          <p className="text-sm text-muted-foreground">View, reveal, and manage encrypted code items</p>
-        </div>
+  const filteredBatchCodes = useMemo(() => {
+    if (!batchCodes?.items) return [];
+    return batchCodes.items;
+  }, [batchCodes?.items]);
+
+  const selectedBatch = batchesData?.items?.find((b: any) => b.id === selectedBatchId);
+
+  // ─── Batch detail view ───
+  if (view === 'batch' && selectedBatchId) {
+    return (
+      <div className="space-y-6 animate-slide-up">
         <div className="flex items-center gap-3">
-          <Badge className="bg-primary/10 text-primary">{data?.total || 0} codes</Badge>
+          <Button variant="ghost" size="sm" onClick={backToOverview}>
+            <ArrowLeft className="mr-1 h-4 w-4" /> Back
+          </Button>
         </div>
-      </div>
 
-      {/* Filters */}
-      <Card className="flex flex-col gap-4 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search product, region, batch, status..."
-            className="w-full rounded-lg border border-input bg-background py-2.5 pl-10 pr-3 text-sm outline-none transition-all placeholder:text-muted-foreground/50 focus:border-primary focus:ring-1 focus:ring-primary/30"
-          />
-        </div>
+        {/* Batch header */}
+        <Card className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Layers className="h-5 w-5" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">
+                {selectedBatch?.batch_name || `Batch ${selectedBatchId.slice(0, 12)}`}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                {selectedBatch?.denomination.product} · ${selectedBatch?.denomination.face_value} · {selectedBatch?.denomination.region}
+              </p>
+            </div>
+          </div>
+
+          {/* Batch stats */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            <div className="rounded-lg bg-muted/50 p-3 text-center">
+              <p className="text-2xl font-semibold text-emerald-400">{selectedBatch?.available || 0}</p>
+              <p className="text-xs text-muted-foreground">Available</p>
+            </div>
+            <div className="rounded-lg bg-muted/50 p-3 text-center">
+              <p className="text-2xl font-semibold text-blue-400">{selectedBatch?.allocated || 0}</p>
+              <p className="text-xs text-muted-foreground">Allocated</p>
+            </div>
+            <div className="rounded-lg bg-muted/50 p-3 text-center">
+              <p className="text-2xl font-semibold text-amber-400">{selectedBatch?.reserved || 0}</p>
+              <p className="text-xs text-muted-foreground">Reserved</p>
+            </div>
+            <div className="rounded-lg bg-muted/50 p-3 text-center">
+              <p className="text-2xl font-semibold text-primary">{selectedBatch?.delivered || 0}</p>
+              <p className="text-xs text-muted-foreground">Delivered</p>
+            </div>
+            <div className="rounded-lg bg-muted/50 p-3 text-center">
+              <p className="text-2xl font-semibold text-destructive">{selectedBatch?.voided || 0}</p>
+              <p className="text-xs text-muted-foreground">Voided</p>
+            </div>
+          </div>
+
+          {selectedBatch?.note && (
+            <div className="rounded-lg bg-muted/30 p-3 text-sm text-muted-foreground">
+              <span className="font-medium">Note:</span> {selectedBatch.note}
+            </div>
+          )}
+          {selectedBatch?.supplier && (
+            <p className="text-xs text-muted-foreground">Supplier: {selectedBatch.supplier}</p>
+          )}
+          <p className="text-xs text-muted-foreground">Created: {formatDate(selectedBatch?.created_at)}</p>
+        </Card>
+
+        {/* Status filter */}
         <div className="w-full sm:w-48">
           <Select
             value={statusFilter}
@@ -115,107 +188,268 @@ export function InventoryPage() {
             ]}
           />
         </div>
-      </Card>
 
-      {/* Table */}
-      <Card className="p-0">
-        <Table>
-          <thead>
-            <tr>
-              <Th>Product</Th>
-              <Th>Denomination</Th>
-              <Th>Status</Th>
-              <Th>Batch</Th>
-              <Th>Created</Th>
-              <Th className="text-right">Actions</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredItems.map((item: any) => (
-              <tr key={item.id} className="group hover:bg-muted/30">
-                <Td>
-                  <div className="font-medium">{item.denomination.product}</div>
-                  <div className="text-xs text-muted-foreground">{item.denomination.region}</div>
-                </Td>
-                <Td className="font-medium">${item.denomination.face_value}</Td>
-                <Td>
-                  <Badge className={statusColor(item.status)}>{item.status}</Badge>
-                </Td>
-                <Td className="font-mono text-xs text-muted-foreground">{item.batch_id?.slice(0, 12)}...</Td>
-                <Td className="text-muted-foreground">{formatDate(item.created_at)}</Td>
-                <Td className="text-right">
-                  <div className="flex justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleReveal(item)}
-                      disabled={item.status === 'DELIVERED' || item.status === 'VOID'}
-                      title="Reveal code"
-                    >
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                    {item.status === 'AVAILABLE' && (
-                      <Button variant="ghost" size="sm" onClick={() => voidMutation.mutate(item.id)} title="Void code">
-                        <Ban className="h-4 w-4 text-destructive" />
-                      </Button>
-                    )}
-                  </div>
-                </Td>
-              </tr>
-            ))}
-            {filteredItems.length === 0 && (
-              <tr>
-                <Td colSpan={6} className="py-12 text-center text-muted-foreground">
-                  No code items found matching your filters.
-                </Td>
-              </tr>
-            )}
-          </tbody>
-        </Table>
-      </Card>
+        {/* Codes table */}
+        <Card className="p-0">
+          {batchCodesLoading ? (
+            <div className="flex items-center justify-center py-12 text-muted-foreground">
+              <RefreshCw className="mr-2 h-5 w-5 animate-spin" /> Loading codes...
+            </div>
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Status</Th>
+                  <Th>Created</Th>
+                  <Th className="text-right">Actions</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredBatchCodes.map((item: any, idx: number) => (
+                  <tr key={item.id} className="group hover:bg-muted/30">
+                    <Td>
+                      <Badge className={statusColor(item.status)}>{item.status}</Badge>
+                    </Td>
+                    <Td className="text-muted-foreground">{formatDate(item.created_at)}</Td>
+                    <Td className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleReveal(item)}
+                          disabled={item.status === 'DELIVERED' || item.status === 'VOIDED'}
+                          title="Reveal code"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        {item.status === 'AVAILABLE' && (
+                          <Button variant="ghost" size="sm" onClick={() => voidMutation.mutate(item.id)} title="Void code">
+                            <Ban className="h-4 w-4 text-destructive" />
+                          </Button>
+                        )}
+                      </div>
+                    </Td>
+                  </tr>
+                ))}
+                {filteredBatchCodes.length === 0 && (
+                  <tr>
+                    <Td colSpan={3} className="py-12 text-center text-muted-foreground">
+                      No codes found in this batch.
+                    </Td>
+                  </tr>
+                )}
+              </tbody>
+            </Table>
+          )}
+        </Card>
 
-      {/* Reveal modal */}
-      <Modal open={!!revealItem} onClose={handleClose} title="Reveal Code" size="md">
-        {revealMutation.isPending ? (
-          <div className="flex flex-col items-center gap-3 py-8 text-muted-foreground">
-            <RefreshCw className="h-8 w-8 animate-spin text-primary" />
-            <p className="text-sm">Decrypting AES-256-GCM ciphertext...</p>
-          </div>
-        ) : revealedCode ? (
-          <div className="space-y-4">
-            <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
-              <div className="mb-3 flex items-center justify-between">
+        <RevealModal
+          revealItem={revealItem}
+          revealedCode={revealedCode}
+          isPending={revealMutation.isPending}
+          copied={copied}
+          onCopy={handleCopy}
+          onClose={handleClose}
+        />
+      </div>
+    );
+  }
+
+  // ─── Overview view (default) ───
+  const isLoading = stockLoading || batchesLoading;
+
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center text-muted-foreground">
+        <RefreshCw className="mr-2 h-5 w-5 animate-spin" /> Loading inventory...
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 animate-slide-up">
+      {/* Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Inventory</h1>
+          <p className="text-sm text-muted-foreground">Batch-based code inventory management</p>
+        </div>
+      </div>
+
+      {/* Denomination stock summary */}
+      <div>
+        <h2 className="mb-3 text-lg font-semibold">Stock by Denomination</h2>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {denomStock?.map((d: any) => (
+            <Card key={d.id} className="space-y-2" hover>
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Decrypted Code</p>
-                  <p className="text-sm text-muted-foreground">
-                    {revealItem?.denomination?.product} · ${revealItem?.denomination?.face_value}
-                  </p>
+                  <p className="font-medium">{d.product}</p>
+                  <p className="text-xs text-muted-foreground">{d.region}</p>
                 </div>
-                <Button variant="outline" size="sm" onClick={handleCopy}>
-                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                </Button>
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Package className="h-4 w-4" />
+                </div>
               </div>
-              <p className="font-mono text-2xl font-semibold break-all text-primary">{revealedCode}</p>
-            </div>
-            <div className="flex items-start gap-3 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
-              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-              <div>
-                <p className="font-medium">One-time reveal enforced</p>
-                <p className="text-xs opacity-90">This code is now marked DELIVERED and cannot be revealed again. The action is logged in the audit trail.</p>
+              <div className="flex items-baseline gap-2">
+                <p className="text-2xl font-semibold">${d.face_value}</p>
+                <Badge className={d.available > 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-destructive/10 text-destructive'}>
+                  {d.available} available
+                </Badge>
               </div>
-            </div>
-            <Button onClick={handleClose} className="w-full">
-              Done
-            </Button>
+              <div className="flex gap-3 text-xs text-muted-foreground">
+                <span>{d.total_codes} total</span>
+                <span>{d.delivered} delivered</span>
+                <span>{d.voided} voided</span>
+              </div>
+            </Card>
+          ))}
+          {denomStock?.length === 0 && (
+            <Card className="col-span-full py-8 text-center text-muted-foreground">
+              No denominations found.
+            </Card>
+          )}
+        </div>
+      </div>
+
+      {/* Batches section */}
+      <div>
+        <h2 className="mb-3 text-lg font-semibold">Batches</h2>
+
+        {/* Search */}
+        <Card className="mb-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search batch name, product, region..."
+              className="w-full rounded-lg border border-input bg-background py-2.5 pl-10 pr-3 text-sm outline-none transition-all placeholder:text-muted-foreground/50 focus:border-primary focus:ring-1 focus:ring-primary/30"
+            />
           </div>
-        ) : (
-          <div className="py-6 text-center text-muted-foreground">
-            <ShieldAlert className="mx-auto mb-2 h-8 w-8 text-destructive" />
-            <p>Failed to reveal code.</p>
-            <p className="text-xs">It may have already been revealed or voided.</p>
-          </div>
-        )}
-      </Modal>
+        </Card>
+
+        {/* Batches table */}
+        <Card className="p-0">
+          <Table>
+            <thead>
+              <tr>
+                <Th>Batch Name</Th>
+                <Th>Product</Th>
+                <Th>Denomination</Th>
+                <Th>Available</Th>
+                <Th>Delivered</Th>
+                <Th>Total</Th>
+                <Th>Created</Th>
+                <Th className="text-right">View</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredBatches.map((b: any) => (
+                <tr
+                  key={b.id}
+                  className="group cursor-pointer hover:bg-muted/30"
+                  onClick={() => openBatch(b.id)}
+                >
+                  <Td>
+                    <div className="font-medium">{b.batch_name || <span className="text-muted-foreground">Unnamed batch</span>}</div>
+                    <div className="text-xs font-mono text-muted-foreground">{b.id.slice(0, 12)}</div>
+                  </Td>
+                  <Td>
+                    <div className="font-medium">{b.denomination.product}</div>
+                    <div className="text-xs text-muted-foreground">{b.denomination.region}</div>
+                  </Td>
+                  <Td className="font-medium">${b.denomination.face_value}</Td>
+                  <Td>
+                    <Badge className={b.available > 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-muted text-muted-foreground'}>
+                      {b.available}
+                    </Badge>
+                  </Td>
+                  <Td className="text-muted-foreground">{b.delivered}</Td>
+                  <Td className="font-medium">{b.quantity}</Td>
+                  <Td className="text-muted-foreground">{formatDate(b.created_at)}</Td>
+                  <Td className="text-right">
+                    <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                  </Td>
+                </tr>
+              ))}
+              {filteredBatches.length === 0 && (
+                <tr>
+                  <Td colSpan={8} className="py-12 text-center text-muted-foreground">
+                    No batches found.
+                  </Td>
+                </tr>
+              )}
+            </tbody>
+          </Table>
+        </Card>
+      </div>
+
+      <RevealModal
+        revealItem={revealItem}
+        revealedCode={revealedCode}
+        isPending={revealMutation.isPending}
+        copied={copied}
+        onCopy={handleCopy}
+        onClose={handleClose}
+      />
     </div>
+  );
+}
+
+// ─── Reusable reveal modal ───
+function RevealModal({
+  revealItem, revealedCode, isPending, copied, onCopy, onClose,
+}: {
+  revealItem: any;
+  revealedCode: string;
+  isPending: boolean;
+  copied: boolean;
+  onCopy: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal open={!!revealItem} onClose={onClose} title="Reveal Code" size="md">
+      {isPending ? (
+        <div className="flex flex-col items-center gap-3 py-8 text-muted-foreground">
+          <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm">Decrypting AES-256-GCM ciphertext...</p>
+        </div>
+      ) : revealedCode ? (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-primary/20 bg-primary/5 p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Decrypted Code</p>
+                <p className="text-sm text-muted-foreground">
+                  {revealItem?.denomination?.product} · ${revealItem?.denomination?.face_value}
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={onCopy}>
+                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              </Button>
+            </div>
+            <p className="font-mono text-2xl font-semibold break-all text-primary">{revealedCode}</p>
+          </div>
+          <div className="flex items-start gap-3 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-medium">One-time reveal enforced</p>
+              <p className="text-xs opacity-90">This code is now marked DELIVERED and cannot be revealed again. The action is logged in the audit trail.</p>
+            </div>
+          </div>
+          <Button onClick={onClose} className="w-full">
+            Done
+          </Button>
+        </div>
+      ) : (
+        <div className="py-6 text-center text-muted-foreground">
+          <ShieldAlert className="mx-auto mb-2 h-8 w-8 text-destructive" />
+          <p>Failed to reveal code.</p>
+          <p className="text-xs">It may have already been revealed or voided.</p>
+        </div>
+      )}
+    </Modal>
   );
 }

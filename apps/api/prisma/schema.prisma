@@ -632,6 +632,7 @@ model PlatformSetting {
 model CodeBatch {
   id             String   @id // same nanoid stored on each CodeItem.batchId
   denominationId String
+  batchName      String?  // human-friendly name set by admin at upload time
   quantity       Int
   supplierId     String?
   costPerCode    Decimal?

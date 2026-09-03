@@ -67,6 +67,17 @@ else
   find . -path "*/.prisma/client" -type d 2>/dev/null | head -5
   find ../.. -path "*/.prisma/client" -type d 2>/dev/null | head -5
 fi
+
+# Step 4b: Apply pending database migrations
+echo "--- Applying Prisma migrations ---"
+if [ -f node_modules/.bin/prisma ]; then
+  node_modules/.bin/prisma migrate deploy --schema=prisma/schema.prisma
+elif [ -f ../../node_modules/.bin/prisma ]; then
+  ../../node_modules/.bin/prisma migrate deploy --schema=prisma/schema.prisma
+else
+  npx prisma migrate deploy --schema=prisma/schema.prisma
+fi
+echo "OK: Migrations applied"
 cd ../..
 
 # Step 5: Build frontends

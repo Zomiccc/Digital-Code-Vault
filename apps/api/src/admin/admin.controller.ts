@@ -335,8 +335,26 @@ export class AdminController {
       user.id,
       body.supplier_id,
       req.ip,
-      { costPerCode: body.cost_per_code, currency: body.currency, note: body.note },
+      { costPerCode: body.cost_per_code, currency: body.currency, note: body.note, batchName: body.batch_name },
     );
+  }
+
+  @Get('codes/batches')
+  async listBatches(
+    @Query('denominationId') denominationId?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.codesService.listBatches({
+      denominationId,
+      limit: limit ? parseInt(limit) : 50,
+      offset: offset ? parseInt(offset) : 0,
+    });
+  }
+
+  @Get('codes/denomination-stock')
+  async getDenominationStock() {
+    return this.codesService.getDenominationStock();
   }
 
   // ─── Manual order creation (admin) ───

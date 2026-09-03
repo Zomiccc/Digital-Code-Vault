@@ -13,6 +13,7 @@ export function BulkUploadPage() {
   const [costPerCode, setCostPerCode] = useState('');
   const [costCurrency, setCostCurrency] = useState('USD');
   const [costNote, setCostNote] = useState('');
+  const [batchName, setBatchName] = useState('');
   const [result, setResult] = useState<any>(null);
 
   const { data: products, isLoading: productsLoading } = useQuery({ queryKey: ['products'], queryFn: api.listProducts });
@@ -30,6 +31,7 @@ export function BulkUploadPage() {
         cost_per_code: costPerCode ? parseFloat(costPerCode) : undefined,
         currency: costCurrency,
         note: costNote || undefined,
+        batch_name: batchName || undefined,
       });
     },
     onSuccess: (data) => {
@@ -38,6 +40,8 @@ export function BulkUploadPage() {
       queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
       queryClient.invalidateQueries({ queryKey: ['cost-basis'] });
       queryClient.invalidateQueries({ queryKey: ['platform-finance-overview'] });
+      queryClient.invalidateQueries({ queryKey: ['batches'] });
+      queryClient.invalidateQueries({ queryKey: ['denomination-stock'] });
     },
     onError: (err: any) => setResult({ error: err.message }),
   });
@@ -50,6 +54,7 @@ export function BulkUploadPage() {
     setCostPerCode('');
     setCostCurrency('USD');
     setCostNote('');
+    setBatchName('');
     setResult(null);
   };
 
@@ -103,6 +108,14 @@ export function BulkUploadPage() {
               { value: '', label: '— None —' },
               ...(suppliers?.map((s: any) => ({ value: s.id, label: s.name })) || []),
             ]}
+          />
+
+          {/* Batch name */}
+          <Input
+            label="Batch name (optional)"
+            value={batchName}
+            onChange={(e: any) => setBatchName(e.target.value)}
+            placeholder="e.g. PSN KSA Batch #5 — Jan 2026"
           />
 
           {/* Cost bookkeeping — remember what this batch cost */}
