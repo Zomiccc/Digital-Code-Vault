@@ -319,6 +319,12 @@ model FulfillmentRequest {
   // Fixed manual-order discount; amount remains the original allocation value.
   discountAmount  Decimal            @default(0)
   currency        String             @default("USD")
+  // What the merchant wallet was actually charged. `amount` stays the USD face
+  // value; these record the wallet's own currency and the rate used at order
+  // time, so a later rate change cannot rewrite past orders.
+  chargedCurrency String             @default("USD")
+  chargedAmount   Decimal            @default(0)
+  fxRate          Decimal            @default(1)
   idempotencyKey  String
   referenceId     String?
   status          String             @default("PENDING")
@@ -375,6 +381,8 @@ model WalletTransaction {
   merchantId    String
   type          String
   amount        Decimal
+  // Wallet currency this row is denominated in; balances never mix currencies.
+  currency      String        @default("USD")
   balanceAfter  Decimal
   referenceId   String?
   fulfillmentId String?       @unique
@@ -628,6 +636,16 @@ model PlatformSetting {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
+}
+
+/// Admin-managed conversion rates against USD, which is always the base unit.
+/// USD itself is implicit and never stored.
+model ExchangeRate {
+  currency    String   @id // ISO code, e.g. "PKR", "TRY"
+  unitsPerUsd Decimal // 1 USD buys this many units, e.g. 300 for PKR
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
 }
 
 // Cost tracking for each bulk code upload batch

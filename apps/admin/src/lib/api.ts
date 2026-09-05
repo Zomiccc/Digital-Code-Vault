@@ -198,6 +198,14 @@ export const api = {
   getAdminWallet: () => apiFetch('/admin/wallet'),
   getPlatformFinanceOverview: () => apiFetch('/admin/finance/overview'),
   getCostBasis: () => apiFetch('/admin/finance/cost-basis'),
+  listExchangeRates: () => apiFetch('/admin/currency/rates'),
+  setExchangeRate: (currency: string, unitsPerUsd: number) =>
+    apiFetch(`/admin/currency/rates/${encodeURIComponent(currency)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ units_per_usd: unitsPerUsd }),
+    }),
+  deleteExchangeRate: (currency: string) =>
+    apiFetch(`/admin/currency/rates/${encodeURIComponent(currency)}`, { method: 'DELETE' }),
   updateExchangeRate: (rate: number) =>
     apiFetch('/admin/finance/exchange-rate', { method: 'PATCH', body: JSON.stringify({ rate }) }),
   getAdminWalletTransactions: (limit = 50, offset = 0) =>

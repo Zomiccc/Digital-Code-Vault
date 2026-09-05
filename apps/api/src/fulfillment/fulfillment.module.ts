@@ -5,9 +5,10 @@ import { AllocationEngineService } from './allocation-engine.service';
 import { ScheduledTasksService } from './scheduled-tasks.service';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { AuthModule } from '../auth/auth.module';
+import { CurrencyModule } from '../currency/currency.module';
 
 @Module({
-  imports: [forwardRef(() => WebhooksModule), AuthModule],
+  imports: [forwardRef(() => WebhooksModule), AuthModule, CurrencyModule],
   providers: [FulfillmentService, AllocationEngineService, ScheduledTasksService],
   controllers: [FulfillmentController, OrdersController, PaymentNotificationController, SandboxController],
   exports: [FulfillmentService, AllocationEngineService],

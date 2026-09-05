@@ -17,6 +17,8 @@ import { WebhookService } from '../webhooks/webhook.service';
 import { EmailService } from '../email/email.service';
 import { OrderDigestService } from '../email/order-digest.service';
 import { WalletService } from '../wallet/wallet.service';
+import { CurrencyService } from '../currency/currency.service';
+import { convertFromUsd, normaliseCurrency } from '../currency/money';
 @Injectable()
 export class FulfillmentService {
   private readonly logger = new Logger(FulfillmentService.name);
@@ -31,6 +33,7 @@ export class FulfillmentService {
     private emailService: EmailService,
     private orderDigestService: OrderDigestService,
     private walletService: WalletService,
+    private currencyService: CurrencyService,
   ) {}
 
   async createFulfillment(params: {
@@ -499,9 +502,18 @@ export class FulfillmentService {
     // Admin-created orders are the platform's own responsibility — no wallet is
     // checked or charged; stock is fulfilled straight from the vault.
     const skipWallet = sandbox || useMerchantPool || actorType === 'ADMIN';
+
+    // Prices are held in USD; a wallet is charged in its own currency. Resolve the
+    // rate once, before the transaction, so every check and write below agrees on
+    // it and a mid-order rate change cannot split the charge across two rates.
+    const walletCurrency = normaliseCurrency(merchant.currency || 'USD');
+    const fxRate = skipWallet ? 1 : await this.currencyService.getRate(walletCurrency);
+    const chargeFor = (costUsd: number) => convertFromUsd(costUsd, fxRate);
+    let chargedAmount = chargeFor(totalCost);
+
     if (!skipWallet) {
-      // Check wallet balance
-      if (Number(merchant.walletBalance) < totalCost) {
+      // Check wallet balance, in the wallet's own currency
+      if (Number(merchant.walletBalance) < chargedAmount) {
         const failedReq = await this.prisma.fulfillmentRequest.create({
           data: {
             merchantId,
@@ -522,7 +534,10 @@ export class FulfillmentService {
           action: 'fulfillment.failed',
           entity: 'FulfillmentRequest',
           entityId: failedReq.id,
-          metadata: { reason: 'INSUFFICIENT_WALLET', balance: merchant.walletBalance, required: totalCost },
+          metadata: {
+            reason: 'INSUFFICIENT_WALLET', balance: merchant.walletBalance,
+            required: chargedAmount, currency: walletCurrency, amountUsd: totalCost, fxRate,
+          },
           ip,
         });
 
@@ -535,7 +550,7 @@ export class FulfillmentService {
         throw new BadRequestException({
           error: 'INSUFFICIENT_WALLET',
           code: 'INSUFFICIENT_WALLET',
-          message: `Insufficient wallet balance. Required: ${totalCost}, Available: ${merchant.walletBalance}`,
+          message: `Insufficient wallet balance. Required: ${chargedAmount} ${walletCurrency}, Available: ${merchant.walletBalance} ${walletCurrency}`,
         });
       }
     }
@@ -636,6 +651,8 @@ export class FulfillmentService {
                 message: `Combination total ${totalCost} does not match requested amount ${amount} after retry`,
               });
             }
+            // Keep the wallet charge in step with the re-picked combination.
+            chargedAmount = chargeFor(totalCost);
           }
         }
 
@@ -685,7 +702,7 @@ export class FulfillmentService {
             updatedMerchant = await tx.merchant.update({
               where: { id: merchantId },
               data: {
-                walletBalance: { decrement: totalCost },
+                walletBalance: { decrement: chargedAmount },
               },
             });
 
@@ -703,11 +720,19 @@ export class FulfillmentService {
               data: {
                 merchantId,
                 type: 'DEBIT',
-                amount: totalCost,
+                amount: chargedAmount,
+                currency: walletCurrency,
                 balanceAfter: updatedMerchant.walletBalance,
                 referenceId: fulfillmentReq.id,
                 fulfillmentId: fulfillmentReq.id,
               },
+            });
+
+            // The platform's own books stay in USD regardless of what the merchant
+            // wallet is denominated in, so revenue across merchants stays comparable.
+            await tx.fulfillmentRequest.update({
+              where: { id: fulfillmentReq.id },
+              data: { chargedCurrency: walletCurrency, chargedAmount, fxRate },
             });
 
             // 4b. Credit admin/platform wallet atomically
@@ -1070,29 +1095,36 @@ export class FulfillmentService {
         data: { walletBalance: { increment: refundAmount } },
       });
 
-      // Create refund wallet transaction
+      // Create refund wallet transaction, in the wallet's own currency
       await tx.walletTransaction.create({
         data: {
           merchantId: req.merchantId,
           type: 'REFUND',
           amount: refundAmount,
+          currency: req.walletTxn.currency || 'USD',
           balanceAfter: updatedMerchant.walletBalance,
           referenceId: fulfillmentId,
           fulfillmentId: fulfillmentId,
         },
       });
 
-      // Reverse admin wallet credit (debit it back)
-      const adminWalletId = revenueWalletId!;
+      // Reverse admin wallet credit. The platform's books are in USD, so the debit
+      // must undo the USD credit actually recorded, not the merchant-currency
+      // refund, which for a non-USD wallet is a completely different number.
+      const revenue = await tx.adminWalletTransaction.findFirst({
+        where: { referenceId: fulfillmentId, source: 'FULFILLMENT', type: 'CREDIT' },
+      });
+      const usdReversal = revenue ? Number(revenue.amount) : Number(req.amount);
+      const adminWalletId = revenue?.adminWalletId ?? revenueWalletId!;
       const updatedAdminWallet = await tx.adminWallet.update({
         where: { id: adminWalletId },
-        data: { balance: { decrement: refundAmount } },
+        data: { balance: { decrement: usdReversal } },
       });
       await tx.adminWalletTransaction.create({
         data: {
           adminWalletId,
           type: 'DEBIT',
-          amount: refundAmount,
+          amount: usdReversal,
           balanceAfter: updatedAdminWallet.balance,
           referenceId: fulfillmentId,
           source: 'REFUND',

@@ -280,6 +280,8 @@ export class WalletService {
           merchantId: request.merchantId,
           type: 'CREDIT',
           amount: finalAmount,
+          // createFundingRequest already forces this to equal the wallet currency.
+          currency: request.currency || 'USD',
           balanceAfter: updatedMerchant.walletBalance,
           referenceId: requestId,
         },
@@ -373,9 +375,7 @@ export class WalletService {
   // ─── Reconciliation ───
 
   async getPlatformFinanceOverview() {
-    // Get admin-configured exchange rate (USD to PKR)
-    const rateSetting = await this.prisma.platformSetting.findUnique({ where: { key: 'USD_TO_PKR_RATE' } });
-    const usdToPkrRate = rateSetting ? parseFloat(rateSetting.value) : 280; // default 280
+    const usdToPkrRate = (await this.rateFor('PKR')) ?? 280;
 
     // Aggregate merchant balances grouped by currency
     const merchants = await this.prisma.merchant.findMany({
@@ -425,15 +425,23 @@ export class WalletService {
     };
   }
 
+  /** Kept for the existing Finance screen; PKR is one row in the rate table. */
   async updateExchangeRate(rate: number, adminId: string) {
     if (rate <= 0) throw new BadRequestException('Exchange rate must be greater than 0');
-    await this.prisma.platformSetting.upsert({
-      where: { key: 'USD_TO_PKR_RATE' },
-      create: { key: 'USD_TO_PKR_RATE', value: String(rate) },
-      update: { value: String(rate) },
+    await this.prisma.exchangeRate.upsert({
+      where: { currency: 'PKR' },
+      create: { currency: 'PKR', unitsPerUsd: rate, updatedBy: adminId },
+      update: { unitsPerUsd: rate, updatedBy: adminId },
     });
     this.logger.log(`USD to PKR rate updated to ${rate} by admin ${adminId}`);
     return { key: 'USD_TO_PKR_RATE', value: String(rate) };
+  }
+
+  /** Units per USD for one currency, or undefined when no rate is configured. */
+  private async rateFor(currency: string): Promise<number | undefined> {
+    if (currency === 'USD') return 1;
+    const row = await this.prisma.exchangeRate.findUnique({ where: { currency } });
+    return row ? Number(row.unitsPerUsd) : undefined;
   }
 
   async getReconciliationReport(limit = 100, offset = 0) {
@@ -463,7 +471,13 @@ export class WalletService {
 
       const merchantDebit = f.walletTxn ? Number(f.walletTxn.amount) : null;
       const adminCredit = adminTxn ? Number(adminTxn.amount) : null;
-      const matched = merchantDebit !== null && adminCredit !== null && merchantDebit === adminCredit;
+      // The merchant is debited in its wallet currency and the platform is credited
+      // in USD, so the two only compare after undoing the rate used at order time.
+      const rate = Number(f.fxRate) || 1;
+      const merchantDebitUsd = merchantDebit === null ? null : Math.round((merchantDebit / rate) * 100) / 100;
+      const matched =
+        merchantDebitUsd !== null && adminCredit !== null &&
+        Math.abs(merchantDebitUsd - adminCredit) < 0.01;
 
       if (!matched) mismatchCount++;
 
@@ -475,6 +489,9 @@ export class WalletService {
         reference_id: f.referenceId,
         created_at: f.createdAt,
         merchant_debit: merchantDebit,
+        merchant_debit_currency: f.chargedCurrency || 'USD',
+        merchant_debit_usd: merchantDebitUsd,
+        fx_rate: rate,
         admin_credit: adminCredit,
         matched,
       });
@@ -607,9 +624,7 @@ export class WalletService {
       });
     }
 
-    // Get exchange rate for conversion
-    const rateSetting = await this.prisma.platformSetting.findUnique({ where: { key: 'USD_TO_PKR_RATE' } });
-    const usdToPkrRate = rateSetting ? parseFloat(rateSetting.value) : 280;
+    const usdToPkrRate = (await this.rateFor('PKR')) ?? 280;
 
     // Compute grand totals in USD and PKR
     let totalUsd = 0;

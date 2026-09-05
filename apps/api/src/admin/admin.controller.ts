@@ -1,6 +1,6 @@
 import { manualOrderPricing } from '../fulfillment/manual-order-pricing';
 import {
-  Controller, Get, Post, Patch, Delete, Body, Param, Query, Req,
+  Controller, Get, Post, Patch, Put, Delete, Body, Param, Query, Req,
   UseGuards, NotFoundException, BadRequestException,
 } from '@nestjs/common';
 import { AdminService } from './admin.service';
@@ -10,6 +10,7 @@ import { CodesService } from '../codes/codes.service';
 import { EssentialsService } from '../essentials/essentials.service';
 import { AuthService } from '../auth/auth.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CurrencyService } from '../currency/currency.service';
 import { WalletService } from '../wallet/wallet.service';
 import { DeliveryService } from '../delivery/delivery.service';
 import { SupportService } from '../merchants/support.service';
@@ -114,6 +115,7 @@ export class AdminController {
     private deliveryService: DeliveryService,
     private supportService: SupportService,
     private fulfillmentService: FulfillmentService,
+    private currencyService: CurrencyService,
   ) {}
 
   @Get('stats')
@@ -169,6 +171,37 @@ export class AdminController {
   @Roles('SUPER_ADMIN', 'FINANCE')
   async updateExchangeRate(@Body() body: { rate: number }, @CurrentUser() user: any) {
     return this.walletService.updateExchangeRate(body.rate, user.id);
+  }
+
+  // ─── Exchange rates ───
+  // USD is the base for every stored price; these are the rates the platform
+  // converts with, for merchant wallets and for regional display prices alike.
+
+  @Get('currency/rates')
+  @Roles('SUPER_ADMIN', 'FINANCE', 'SUPPORT', 'INVENTORY_MANAGER')
+  async listExchangeRates() {
+    return this.currencyService.listRates();
+  }
+
+  @Put('currency/rates/:currency')
+  @Roles('SUPER_ADMIN', 'FINANCE')
+  async setExchangeRate(
+    @Param('currency') currency: string,
+    @Body() body: { units_per_usd: number },
+    @CurrentUser() user: any,
+    @Req() req: any,
+  ) {
+    return this.currencyService.setRate(currency, body.units_per_usd, user.id, req.ip);
+  }
+
+  @Delete('currency/rates/:currency')
+  @Roles('SUPER_ADMIN', 'FINANCE')
+  async deleteExchangeRate(
+    @Param('currency') currency: string,
+    @CurrentUser() user: any,
+    @Req() req: any,
+  ) {
+    return this.currencyService.deleteRate(currency, user.id, req.ip);
   }
 
   @Get('finance/cost-basis')
