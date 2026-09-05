@@ -36,6 +36,19 @@ export class CodesService {
       throw new NotFoundException('Denomination not found');
     }
 
+    // Resolve the supplier before the transaction. An unknown id is the caller's
+    // mistake, and letting it reach the insert would abort the whole batch with a
+    // foreign-key error that surfaces to the admin as an opaque 500.
+    if (supplierId) {
+      const supplier = await this.prisma.supplier.findUnique({
+        where: { id: supplierId },
+        select: { id: true },
+      });
+      if (!supplier) {
+        throw new BadRequestException(`Supplier ${supplierId} not found`);
+      }
+    }
+
     const batchId = nanoid(16);
     const results: { inserted: number; duplicates: number; errors: string[] } = {
       inserted: 0,
@@ -62,27 +75,53 @@ export class CodesService {
     }
 
     // Serialize uploads for this denomination and commit codes with their named batch.
-    await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${denominationId}))`;
-      const existing = await tx.codeItem.findMany({
-        where: { denominationId, codeHash: { in: rows.map(row => row.codeHash) } },
-        select: { codeHash: true },
-      });
-      const existingHashes = new Set(existing.map(item => item.codeHash));
-      const newRows = rows.filter(row => !existingHashes.has(row.codeHash));
-      results.duplicates += rows.length - newRows.length;
-      await tx.codeBatch.create({ data: {
-        id: batchId, denominationId, batchName: costInfo?.batchName?.trim() || null,
-        quantity: 0, supplierId: supplierId || null,
-        costPerCode: costInfo?.costPerCode ?? null, currency: costInfo?.currency || 'USD',
-        note: costInfo?.note || null, createdBy: adminId,
-      } });
-      if (newRows.length) {
-        const inserted = await tx.codeItem.createMany({ data: newRows });
-        results.inserted = inserted.count;
-      }
-      await tx.codeBatch.update({ where: { id: batchId }, data: { quantity: results.inserted } });
-    });
+    // Large uploads run many statements over one connection, so the interactive
+    // transaction gets an explicit budget rather than Prisma's 5s default, which a
+    // few thousand codes will exceed and report only as an opaque 500.
+    const CHUNK = 1000;
+    try {
+      await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${denominationId}))`;
+          const existingHashes = new Set<string>();
+          for (let i = 0; i < rows.length; i += CHUNK) {
+            const existing = await tx.codeItem.findMany({
+              where: {
+                denominationId,
+                codeHash: { in: rows.slice(i, i + CHUNK).map((row) => row.codeHash) },
+              },
+              select: { codeHash: true },
+            });
+            for (const item of existing) existingHashes.add(item.codeHash);
+          }
+          const newRows = rows.filter((row) => !existingHashes.has(row.codeHash));
+          results.duplicates += rows.length - newRows.length;
+          await tx.codeBatch.create({ data: {
+            id: batchId, denominationId, batchName: costInfo?.batchName?.trim() || null,
+            quantity: 0, supplierId: supplierId || null,
+            costPerCode: costInfo?.costPerCode ?? null, currency: costInfo?.currency || 'USD',
+            note: costInfo?.note || null, createdBy: adminId,
+          } });
+          for (let i = 0; i < newRows.length; i += CHUNK) {
+            const inserted = await tx.codeItem.createMany({ data: newRows.slice(i, i + CHUNK) });
+            results.inserted += inserted.count;
+          }
+          await tx.codeBatch.update({ where: { id: batchId }, data: { quantity: results.inserted } });
+        },
+        { timeout: 120_000, maxWait: 30_000 },
+      );
+    } catch (err) {
+      // Nest reports an unrecognised error as a bare "Internal server error", which
+      // leaves the admin with nothing to act on. Keep the database's own wording.
+      const cause = err as { code?: string; message?: string };
+      this.logger.error(
+        `Bulk upload failed for denomination ${denominationId} (batch ${batchId}): ${cause.code ?? 'no-code'} ${cause.message ?? err}`,
+      );
+      throw new BadRequestException(
+        `Upload failed, no codes were saved: ${cause.code ? `[${cause.code}] ` : ''}${(cause.message ?? 'unknown database error').split('\n').filter(Boolean).slice(-1)[0].trim()}`,
+        { cause: err },
+      );
+    }
 
     await this.auditService.log({
       actorType: 'ADMIN',

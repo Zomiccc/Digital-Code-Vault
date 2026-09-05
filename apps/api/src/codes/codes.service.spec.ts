@@ -80,7 +80,10 @@ function uploadMock(insertedCount: number, failureStage?: FailureStage) {
     codeItem: {
       findMany: async (args: any) => {
         write('findMany', args);
-        assert.deepEqual(events.slice(0, 3), ['transaction', 'lock', 'findMany']);
+        assert.deepEqual(
+          events.slice(events.indexOf('transaction'), events.indexOf('transaction') + 3),
+          ['transaction', 'lock', 'findMany'],
+        );
         calls.findMany = args;
         assert.equal(args.where.denominationId, denomination.id);
         assert.deepEqual(args.select, { codeHash: true });
@@ -95,9 +98,20 @@ function uploadMock(insertedCount: number, failureStage?: FailureStage) {
   // Writes exist only on tx: using the root client instead fails the test.
   const prisma = {
     denomination: { findUnique: async () => denomination },
-    $transaction: async (callback: (client: typeof tx) => Promise<void>) => {
+    // Only 'supplier-1' exists; any other id must be rejected before the transaction.
+    supplier: {
+      findUnique: async ({ where }: any) => {
+        events.push('supplierLookup');
+        return where.id === 'supplier-1' ? { id: 'supplier-1' } : null;
+      },
+    },
+    $transaction: async (callback: (client: typeof tx) => Promise<void>, options?: unknown) => {
       events.push('transaction');
       assert.equal(typeof callback, 'function');
+      // A large upload must not inherit Prisma's 5s default transaction budget.
+      const budget = options as { timeout?: number; maxWait?: number } | undefined;
+      assert.ok((budget?.timeout ?? 0) >= 60_000, 'Transaction needs an explicit generous timeout');
+      assert.ok((budget?.maxWait ?? 0) > 5_000, 'Transaction needs an explicit maxWait');
       inTransaction = true;
       try {
         await callback(tx);
@@ -208,7 +222,22 @@ async function main() {
       batchId: result.batchId, total: 5, inserted: 2, duplicates: 2, errors: 1,
       supplierId: 'supplier-1', costPerCode: 8, currency: 'EUR',
     });
-    assert.deepEqual(events, ['transaction', 'lock', 'findMany', 'create', 'createMany', 'update', 'commit', 'audit', 'fulfill']);
+    assert.deepEqual(events, ['supplierLookup', 'transaction', 'lock', 'findMany', 'create', 'createMany', 'update', 'commit', 'audit', 'fulfill']);
+  });
+
+  await test('unknown supplier is rejected before any code or batch is written', async () => {
+    const { sut, events, calls } = uploadMock(1);
+    await assert.rejects(
+      () => sut.bulkUpload(denomination.id, ['FIRST'], 'admin-1', 'supplier-missing'),
+      (error: unknown) => {
+        const rejection = error as { status?: number; message?: string };
+        assert.equal(rejection.status, 400);
+        assert.match(rejection.message ?? '', /Supplier supplier-missing not found/);
+        return true;
+      },
+    );
+    assert.deepEqual(events, ['supplierLookup'], 'No transaction may be opened');
+    assert.deepEqual(calls, {}, 'Nothing may be written');
   });
 
   await test('all database duplicates persist zero inserted quantity and skip fulfillment', async () => {
@@ -233,9 +262,18 @@ async function main() {
   for (const stage of ['lock', 'findMany', 'create', 'createMany', 'update', 'commit'] as const) {
     await test(`transaction ${stage} failure rejects upload without success side effects`, async () => {
       const { sut, events, failure } = uploadMock(1, stage);
+      // The database error is reported to the admin rather than surfacing as a bare
+      // "Internal server error", and the original is kept as the cause.
       await assert.rejects(
         () => sut.bulkUpload(denomination.id, ['FIRST'], 'admin-1'),
-        (error: unknown) => error === failure,
+        (error: unknown) => {
+          const rejection = error as { status?: number; message?: string; cause?: unknown };
+          assert.equal(rejection.cause, failure);
+          assert.equal(rejection.status, 400);
+          assert.match(rejection.message ?? '', /^Upload failed, no codes were saved: /);
+          assert.match(rejection.message ?? '', new RegExp(stage));
+          return true;
+        },
       );
       const writes = ['lock', 'findMany', 'create', 'createMany', 'update'];
       assert.deepEqual(events, [

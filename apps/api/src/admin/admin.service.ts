@@ -108,8 +108,11 @@ export class AdminService {
 
   // ─── Suppliers ───
 
-  async createSupplier(data: { name: string; contactInfo?: string }) {
-    return this.prisma.supplier.create({ data });
+  // The controller hands over the request DTO, whose keys are snake_case.
+  async createSupplier(data: { name: string; contact_info?: string }) {
+    return this.prisma.supplier.create({
+      data: { name: data.name.trim(), contactInfo: data.contact_info?.trim() || null },
+    });
   }
 
   async listSuppliers() {

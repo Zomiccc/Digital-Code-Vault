@@ -4,11 +4,16 @@ import { Upload, CheckCircle, AlertCircle, Shield, FileDigit } from 'lucide-reac
 import { api } from '@/lib/api';
 import { Card, Button, Select, Input, Badge } from '@/components/ui';
 
+// Sentinel for the supplier dropdown; never sent to the API as an id.
+const NEW_SUPPLIER = '__new__';
+
 export function BulkUploadPage() {
   const queryClient = useQueryClient();
   const [productId, setProductId] = useState('');
   const [denomId, setDenomId] = useState('');
   const [supplierId, setSupplierId] = useState('');
+  const [newSupplierName, setNewSupplierName] = useState('');
+  const [newSupplierContact, setNewSupplierContact] = useState('');
   const [codesText, setCodesText] = useState('');
   const [costPerCode, setCostPerCode] = useState('');
   const [costCurrency, setCostCurrency] = useState('USD');
@@ -25,9 +30,19 @@ export function BulkUploadPage() {
   const codeCount = codesText.split('\n').map((c) => c.trim()).filter(Boolean).length;
 
   const uploadMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const codes = codesText.split('\n').map((c) => c.trim()).filter(Boolean);
-      return api.bulkUpload(denomId, codes, supplierId || undefined, {
+      // A newly typed supplier is created first so the batch can reference it.
+      let resolvedSupplierId = supplierId;
+      if (supplierId === NEW_SUPPLIER) {
+        const created = await api.createSupplier({
+          name: newSupplierName.trim(),
+          contact_info: newSupplierContact.trim() || undefined,
+        });
+        resolvedSupplierId = created.id;
+        queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      }
+      return api.bulkUpload(denomId, codes, resolvedSupplierId || undefined, {
         cost_per_code: costPerCode ? parseFloat(costPerCode) : undefined,
         currency: costCurrency,
         note: costNote || undefined,
@@ -50,6 +65,8 @@ export function BulkUploadPage() {
     setProductId('');
     setDenomId('');
     setSupplierId('');
+    setNewSupplierName('');
+    setNewSupplierContact('');
     setCodesText('');
     setCostPerCode('');
     setCostCurrency('USD');
@@ -107,8 +124,29 @@ export function BulkUploadPage() {
             options={[
               { value: '', label: '— None —' },
               ...(suppliers?.map((s: any) => ({ value: s.id, label: s.name })) || []),
+              { value: NEW_SUPPLIER, label: '+ Add a new supplier' },
             ]}
           />
+
+          {supplierId === NEW_SUPPLIER && (
+            <div className="space-y-3 rounded-xl border border-border bg-muted/30 p-4">
+              <Input
+                label="New supplier name"
+                value={newSupplierName}
+                onChange={(e: any) => setNewSupplierName(e.target.value)}
+                placeholder="e.g. Gulf Digital Trading"
+              />
+              <Input
+                label="Contact info (optional)"
+                value={newSupplierContact}
+                onChange={(e: any) => setNewSupplierContact(e.target.value)}
+                placeholder="email, phone or account manager"
+              />
+              <p className="text-xs text-muted-foreground">
+                The supplier is created and saved when you upload, then reusable for later batches.
+              </p>
+            </div>
+          )}
 
           {/* Batch name */}
           <Input
@@ -173,7 +211,7 @@ export function BulkUploadPage() {
           <div className="flex gap-3">
             <Button
               onClick={() => uploadMutation.mutate()}
-              disabled={uploadMutation.isPending || !denomId || codeCount === 0}
+              disabled={uploadMutation.isPending || !denomId || codeCount === 0 || (supplierId === NEW_SUPPLIER && !newSupplierName.trim())}
               size="lg"
               className="flex-1"
             >

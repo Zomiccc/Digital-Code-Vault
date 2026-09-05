@@ -27,8 +27,10 @@ export function clearTokens() {
 
 export async function apiFetch<T = any>(
   path: string,
-  options: RequestInit = {},
+  options: RequestInit & { timeoutMs?: number } = {},
 ): Promise<T> {
+  const { timeoutMs = 30000, ...fetchOptions } = options;
+  options = fetchOptions;
   const token = getToken();
   const role = getRole();
   const headers: Record<string, string> = {
@@ -40,7 +42,7 @@ export async function apiFetch<T = any>(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   let res: Response;
   try {
@@ -162,6 +164,9 @@ export const api = {
     apiFetch('/admin/codes/bulk-upload', {
       method: 'POST',
       body: JSON.stringify({ denomination_id: denominationId, codes, supplier_id: supplierId, ...costInfo }),
+      // A few thousand codes are encrypted and inserted in one request, which
+      // outlasts the default client budget.
+      timeoutMs: 180000,
     }),
   listBatches: (params?: Record<string, string>) => {
     const qs = params ? `?${new URLSearchParams(params)}` : '';
