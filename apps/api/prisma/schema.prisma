@@ -653,6 +653,8 @@ model CodeBatch {
   id             String   @id // same nanoid stored on each CodeItem.batchId
   denominationId String
   batchName      String?  // human-friendly name set by admin at upload time
+  // Allocation order within a denomination: the lowest number is used up first.
+  priority       Int      @default(0)
   quantity       Int
   supplierId     String?
   costPerCode    Decimal?

@@ -281,6 +281,59 @@ export class AllocationEngineService {
    If merchantId is provided, only reserves codes owned by that merchant.
    If merchantId is null/undefined, only reserves DCV-owned codes (merchantId is null).
    */
+  /**
+   * Choose which codes to hand out, honouring the batch order the admin set.
+   * Batches are drained in ascending `priority`, and within a batch the oldest
+   * code goes first, so a batch marked to clear first empties before the next is
+   * touched. Codes belonging to no batch are used last, once the ordered batches
+   * are exhausted, so they never jump ahead of a deliberate ordering.
+   *
+   * There is no Prisma relation from CodeItem to CodeBatch — historical rows
+   * carry batch ids with no matching batch — so the order is resolved here
+   * rather than through a join.
+   */
+  private async pickCodesInBatchOrder(
+    tx: Prisma.TransactionClient,
+    codeItemWhere: any,
+    combo: { denominationId: string; count: number },
+  ): Promise<{ id: string; denominationId: string }[]> {
+    const batches = await tx.codeBatch.findMany({
+      where: { denominationId: combo.denominationId },
+      orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }],
+      select: { id: true },
+    });
+
+    const picked: { id: string; denominationId: string }[] = [];
+    for (const batch of batches) {
+      if (picked.length >= combo.count) break;
+      const fromBatch = await tx.codeItem.findMany({
+        where: { ...codeItemWhere, batchId: batch.id },
+        orderBy: { createdAt: 'asc' },
+        take: combo.count - picked.length,
+        select: { id: true, denominationId: true },
+      });
+      picked.push(...fromBatch);
+    }
+
+    if (picked.length < combo.count) {
+      // `notIn` alone would drop rows with a null batchId, because SQL compares
+      // NULL as unknown — and an unbatched code is exactly what this is for.
+      const loose = await tx.codeItem.findMany({
+        where: {
+          ...codeItemWhere,
+          ...(batches.length
+            ? { OR: [{ batchId: null }, { batchId: { notIn: batches.map((b) => b.id) } }] }
+            : {}),
+        },
+        orderBy: { createdAt: 'asc' },
+        take: combo.count - picked.length,
+        select: { id: true, denominationId: true },
+      });
+      picked.push(...loose);
+    }
+    return picked;
+  }
+
   async reserveCodes(
     tx: Prisma.TransactionClient,
     fulfillmentRequestId: string,
@@ -299,12 +352,7 @@ export class AllocationEngineService {
         codeItemWhere.merchantId = null;
       }
 
-      const codeItems = await tx.codeItem.findMany({
-        where: codeItemWhere,
-        orderBy: { createdAt: 'asc' },
-        take: combo.count,
-        select: { id: true, denominationId: true },
-      });
+      const codeItems = await this.pickCodesInBatchOrder(tx, codeItemWhere, combo);
 
       if (codeItems.length < combo.count) {
         throw new BadRequestException({

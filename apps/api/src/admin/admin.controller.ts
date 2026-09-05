@@ -290,6 +290,23 @@ export class AdminController {
     });
   }
 
+  @Patch('codes/batches/:id/priority')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async setBatchPriority(
+    @Param('id') id: string,
+    @Body() body: { priority: number },
+    @CurrentUser() user: any,
+    @Req() req: any,
+  ) {
+    return this.codesService.setBatchPriority(id, Number(body.priority), user.id, req.ip);
+  }
+
+  @Post('codes/batches/:id/use-first')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async prioritiseBatchFirst(@Param('id') id: string, @CurrentUser() user: any, @Req() req: any) {
+    return this.codesService.prioritiseBatchFirst(id, user.id, req.ip);
+  }
+
   @Post('codes/bulk-upload')
   @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
   async bulkUploadCodes(

@@ -175,6 +175,10 @@ export const api = {
     return apiFetch(`/admin/codes/batches${qs}`);
   },
   getDenominationStock: () => apiFetch('/admin/codes/denomination-stock'),
+  setBatchPriority: (batchId: string, priority: number) =>
+    apiFetch(`/admin/codes/batches/${batchId}/priority`, { method: 'PATCH', body: JSON.stringify({ priority }) }),
+  prioritiseBatchFirst: (batchId: string) =>
+    apiFetch(`/admin/codes/batches/${batchId}/use-first`, { method: 'POST' }),
   createManualOrder: (data: { productId: string; amount: number; discountAmount?: number; currency?: string; variantId?: string; customerEmail?: string; customerName?: string }) =>
     apiFetch('/admin/orders/create', { method: 'POST', body: JSON.stringify(data) }),
   getEmergencyStop: () => apiFetch('/admin/system/emergency'),

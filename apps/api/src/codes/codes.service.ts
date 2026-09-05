@@ -301,6 +301,48 @@ export class CodesService {
   }
 
   /**
+   * Set a batch's place in the allocation order. Lower goes first, and ordering
+   * only means anything among batches of the same denomination, since that is
+   * the level allocation picks codes at.
+   */
+  async setBatchPriority(batchId: string, priority: number, adminId: string, ip?: string) {
+    if (!Number.isInteger(priority)) {
+      throw new BadRequestException('priority must be a whole number');
+    }
+    const batch = await this.prisma.codeBatch.findUnique({ where: { id: batchId } });
+    if (!batch) throw new NotFoundException('Batch not found');
+
+    const updated = await this.prisma.codeBatch.update({
+      where: { id: batchId },
+      data: { priority },
+    });
+    await this.auditService.log({
+      actorType: 'ADMIN', actorId: adminId, action: 'codes.batch_priority',
+      entity: 'CodeBatch', entityId: batchId,
+      metadata: { from: batch.priority, to: priority, denominationId: batch.denominationId }, ip,
+    });
+    return { id: updated.id, priority: updated.priority };
+  }
+
+  /**
+   * Put a batch at the front of the queue for its denomination, so it is the one
+   * that clears out next. Implemented as one below the current minimum rather
+   * than renumbering every batch, which keeps it a single row write.
+   */
+  async prioritiseBatchFirst(batchId: string, adminId: string, ip?: string) {
+    const batch = await this.prisma.codeBatch.findUnique({ where: { id: batchId } });
+    if (!batch) throw new NotFoundException('Batch not found');
+
+    const front = await this.prisma.codeBatch.aggregate({
+      where: { denominationId: batch.denominationId },
+      _min: { priority: true },
+    });
+    // One below the current minimum always wins, including when several batches
+    // are tied at the front.
+    return this.setBatchPriority(batchId, (front._min.priority ?? 0) - 1, adminId, ip);
+  }
+
+  /**
    * List batches with aggregated stats (available, delivered, voided counts).
    */
   async listBatches(options: {
@@ -328,7 +370,8 @@ export class CodesService {
           },
           supplier: true,
         },
-        orderBy: { createdAt: 'desc' },
+        // Shown in the order codes will actually be handed out.
+        orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
         take: Number.isFinite(options.limit) ? Math.max(1, Math.min(100, options.limit!)) : 50,
         skip: Number.isFinite(options.offset) ? Math.max(0, options.offset!) : 0,
       }),
@@ -355,6 +398,7 @@ export class CodesService {
       items: batches.map((b) => ({
         id: b.id,
         batch_name: b.batchName,
+        priority: b.priority,
         denomination: {
           id: b.denomination.id,
           face_value: b.denomination.faceValue,

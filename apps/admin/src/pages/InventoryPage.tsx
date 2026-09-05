@@ -90,6 +90,12 @@ export function InventoryPage() {
     setCodePage(0);
   };
 
+  // Reordering changes which batch the next order draws from.
+  const useFirstMutation = useMutation({
+    mutationFn: (batchId: string) => api.prioritiseBatchFirst(batchId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['batches'] }),
+  });
+
   const backToOverview = () => {
     setView('overview');
     setSelectedBatchId(null);
@@ -271,7 +277,10 @@ export function InventoryPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Inventory</h1>
-          <p className="text-sm text-muted-foreground">Open a batch to see delivered codes and remaining stock.</p>
+          <p className="text-sm text-muted-foreground">
+            Open a batch to see delivered codes and remaining stock. Batches are listed in the order
+            their codes get handed out — use "Use first" to move one to the front.
+          </p>
         </div>
       </div>
 
@@ -299,6 +308,7 @@ export function InventoryPage() {
           <Table>
             <thead>
               <tr>
+                <Th>Order</Th>
                 <Th>Batch Name</Th>
                 <Th>Product</Th>
                 <Th>Denomination</Th>
@@ -319,6 +329,23 @@ export function InventoryPage() {
                   role="button"
                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBatch(b.id); } }}
                 >
+                  <Td>
+                    {/* The row opens the batch, so the reorder control must not bubble. */}
+                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <span className="tabular-nums text-muted-foreground" title="Lower clears out first">
+                        {b.priority ?? 0}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={useFirstMutation.isPending}
+                        title="Hand out this batch's codes before any other batch of this denomination"
+                        onClick={() => useFirstMutation.mutate(b.id)}
+                      >
+                        Use first
+                      </Button>
+                    </div>
+                  </Td>
                   <Td>
                     <div className="font-medium">{b.batch_name || `Batch ${b.id.slice(0, 8)}`}</div>
                     <div className="text-xs font-mono text-muted-foreground">{b.id.slice(0, 12)}</div>
@@ -343,7 +370,7 @@ export function InventoryPage() {
               ))}
               {filteredBatches.length === 0 && (
                 <tr>
-                  <Td colSpan={8} className="py-12 text-center text-muted-foreground">
+                  <Td colSpan={9} className="py-12 text-center text-muted-foreground">
                     No batches found.
                   </Td>
                 </tr>
