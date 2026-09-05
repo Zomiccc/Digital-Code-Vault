@@ -4,9 +4,11 @@ import {
   LayoutDashboard, Users, Package, Database, Upload, FileText,
   ScrollText, UserCog, LogOut, Menu, X, Shield, ChevronRight,
   Wallet, Key, ShoppingCart, Webhook, Store, Gift, Plug, Layers, FolderTree,
-  MessagesSquare, Tags, Mail,
+  MessagesSquare, Tags, Mail, ShieldAlert,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth-context';
+import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 const adminNav = [
@@ -25,6 +27,7 @@ const adminNav = [
   { to: '/admin/audit', label: 'Audit Logs', icon: ScrollText },
   { to: '/admin/email-logs', label: 'Email Logs', icon: Mail },
   { to: '/admin/staff', label: 'Staff', icon: UserCog },
+  { to: '/admin/emergency', label: 'Emergency', icon: ShieldAlert },
 ];
 
 const merchantNav = [
@@ -151,7 +154,42 @@ export function Layout({ children }: { children: ReactNode }) {
             <span className="hidden text-xs text-muted-foreground sm:block">System Operational</span>
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-4 lg:p-8 animate-fade-in">{children}</main>
+        <main className="flex-1 overflow-y-auto p-4 lg:p-8 animate-fade-in">
+          <PlatformPausedBanner />
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Tells a merchant when they cannot order and why, so an admin pausing the
+ * platform or freezing their account is visible immediately rather than only
+ * surfacing as a failed order. Polled, because the pause happens elsewhere.
+ */
+function PlatformPausedBanner() {
+  const { user } = useAuth();
+  const { data } = useQuery({
+    queryKey: ['merchant-platform-status'],
+    queryFn: api.getMerchantPlatformStatus,
+    enabled: user?.role === 'merchant',
+    refetchInterval: 60000,
+    retry: false,
+  });
+
+  if (!data?.ordering_paused) return null;
+  return (
+    <div
+      role="alert"
+      className="mb-6 flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-4"
+    >
+      <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+      <div>
+        <p className="font-semibold text-destructive">
+          {data.global_stop ? 'Ordering is paused' : 'Your account is on hold'}
+        </p>
+        <p className="text-sm text-muted-foreground">{data.message}</p>
       </div>
     </div>
   );

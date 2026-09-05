@@ -12,6 +12,7 @@ import { AuthService } from '../auth/auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrencyService } from '../currency/currency.service';
 import { SkuService } from '../products/sku.service';
+import { EmergencyService } from './emergency.service';
 import { resolveProductSkuBase, uniqueSku, denominationSku } from '../products/sku';
 import { WalletService } from '../wallet/wallet.service';
 import { DeliveryService } from '../delivery/delivery.service';
@@ -46,6 +47,7 @@ export class AdminController {
     private fulfillmentService: FulfillmentService,
     private currencyService: CurrencyService,
     private skuService: SkuService,
+    private emergencyService: EmergencyService,
   ) {}
 
   @Get('stats')
@@ -432,23 +434,66 @@ export class AdminController {
     return result;
   }
 
-  // ─── Emergency stop ───
+  // ─── Emergency controls ───
+  // Each control flips the flag the platform already enforces, so freezing
+  // actually blocks delivery rather than only hiding a button.
 
   @Get('system/emergency')
   async getEmergencyStop() {
-    const setting = await this.prisma.platformSetting.findUnique({ where: { key: 'EMERGENCY_STOP' } });
-    return { active: setting?.value === 'true', updatedAt: setting?.updatedAt || null };
+    const status = await this.emergencyService.getStatus();
+    // `active` is kept for the existing dashboard widget.
+    return { active: status.global_stop, updatedAt: status.updated_at, ...status };
   }
 
   @Post('system/emergency')
   @Roles('SUPER_ADMIN')
-  async setEmergencyStop(@Body() body: { enabled: boolean }, @CurrentUser() user: any) {
-    await this.prisma.platformSetting.upsert({
-      where: { key: 'EMERGENCY_STOP' },
-      create: { key: 'EMERGENCY_STOP', value: body.enabled ? 'true' : 'false' },
-      update: { value: body.enabled ? 'true' : 'false' },
-    });
-    return { active: body.enabled };
+  async setEmergencyStop(
+    @Body() body: { enabled: boolean; message?: string },
+    @CurrentUser() user: any, @Req() req: any,
+  ) {
+    const status = await this.emergencyService.setGlobalStop(body.enabled, body.message, user.id, req.ip);
+    return { active: status.global_stop, ...status };
+  }
+
+  @Get('emergency/targets')
+  @Roles('SUPER_ADMIN', 'SUPPORT')
+  async listEmergencyTargets() {
+    return this.emergencyService.listControllable();
+  }
+
+  @Post('emergency/merchants/:id')
+  @Roles('SUPER_ADMIN')
+  async freezeMerchant(
+    @Param('id') id: string, @Body() body: { frozen: boolean },
+    @CurrentUser() user: any, @Req() req: any,
+  ) {
+    return this.emergencyService.setMerchantFrozen(id, body.frozen, user.id, req.ip);
+  }
+
+  @Post('emergency/merchants-all')
+  @Roles('SUPER_ADMIN')
+  async freezeAllMerchants(
+    @Body() body: { frozen: boolean }, @CurrentUser() user: any, @Req() req: any,
+  ) {
+    return this.emergencyService.setAllMerchantsFrozen(body.frozen, user.id, req.ip);
+  }
+
+  @Post('emergency/products/:id')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async freezeProduct(
+    @Param('id') id: string, @Body() body: { frozen: boolean },
+    @CurrentUser() user: any, @Req() req: any,
+  ) {
+    return this.emergencyService.setProductFrozen(id, body.frozen, user.id, req.ip);
+  }
+
+  @Post('emergency/api-keys/:id')
+  @Roles('SUPER_ADMIN')
+  async disableApiKey(
+    @Param('id') id: string, @Body() body: { disabled: boolean },
+    @CurrentUser() user: any, @Req() req: any,
+  ) {
+    return this.emergencyService.setApiKeyDisabled(id, body.disabled, user.id, req.ip);
   }
 
   @Post('codes/:id/reveal')

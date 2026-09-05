@@ -4,6 +4,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { EncryptionService } from '../encryption/encryption.service';
 import { WalletService } from '../wallet/wallet.service';
+import { CurrencyService } from '../currency/currency.service';
+import { AuditService } from '../audit/audit.service';
+import { roundMoney } from '../currency/money';
 import * as argon2 from 'argon2';
 import { nanoid } from 'nanoid';
 
@@ -15,6 +18,8 @@ export class MerchantsService {
     private encryptionService: EncryptionService,
     private walletService: WalletService,
     private configService: ConfigService,
+    private currencyService: CurrencyService,
+    private auditService: AuditService,
   ) {}
 
   /**
@@ -135,14 +140,95 @@ export class MerchantsService {
     return { success: true };
   }
 
-  async updateMerchantCurrency(id: string, currency: string) {
-    const validCurrencies = ['USD', 'PKR', 'EUR'];
-    const upper = currency.toUpperCase();
-    if (!validCurrencies.includes(upper)) {
-      throw new BadRequestException(`Invalid currency. Must be one of: ${validCurrencies.join(', ')}`);
-    }
-    const updated = await this.prisma.merchant.update({ where: { id }, data: { currency: upper } });
-    return { id: updated.id, currency: updated.currency };
+  /**
+   * Switch a merchant's wallet currency and convert what it holds.
+   *
+   * Changing the label alone would turn a $100 balance into "100 PKR", so the
+   * balance and the wallet history are converted at the current rate: deposit
+   * USD 100 with PKR at 300 and the wallet reads PKR 30,000, with past deposits
+   * and spend restated to match so the totals still add up.
+   *
+   * The whole switch is one transaction, and a CONVERSION row records the rate
+   * used so the change is traceable afterwards.
+   */
+  async updateMerchantCurrency(id: string, currency: string, actorId?: string, ip?: string) {
+    const merchant = await this.prisma.merchant.findUnique({ where: { id } });
+    if (!merchant) throw new NotFoundException('Merchant not found');
+
+    const from = (merchant.currency || 'USD').toUpperCase();
+    // getRate rejects a currency with no configured rate, which is what should
+    // happen: converting at a guessed rate would misstate the balance.
+    const to = currency.toUpperCase();
+    const [fromRate, toRate] = await Promise.all([
+      this.currencyService.getRate(from),
+      this.currencyService.getRate(to),
+    ]);
+    if (from === to) return { id: merchant.id, currency: to, converted: false };
+
+    // Via USD, so any pair works without needing a direct rate between them.
+    const factor = toRate / fromRate;
+    const convert = (value: unknown) => roundMoney(Number(value) * factor);
+    // Captured before the write, so what is reported cannot depend on whether
+    // the update mutated the record we read.
+    const balanceBefore = Number(merchant.walletBalance);
+    const newBalance = convert(balanceBefore);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.merchant.update({
+        where: { id },
+        data: { currency: to, walletBalance: newBalance },
+      });
+
+      // Restate history in the new currency so deposited/spent totals stay
+      // comparable instead of silently mixing two currencies in one sum.
+      const rows = await tx.walletTransaction.findMany({
+        where: { merchantId: id },
+        select: { id: true, amount: true, balanceAfter: true, currency: true },
+      });
+      for (const row of rows) {
+        if ((row.currency || 'USD').toUpperCase() !== from) continue;
+        await tx.walletTransaction.update({
+          where: { id: row.id },
+          data: {
+            amount: convert(row.amount),
+            balanceAfter: convert(row.balanceAfter),
+            currency: to,
+          },
+        });
+      }
+
+      await tx.walletTransaction.create({
+        data: {
+          merchantId: id,
+          type: 'CONVERSION',
+          amount: 0,
+          currency: to,
+          balanceAfter: newBalance,
+          referenceId: `fx-${from}-${to}`,
+        },
+      });
+    });
+
+    await this.auditService.log({
+      actorType: 'ADMIN',
+      actorId: actorId || id,
+      action: 'merchant.currency_change',
+      entity: 'Merchant',
+      entityId: id,
+      metadata: {
+        from, to, factor,
+        balance_before: balanceBefore,
+        balance_after: newBalance,
+      },
+      ip,
+    });
+
+    return {
+      id, currency: to, converted: true,
+      from, to, rate: factor,
+      balance_before: balanceBefore,
+      balance_after: newBalance,
+    };
   }
 
   async getWebhookSecret(merchantId: string) {

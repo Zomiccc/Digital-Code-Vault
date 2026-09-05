@@ -191,6 +191,16 @@ export const api = {
   createManualOrder: (data: { productId: string; amount: number; discountAmount?: number; currency?: string; variantId?: string; customerEmail?: string; customerName?: string }) =>
     apiFetch('/admin/orders/create', { method: 'POST', body: JSON.stringify(data) }),
   getEmergencyStop: () => apiFetch('/admin/system/emergency'),
+  listEmergencyTargets: () => apiFetch('/admin/emergency/targets'),
+  freezeMerchant: (id: string, frozen: boolean) =>
+    apiFetch(`/admin/emergency/merchants/${id}`, { method: 'POST', body: JSON.stringify({ frozen }) }),
+  freezeAllMerchants: (frozen: boolean) =>
+    apiFetch('/admin/emergency/merchants-all', { method: 'POST', body: JSON.stringify({ frozen }) }),
+  freezeProduct: (id: string, frozen: boolean) =>
+    apiFetch(`/admin/emergency/products/${id}`, { method: 'POST', body: JSON.stringify({ frozen }) }),
+  disableApiKey: (id: string, disabled: boolean) =>
+    apiFetch(`/admin/emergency/api-keys/${id}`, { method: 'POST', body: JSON.stringify({ disabled }) }),
+  getMerchantPlatformStatus: () => apiFetch('/merchant/dashboard/platform-status'),
   setEmergencyStop: (enabled: boolean) =>
     apiFetch('/admin/system/emergency', { method: 'POST', body: JSON.stringify({ enabled }) }),
   revealCode: (id: string) =>

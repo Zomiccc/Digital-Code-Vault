@@ -10,6 +10,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { CodesService } from '../codes/codes.service';
 import { ProductsService } from '../products/products.service';
 import { nanoid } from 'nanoid';
+import { EmergencyService } from '../admin/emergency.service';
 import { CreateApiKeyDto, CreateWebhookDto, CreateFulfillmentDto, CreateFundingRequestDto, CreateSupportMessageDto } from '../dto';
 
 @Controller('merchant')
@@ -23,7 +24,19 @@ export class MerchantDashboardController {
     private productsService: ProductsService,
     private walletService: WalletService,
     private pluginDownloadService: PluginDownloadService,
+    private emergencyService: EmergencyService,
   ) {}
+
+  /**
+   * Whether this merchant can order right now, and why not. Polled by the
+   * merchant UI so an admin pausing the platform is visible immediately instead
+   * of only surfacing as a failed order.
+   */
+  @Get('dashboard/platform-status')
+  @UseGuards(JwtAuthGuard)
+  async getPlatformStatus(@Req() req: any) {
+    return this.emergencyService.getStatusForMerchant(req.user.merchantId);
+  }
 
   @Get('dashboard/wallet')
   @UseGuards(JwtAuthGuard)
