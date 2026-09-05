@@ -4,9 +4,10 @@ import { SkuService } from './sku.service';
 import { ProductsController } from './products.controller';
 import { AuthModule } from '../auth/auth.module';
 import { CurrencyModule } from '../currency/currency.module';
+import { AuditModule } from '../audit/audit.module';
 
 @Module({
-  imports: [AuthModule, CurrencyModule],
+  imports: [AuthModule, CurrencyModule, AuditModule],
   providers: [ProductsService, SkuService],
   controllers: [ProductsController],
   exports: [ProductsService, SkuService],

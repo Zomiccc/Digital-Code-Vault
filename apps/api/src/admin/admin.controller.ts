@@ -257,6 +257,22 @@ export class AdminController {
     return this.skuService.resyncDenominations(id, user.id, req.ip);
   }
 
+  @Patch('denominations/:id')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async updateDenomination(
+    @Param('id') id: string,
+    @Body() body: { face_value?: number; currency?: string },
+    @CurrentUser() user: any,
+    @Req() req: any,
+  ) {
+    return this.productsService.updateDenomination(
+      id,
+      { faceValue: body.face_value, currency: body.currency },
+      user.id,
+      req.ip,
+    );
+  }
+
   @Get('products/suggest-sku')
   @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
   async suggestProductSku(@Query('name') name: string, @Query('region') region: string) {

@@ -147,7 +147,7 @@ export function FulfillmentPage() {
                         : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
                     }`}
                   >
-                    ${Number(d.faceValue)}
+                    {formatPrice(d.faceValue, d.currency)}
                   </button>
                 ))}
               </div>

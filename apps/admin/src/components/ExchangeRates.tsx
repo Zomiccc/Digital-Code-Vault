@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '@/lib/api';
 import { Card, Button, Table, Th, Td, Input } from '@/components/ui';
-import { formatDate } from '@/lib/utils';
+import { formatDate, isKnownCurrency } from '@/lib/utils';
 
 
 /**
@@ -39,6 +39,9 @@ export function ExchangeRatesCard() {
   });
 
   const codeIsValid = /^[A-Za-z]{3}$/.test(newCurrency.trim());
+  // "PAK" is three letters but is not a currency; the code is PKR. A rate on a
+  // code no region uses simply never matches, so flag it before it is saved.
+  const codeUnrecognised = codeIsValid && !isKnownCurrency(newCurrency);
   const newRateValue = Number(newRate);
   const newRateIsValid = Number.isFinite(newRateValue) && newRateValue > 0;
 
@@ -134,6 +137,12 @@ export function ExchangeRatesCard() {
         >
           Add rate
         </Button>
+        {codeUnrecognised && (
+          <p role="alert" className="w-full text-xs text-amber-500">
+            {newCurrency.toUpperCase()} is not a currency code we recognise — Pakistan is PKR, Saudi
+            Arabia is SAR, Turkey is TRY. A rate on a code no region uses will never be applied.
+          </p>
+        )}
       </div>
     </Card>
   );

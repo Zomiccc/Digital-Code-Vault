@@ -7,6 +7,11 @@ import assert from 'node:assert/strict';
 import { ProductsService } from './products.service';
 import { CurrencyService } from '../currency/currency.service';
 
+/** Audit is only exercised by the price update; elsewhere it must simply exist. */
+function audit() {
+  return { log: async () => {} } as any;
+}
+
 function service(options: {
   products: any[];
   regions?: any[];
@@ -31,7 +36,7 @@ function service(options: {
     },
   };
   const currency = new CurrencyService(prisma, { log: async () => {} } as any);
-  return new ProductsService(prisma, currency);
+  return new ProductsService(prisma, currency, audit());
 }
 
 test('products load when no regions or rates are configured at all', async () => {
@@ -113,7 +118,7 @@ test('a Prisma client without the ExchangeRate model must not empty the dropdown
     // exchangeRate intentionally absent
   };
   const currency = new CurrencyService(prisma, { log: async () => {} } as any);
-  const sut = new ProductsService(prisma, currency);
+  const sut = new ProductsService(prisma, currency, audit());
   const result = await sut.listAllProducts();
   assert.equal(result.length, 1, 'products must load even if currency lookup fails');
 });
@@ -127,8 +132,91 @@ test('a currency lookup that throws does not empty the dropdown', async () => {
     region: { findFirst: async () => { throw new Error('relation "Region" does not exist'); } },
   };
   const currency = new CurrencyService(prisma, { log: async () => {} } as any);
-  const sut = new ProductsService(prisma, currency);
+  const sut = new ProductsService(prisma, currency, audit());
   const result = await sut.listAllProducts();
   assert.equal(result.length, 1, 'products must load even if the region table is unavailable');
   assert.equal(result[0].regional_currency, 'USD');
+});
+
+// ─── Changing what a code value is worth ───
+
+function priceFixture(existing: any[], target: any) {
+  const audits: any[] = [];
+  const updates: any[] = [];
+  const prisma: any = {
+    denomination: {
+      findUnique: async () => target,
+      findFirst: async ({ where }: any) =>
+        existing.find((row) =>
+          row.id !== where.id.not &&
+          row.productId === where.productId &&
+          Number(row.faceValue) === Number(where.faceValue) &&
+          row.currency === where.currency) ?? null,
+      update: async ({ data }: any) => {
+        updates.push(data);
+        return { ...target, ...data };
+      },
+    },
+  };
+  const sut = new ProductsService(
+    prisma, {} as any, { log: async (event: any) => audits.push(event) } as any,
+  );
+  return { sut, audits, updates };
+}
+
+const saudi50 = { id: 'd1', productId: 'p1', faceValue: 50, currency: 'USD' };
+
+test('a code value can be repriced into the region currency', async () => {
+  const f = priceFixture([saudi50], saudi50);
+  const result = await f.sut.updateDenomination('d1', { faceValue: 187.5, currency: 'SAR' }, 'admin-1');
+
+  assert.deepEqual(result, { id: 'd1', face_value: 187.5, currency: 'SAR' });
+  assert.deepEqual(f.updates, [{ faceValue: 187.5, currency: 'SAR' }]);
+  assert.equal(f.audits[0].action, 'denomination.update_price');
+  assert.deepEqual(f.audits[0].metadata.from, { faceValue: 50, currency: 'USD' });
+});
+
+test('changing only the currency keeps the amount', async () => {
+  const f = priceFixture([saudi50], saudi50);
+  await f.sut.updateDenomination('d1', { currency: 'SAR' }, 'admin-1');
+  assert.deepEqual(f.updates, [{ faceValue: 50, currency: 'SAR' }]);
+});
+
+test('a currency code is normalised to upper case', async () => {
+  const f = priceFixture([saudi50], saudi50);
+  await f.sut.updateDenomination('d1', { currency: 'sar' }, 'admin-1');
+  assert.equal(f.updates[0].currency, 'SAR');
+});
+
+test('a value colliding with another on the same product is refused', async () => {
+  const other = { id: 'd2', productId: 'p1', faceValue: 100, currency: 'USD' };
+  const f = priceFixture([saudi50, other], saudi50);
+  await assert.rejects(
+    () => f.sut.updateDenomination('d1', { faceValue: 100 }, 'admin-1'),
+    /already has a USD 100 value/,
+  );
+  assert.deepEqual(f.updates, [], 'nothing may be written');
+});
+
+test('a nonsensical value or currency is refused before writing', async () => {
+  for (const bad of [
+    { faceValue: 0 },
+    { faceValue: -5 },
+    { faceValue: NaN },
+    { faceValue: 10.005 },
+    { currency: 'SARS' },
+    { currency: 'S' },
+  ]) {
+    const f = priceFixture([saudi50], saudi50);
+    await assert.rejects(() => f.sut.updateDenomination('d1', bad as any, 'admin-1'));
+    assert.deepEqual(f.updates, [], `must not write for ${JSON.stringify(bad)}`);
+  }
+});
+
+test('an unknown denomination is reported rather than created', async () => {
+  const f = priceFixture([], null);
+  await assert.rejects(
+    () => f.sut.updateDenomination('missing', { faceValue: 10 }, 'admin-1'),
+    /Denomination not found/,
+  );
 });

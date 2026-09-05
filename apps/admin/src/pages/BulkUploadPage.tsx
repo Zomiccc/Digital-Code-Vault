@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Upload, CheckCircle, AlertCircle, Shield, FileDigit } from 'lucide-react';
 import { api } from '@/lib/api';
+import { formatPrice } from '@/lib/utils';
 import { Card, Button, Select, Input, Badge } from '@/components/ui';
 
 // Sentinel for the supplier dropdown; never sent to the API as an id.
@@ -112,7 +113,7 @@ export function BulkUploadPage() {
               onChange={(e) => setDenomId(e.target.value)}
               options={[
                 { value: '', label: productId ? '— Select —' : 'Select product first' },
-                ...denominations.map((d: any) => ({ value: d.id, label: `$${d.faceValue} ${d.currency || 'USD'}` })),
+                ...denominations.map((d: any) => ({ value: d.id, label: formatPrice(d.faceValue, d.currency) })),
               ]}
             />
           </div>

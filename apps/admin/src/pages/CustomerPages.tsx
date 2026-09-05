@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { formatPrice } from '@/lib/utils';
 import { Card, Button, Input, Badge, AddressWithMapsLink } from '@/components/ui';
 import { Gift, ShoppingBag, Copy, Check, Store, ArrowRight, Package, Loader2, Clock, ImageIcon } from 'lucide-react';
 
@@ -144,7 +145,7 @@ export function CustomerProductsPage() {
               <div className="mt-3 flex flex-wrap gap-2">
                 {p.denominations.map((d: any) => (
                   <Badge key={d.id} className="bg-secondary text-secondary-foreground">
-                    ${d.faceValue}
+                    {formatPrice(d.faceValue, d.currency)}
                     {d.local_currency && d.local_currency !== 'USD' && (
                       <span className="ml-1.5 opacity-70">{d.local_formatted}</span>
                     )}

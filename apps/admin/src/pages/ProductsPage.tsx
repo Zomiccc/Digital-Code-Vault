@@ -3,7 +3,7 @@ import { useState, useMemo } from 'react';
 import { Plus, Settings2, Package, Tags, Download } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Input, Select, Modal, Badge, Table, Th, Td } from '@/components/ui';
-import { statusColor } from '@/lib/utils';
+import { statusColor, formatPrice } from '@/lib/utils';
 
 function EssentialsBundleDialog({ product, onClose }: { product: any; onClose: () => void }) {
   const queryClient = useQueryClient();
@@ -99,7 +99,7 @@ function EssentialsBundleDialog({ product, onClose }: { product: any; onClose: (
                         { value: '', label: '— Denomination —' },
                         ...denominations
                           .filter((d: any) => d.id === row.denominationId || !usedDenomIds.has(d.id))
-                          .map((d: any) => ({ value: d.id, label: `$${d.faceValue}` })),
+                          .map((d: any) => ({ value: d.id, label: formatPrice(d.faceValue, d.currency) })),
                       ]}
                     />
                     <div className="flex items-center gap-1">
@@ -242,7 +242,7 @@ export function ProductsPage() {
               <div className="mt-5 flex flex-wrap gap-2">
                 {p.denominations.map((d: any) => (
                   <Badge key={d.id} className="bg-secondary text-secondary-foreground">
-                    ${d.faceValue} <span className="ml-1 text-xs opacity-60">({d.availableCount ?? 0})</span>
+                    {formatPrice(d.faceValue, d.currency)} <span className="ml-1 text-xs opacity-60">({d.availableCount ?? 0})</span>
                   </Badge>
                 ))}
               </div>
@@ -452,7 +452,7 @@ function SkuExportModal({ open, onClose }: { open: boolean; onClose: () => void 
                       <div className="space-y-0.5">
                         {item.denominations.map((d: any) => (
                           <div key={d.id} className="font-mono">
-                            <span className="text-muted-foreground">${d.faceValue}</span> →{' '}
+                            <span className="text-muted-foreground">{formatPrice(d.faceValue, d.currency)}</span> →{' '}
                             <span className={d.sku ? 'text-primary' : 'text-muted-foreground'}>{d.sku || '—'}</span>
                           </div>
                         ))}
@@ -492,7 +492,7 @@ function EssentialsDeliverySummary({ productId }: { productId: string }) {
       <div className="flex flex-wrap gap-1.5">
         {items.map((item: any) => (
           <Badge key={item.denominationId} className="bg-secondary text-secondary-foreground">
-            ${item.faceValue} × {item.required}
+            {formatPrice(item.faceValue, item.currency)} × {item.required}
           </Badge>
         ))}
       </div>

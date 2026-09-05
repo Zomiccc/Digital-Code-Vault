@@ -198,8 +198,8 @@ function describe(rule: any): string {
   if (!rule.items?.length) return 'nothing';
   return rule.items
     .map((item: any) => {
-      const value = Number(item.denomination?.faceValue ?? 0);
-      return item.quantity > 1 ? `$${value} × ${item.quantity}` : `$${value}`;
+      const value = formatPrice(item.denomination?.faceValue ?? 0, item.denomination?.currency);
+      return item.quantity > 1 ? `${value} × ${item.quantity}` : value;
     })
     .join(' + ');
 }
@@ -295,13 +295,13 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
                   }`}
                 >
                   <span className="font-medium">
-                    ${Number(denomination.faceValue)}
+                    {formatPrice(denomination.faceValue, denomination.currency)}
                     <span className="ml-2 text-xs text-muted-foreground">{denomination.currency}</span>
                   </span>
                   <div className="flex items-center gap-2">
                     <Button
                       variant="outline" size="sm"
-                      aria-label={`One fewer $${Number(denomination.faceValue)} code`}
+                      aria-label={`One fewer ${formatPrice(denomination.faceValue, denomination.currency)} code`}
                       disabled={quantity === 0}
                       onClick={() => step(denomination.id, -1)}
                     >
@@ -310,7 +310,7 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
                     <span className="w-8 text-center tabular-nums">{quantity}</span>
                     <Button
                       variant="outline" size="sm"
-                      aria-label={`One more $${Number(denomination.faceValue)} code`}
+                      aria-label={`One more ${formatPrice(denomination.faceValue, denomination.currency)} code`}
                       onClick={() => step(denomination.id, 1)}
                     >
                       +
@@ -372,8 +372,8 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
 function describeLines(chosen: { denomination: any; quantity: number }[]): string {
   return chosen
     .map(({ denomination, quantity }) => {
-      const value = Number(denomination.faceValue);
-      return quantity > 1 ? `$${value} × ${quantity}` : `$${value}`;
+      const value = formatPrice(denomination.faceValue, denomination.currency);
+      return quantity > 1 ? `${value} × ${quantity}` : value;
     })
     .join(' + ');
 }

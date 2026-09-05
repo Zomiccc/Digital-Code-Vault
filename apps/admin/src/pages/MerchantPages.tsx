@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Badge, Table, Th, Td, Input, AddressWithMapsLink, Modal } from '@/components/ui';
-import { formatCurrency, formatDate, statusColor } from '@/lib/utils';
+import { formatCurrency, formatDate, statusColor, formatPrice } from '@/lib/utils';
 
 export function MerchantDashboardPage() {
   const { data: wallet, isLoading } = useQuery({ queryKey: ['wallet'], queryFn: api.getWallet });
@@ -130,7 +130,7 @@ export function MerchantProductsPage() {
               <div className="mt-3 flex flex-wrap gap-2">
                 {p.denominations.map((d: any) => (
                   <Badge key={d.id} className="bg-secondary text-secondary-foreground">
-                    ${d.faceValue}
+                    {formatPrice(d.faceValue, d.currency)}
                     {d.local_currency && d.local_currency !== 'USD' && (
                       <span className="ml-1.5 opacity-70">{d.local_formatted}</span>
                     )}
@@ -228,7 +228,7 @@ export function MerchantCreateOrderPage() {
                       : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
                   }`}
                 >
-                  ${d.face_value}
+                  {formatPrice(d.face_value, d.currency)}
                   {d.local_currency && d.local_currency !== 'USD' && (
                     <span className="opacity-70"> · {d.local_formatted}</span>
                   )}

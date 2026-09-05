@@ -2,12 +2,14 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrencyService, localPrice } from '../currency/currency.service';
 import { resolveProductSkuBase, uniqueSku, normaliseSku } from './sku';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class ProductsService {
   constructor(
     private prisma: PrismaService,
     private currencyService: CurrencyService,
+    private auditService: AuditService,
   ) {}
 
   async listProductsForMerchant(merchantId: string) {
@@ -204,6 +206,70 @@ export class ProductsService {
       where: { id: productId },
       data: { productType },
     });
+  }
+
+  /**
+   * Change what a code value is worth, and in which currency.
+   *
+   * This is how a region gets local pricing: a Saudi $50 becomes SAR 187.50, or
+   * whatever it actually sells for. It is consequential — codes already uploaded
+   * against this denomination are worth the new amount from now on, and a
+   * delivery rule that added up to the old value no longer will — so the change
+   * is audited and a collision with another value on the same product is
+   * refused rather than silently merged.
+   */
+  async updateDenomination(
+    id: string,
+    data: { faceValue?: number; currency?: string },
+    adminId?: string,
+    ip?: string,
+  ) {
+    const denomination = await this.prisma.denomination.findUnique({ where: { id } });
+    if (!denomination) throw new NotFoundException('Denomination not found');
+
+    const faceValue = data.faceValue ?? Number(denomination.faceValue);
+    const currency = (data.currency ?? denomination.currency).toUpperCase();
+
+    if (!Number.isFinite(faceValue) || faceValue <= 0) {
+      throw new BadRequestException('Value must be a positive number');
+    }
+    if (Math.abs(faceValue * 100 - Math.round(faceValue * 100)) > 1e-7) {
+      throw new BadRequestException('Value must have at most two decimal places');
+    }
+    if (!/^[A-Z]{3}$/.test(currency)) {
+      throw new BadRequestException('Currency must be a three-letter code');
+    }
+
+    const clash = await this.prisma.denomination.findFirst({
+      where: {
+        productId: denomination.productId,
+        faceValue,
+        currency,
+        id: { not: id },
+      },
+    });
+    if (clash) {
+      throw new BadRequestException(
+        `This product already has a ${currency} ${faceValue} value`,
+      );
+    }
+
+    const updated = await this.prisma.denomination.update({
+      where: { id },
+      data: { faceValue, currency },
+    });
+    if (adminId) {
+      await this.auditService.log({
+        actorType: 'ADMIN', actorId: adminId, action: 'denomination.update_price',
+        entity: 'Denomination', entityId: id,
+        metadata: {
+          from: { faceValue: Number(denomination.faceValue), currency: denomination.currency },
+          to: { faceValue, currency },
+        },
+        ip,
+      });
+    }
+    return { id: updated.id, face_value: Number(updated.faceValue), currency: updated.currency };
   }
 
   async createDenomination(productId: string, faceValue: number, currency: string = 'USD') {

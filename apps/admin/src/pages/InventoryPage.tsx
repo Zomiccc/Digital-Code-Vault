@@ -3,7 +3,7 @@ import { useState, useMemo, ReactNode } from 'react';
 import { Eye, Ban, RefreshCw, Search, Copy, Check, ChevronRight, ArrowLeft } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Select, Table, Th, Td, Badge, Modal } from '@/components/ui';
-import { formatDate, statusColor } from '@/lib/utils';
+import { formatDate, statusColor, formatPrice } from '@/lib/utils';
 import { familyOf } from '@/lib/product-family';
 
 const PAGE_SIZE = 50;
@@ -228,7 +228,7 @@ function DenominationsForProduct({
         {sorted.map((row: any) => (
           <Tile
             key={row.id}
-            title={`$${Number(row.face_value)}`}
+            title={formatPrice(row.face_value, row.currency)}
             subtitle={row.currency}
             footer={
               <>
@@ -331,7 +331,7 @@ function BatchesForDenomination({
 
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">
-          {denomination.product} · ${Number(denomination.face_value)}
+          {denomination.product} · {formatPrice(denomination.face_value, denomination.currency)}
         </h1>
         <p className="text-sm text-muted-foreground">
           {denomination.region} · codes are handed out from the top batch down. "Use first" makes a

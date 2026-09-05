@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, StatCard, Badge, Button, Table, Th, Td, Modal, Input } from '@/components/ui';
-import { formatCurrency, formatDate, statusColor } from '@/lib/utils';
+import { formatCurrency, formatDate, statusColor, formatPrice } from '@/lib/utils';
 import { ExchangeRatesCard } from '@/components/ExchangeRates';
 
 export function FinancePage() {
@@ -452,7 +452,7 @@ export function FinancePage() {
                       <div className="font-medium">{b.product_name}</div>
                       <div className="text-xs text-muted-foreground">{b.product_region}</div>
                     </Td>
-                    <Td className="text-sm">${b.denomination_face_value}</Td>
+                    <Td className="text-sm">{formatPrice(b.denomination_face_value, b.denomination_currency)}</Td>
                     <Td className="text-sm">{b.supplier_name}</Td>
                     <Td className="text-sm">{b.quantity}</Td>
                     <Td className="text-sm font-mono">{b.cost_per_code ? formatCurrency(b.cost_per_code) : '—'}</Td>

@@ -146,13 +146,12 @@ export function SkuMappingPage() {
                     {product.denominations.map((denomination: any) => (
                       <div key={denomination.id} className="flex items-center justify-between gap-3">
                         <span className="text-sm">
-                          ${denomination.face_value}
-                          <span className="ml-2 text-xs text-muted-foreground">{denomination.currency}</span>
+                          {formatPrice(denomination.face_value, denomination.currency)}
                         </span>
                         <SkuField
                           value={denomination.sku}
                           suggestion={denomination.suggested_sku}
-                          label={`SKU for ${product.name} ${denomination.face_value}`}
+                          label={`SKU for ${product.name} ${formatPrice(denomination.face_value, denomination.currency)}`}
                           onSave={(sku) => api.setDenominationSku(denomination.id, sku)}
                           onSaved={refresh}
                         />

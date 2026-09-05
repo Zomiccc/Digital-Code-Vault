@@ -33,6 +33,13 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   HKD: 'HK$',
 };
 
+/** ISO codes we know a symbol for — used to catch a typed code that is not one. */
+export const KNOWN_CURRENCIES = Object.keys(CURRENCY_SYMBOLS);
+
+export function isKnownCurrency(currency?: string | null): boolean {
+  return !!currency && Object.prototype.hasOwnProperty.call(CURRENCY_SYMBOLS, currency.toUpperCase());
+}
+
 export function getCurrencySymbol(currency?: string | null): string {
   if (!currency) return '$';
   return CURRENCY_SYMBOLS[currency.toUpperCase()] || `${currency.toUpperCase()} `;
