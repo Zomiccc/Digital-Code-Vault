@@ -428,7 +428,9 @@ export class CodesService {
   async getDenominationStock() {
     const denominations = await this.prisma.denomination.findMany({
       include: {
-        product: true,
+        // Category and brand give the inventory grid a real family name to group
+        // by ("PlayStation") instead of guessing one from the product name.
+        product: { include: { category: { include: { brand: true } } } },
         _count: {
           select: { codeItems: true },
         },
@@ -462,6 +464,9 @@ export class CodesService {
       sku: d.sku,
       product: d.product.name,
       product_id: d.productId,
+      product_sku: d.product.sku,
+      brand: d.product.category?.brand?.name || null,
+      category: d.product.category?.name || null,
       region: d.product.region,
       batch_count: batchMap.get(d.id) || 0,
       total_codes: d._count.codeItems,

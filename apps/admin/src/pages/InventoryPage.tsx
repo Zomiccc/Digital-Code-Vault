@@ -1,22 +1,34 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, ReactNode } from 'react';
 import { Eye, Ban, RefreshCw, Search, Copy, Check, ChevronRight, ArrowLeft } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Select, Table, Th, Td, Badge, Modal } from '@/components/ui';
 import { formatDate, statusColor } from '@/lib/utils';
+import { familyOf } from '@/lib/product-family';
 
 const PAGE_SIZE = 50;
 
 /**
- * Inventory reads top-down: a tile per product denomination ("PSN $10"), then
- * the batches sitting behind that tile, then the individual codes in a batch.
- * Codes are never the first thing shown — there are far too many of them to be
- * a useful starting point.
+ * Inventory drills down the way the catalogue is actually shaped:
+ *
+ *   PlayStation → PSN USA / PSN Turkey / … → $10 / $20 / … → batches → codes
+ *
+ * Each step answers one question, so no screen has to show everything at once.
+ * All the grouping comes from a single stock request; only batches and codes are
+ * fetched on demand.
  */
 export function InventoryPage() {
   const queryClient = useQueryClient();
+  const [family, setFamily] = useState<string | null>(null);
+  const [productId, setProductId] = useState<string | null>(null);
   const [denomination, setDenomination] = useState<any>(null);
   const [batchId, setBatchId] = useState<string | null>(null);
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['denomination-stock'],
+    queryFn: api.getDenominationStock,
+  });
+  const rows = data || [];
 
   if (batchId && denomination) {
     return (
@@ -38,90 +50,256 @@ export function InventoryPage() {
       />
     );
   }
-  return <DenominationGrid onOpen={setDenomination} />;
+  if (family && productId) {
+    return (
+      <DenominationsForProduct
+        rows={rows.filter((row: any) => row.product_id === productId)}
+        onBack={() => setProductId(null)}
+        onOpen={setDenomination}
+      />
+    );
+  }
+  if (family) {
+    return (
+      <ProductsInFamily
+        family={family}
+        rows={rows.filter((row: any) => familyOf(row) === family)}
+        onBack={() => setFamily(null)}
+        onOpen={setProductId}
+      />
+    );
+  }
+  return <FamilyGrid rows={rows} isLoading={isLoading} error={error} onOpen={setFamily} />;
 }
 
-/** Level 1 — one tile per product denomination. */
-function DenominationGrid({ onOpen }: { onOpen: (denomination: any) => void }) {
-  const [search, setSearch] = useState('');
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['denomination-stock'],
-    queryFn: api.getDenominationStock,
-  });
+/** Sum one stock counter across a set of denomination rows. */
+function total(rows: any[], key: string) {
+  return rows.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
+}
 
-  const tiles = useMemo(() => {
-    const all = data || [];
+/** Level 1 — one box per product family. */
+function FamilyGrid({
+  rows, isLoading, error, onOpen,
+}: { rows: any[]; isLoading: boolean; error: unknown; onOpen: (family: string) => void }) {
+  const [search, setSearch] = useState('');
+
+  const families = useMemo(() => {
+    const grouped = new Map<string, any[]>();
+    for (const row of rows) {
+      const name = familyOf(row);
+      if (!grouped.has(name)) grouped.set(name, []);
+      grouped.get(name)!.push(row);
+    }
     const term = search.trim().toLowerCase();
-    const matched = term
-      ? all.filter((d: any) =>
-          `${d.product} ${d.region} ${d.sku ?? ''} ${d.face_value}`.toLowerCase().includes(term))
-      : all;
-    return [...matched].sort(
-      (a: any, b: any) =>
-        a.product.localeCompare(b.product) || Number(a.face_value) - Number(b.face_value),
-    );
-  }, [data, search]);
+    return [...grouped.entries()]
+      .map(([name, group]) => ({
+        name,
+        products: new Set(group.map((row) => row.product_id)).size,
+        available: total(group, 'available'),
+        delivered: total(group, 'delivered'),
+      }))
+      .filter((family) => !term || family.name.toLowerCase().includes(term))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [rows, search]);
 
   return (
     <div className="space-y-6 animate-slide-up">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Inventory</h1>
         <p className="text-sm text-muted-foreground">
-          Pick a product value to see its batches and how much stock is left.
+          Pick a brand to see its regions, then a value, then its batches.
         </p>
       </div>
 
-      {error && <p role="alert" className="text-destructive">Could not load inventory. {(error as Error).message}</p>}
+      {!!error && (
+        <p role="alert" className="text-destructive">
+          Could not load inventory. {(error as Error).message}
+        </p>
+      )}
 
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search product, region or SKU..."
-          className="w-full rounded-lg border border-input bg-background py-2.5 pl-10 pr-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/30"
-        />
-      </div>
-
+      <SearchBox value={search} onChange={setSearch} placeholder="Search brand..." />
       {isLoading && <p role="status" className="text-muted-foreground">Loading inventory...</p>}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {tiles.map((tile: any) => (
-          <button
-            key={tile.id}
-            type="button"
-            onClick={() => onOpen(tile)}
-            className="group rounded-xl border border-border bg-card p-4 text-left transition-all hover:border-primary/40 hover:bg-muted/30"
-          >
-            <div className="flex items-start justify-between">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{tile.product}</p>
-                <p className="text-xs text-muted-foreground">{tile.region}</p>
-              </div>
-              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-            </div>
-            <p className="mt-3 text-3xl font-semibold tracking-tight">${Number(tile.face_value)}</p>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Badge className={tile.available > 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-destructive/10 text-destructive'}>
-                {tile.available} left
-              </Badge>
-              <span className="text-xs text-muted-foreground">{tile.delivered} delivered</span>
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              {tile.batch_count} batch{tile.batch_count === 1 ? '' : 'es'}
-              {tile.sku && <span className="ml-2 font-mono">{tile.sku}</span>}
-            </p>
-          </button>
+        {families.map((family) => (
+          <Tile
+            key={family.name}
+            title={family.name}
+            subtitle={`${family.products} product${family.products === 1 ? '' : 's'}`}
+            available={family.available}
+            delivered={family.delivered}
+            onClick={() => onOpen(family.name)}
+          />
         ))}
-        {!isLoading && tiles.length === 0 && (
-          <Card className="col-span-full py-12 text-center text-muted-foreground">
-            No product values found.
-          </Card>
-        )}
+        {!isLoading && families.length === 0 && <Empty>No products found.</Empty>}
       </div>
     </div>
   );
+}
+
+/** Level 2 — the regional products inside one family. */
+function ProductsInFamily({
+  family, rows, onBack, onOpen,
+}: { family: string; rows: any[]; onBack: () => void; onOpen: (productId: string) => void }) {
+  const [search, setSearch] = useState('');
+
+  const products = useMemo(() => {
+    const grouped = new Map<string, any[]>();
+    for (const row of rows) {
+      if (!grouped.has(row.product_id)) grouped.set(row.product_id, []);
+      grouped.get(row.product_id)!.push(row);
+    }
+    const term = search.trim().toLowerCase();
+    return [...grouped.entries()]
+      .map(([id, group]) => ({
+        id,
+        name: group[0].product,
+        region: group[0].region,
+        sku: group[0].product_sku,
+        values: group.length,
+        available: total(group, 'available'),
+        delivered: total(group, 'delivered'),
+      }))
+      .filter((product) =>
+        !term || `${product.name} ${product.region} ${product.sku ?? ''}`.toLowerCase().includes(term))
+      .sort((a, b) => a.region.localeCompare(b.region) || a.name.localeCompare(b.name));
+  }, [rows, search]);
+
+  return (
+    <div className="space-y-6 animate-slide-up">
+      <Button variant="ghost" size="sm" onClick={onBack}>
+        <ArrowLeft className="mr-2 h-4 w-4" /> All brands
+      </Button>
+
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">{family}</h1>
+        <p className="text-sm text-muted-foreground">Pick a region to see the values it sells.</p>
+      </div>
+
+      <SearchBox value={search} onChange={setSearch} placeholder="Search region or SKU..." />
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {products.map((product) => (
+          <Tile
+            key={product.id}
+            title={product.region}
+            subtitle={product.name}
+            footer={
+              <>
+                {product.values} value{product.values === 1 ? '' : 's'}
+                {product.sku && <span className="ml-2 font-mono">{product.sku}</span>}
+              </>
+            }
+            available={product.available}
+            delivered={product.delivered}
+            onClick={() => onOpen(product.id)}
+          />
+        ))}
+        {products.length === 0 && <Empty>No regions found.</Empty>}
+      </div>
+    </div>
+  );
+}
+
+/** Level 3 — the values of one regional product. */
+function DenominationsForProduct({
+  rows, onBack, onOpen,
+}: { rows: any[]; onBack: () => void; onOpen: (denomination: any) => void }) {
+  const sorted = useMemo(
+    () => [...rows].sort((a, b) => Number(a.face_value) - Number(b.face_value)),
+    [rows],
+  );
+  const first = sorted[0];
+
+  return (
+    <div className="space-y-6 animate-slide-up">
+      <Button variant="ghost" size="sm" onClick={onBack}>
+        <ArrowLeft className="mr-2 h-4 w-4" /> Back
+      </Button>
+
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">{first ? first.product : 'Product'}</h1>
+        <p className="text-sm text-muted-foreground">
+          {first?.region} · pick a value to see its batches.
+        </p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {sorted.map((row: any) => (
+          <Tile
+            key={row.id}
+            title={`$${Number(row.face_value)}`}
+            subtitle={row.currency}
+            footer={
+              <>
+                {row.batch_count} batch{row.batch_count === 1 ? '' : 'es'}
+                {row.sku && <span className="ml-2 font-mono">{row.sku}</span>}
+              </>
+            }
+            available={row.available}
+            delivered={row.delivered}
+            emphasiseTitle
+            onClick={() => onOpen(row)}
+          />
+        ))}
+        {sorted.length === 0 && <Empty>No values on this product yet.</Empty>}
+      </div>
+    </div>
+  );
+}
+
+/** A drill-down box, shared by every level so the levels look consistent. */
+function Tile({
+  title, subtitle, footer, available, delivered, onClick, emphasiseTitle,
+}: {
+  title: string; subtitle?: string; footer?: ReactNode;
+  available: number; delivered: number; onClick: () => void; emphasiseTitle?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group rounded-xl border border-border bg-card p-4 text-left transition-all hover:border-primary/40 hover:bg-muted/30"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className={emphasiseTitle ? 'text-3xl font-semibold tracking-tight' : 'truncate font-medium'}>
+            {title}
+          </p>
+          {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
+        </div>
+        <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Badge className={available > 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-destructive/10 text-destructive'}>
+          {available} left
+        </Badge>
+        <span className="text-xs text-muted-foreground">{delivered} delivered</span>
+      </div>
+      {footer && <p className="mt-2 text-xs text-muted-foreground">{footer}</p>}
+    </button>
+  );
+}
+
+function SearchBox({
+  value, onChange, placeholder,
+}: { value: string; onChange: (value: string) => void; placeholder: string }) {
+  return (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-lg border border-input bg-background py-2.5 pl-10 pr-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/30"
+      />
+    </div>
+  );
+}
+
+function Empty({ children }: { children: ReactNode }) {
+  return <Card className="col-span-full py-12 text-center text-muted-foreground">{children}</Card>;
 }
 
 /** Level 2 — the batches behind one denomination, in the order they get used. */

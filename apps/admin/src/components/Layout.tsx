@@ -17,7 +17,7 @@ const adminNav = [
   { to: '/admin/applications', label: 'Applications', icon: Store },
   { to: '/admin/products', label: 'Products', icon: Package },
   { to: '/admin/catalog', label: 'Catalog', icon: FolderTree },
-  { to: '/admin/presets', label: 'Fulfillment Presets', icon: Layers },
+  { to: '/admin/presets', label: 'Delivery Rules', icon: Layers },
   { to: '/admin/sku-mapping', label: 'SKU', icon: Tags },
   { to: '/admin/inventory', label: 'Inventory', icon: Database },
   { to: '/admin/upload', label: 'Bulk Upload', icon: Upload },

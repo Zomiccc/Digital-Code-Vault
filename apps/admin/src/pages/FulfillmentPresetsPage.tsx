@@ -1,448 +1,373 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
-import { Plus, Trash2, Pencil, CheckCircle2, XCircle, Layers, Save } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { Plus, Trash2, Search, AlertTriangle, CheckCircle2, Package } from 'lucide-react';
 import { api } from '@/lib/api';
-import { Card, Button, Input, Select, Modal, Badge } from '@/components/ui';
-import { formatPrice, getCurrencySymbol } from '@/lib/utils';
+import { Card, Button, Input, Badge, Modal } from '@/components/ui';
+import { formatPrice } from '@/lib/utils';
 
 /**
- * Fulfillment Presets
- * Admin picks a variant (e.g. "PS Essential: 1 Month") and pre-sets exactly which
- * denomination codes (and how many of each) get delivered when that variant is ordered.
- * Bundles are tried in priority order; each is verified against live AVAILABLE stock.
+ * Delivery rules.
+ *
+ * One rule answers one question: when a customer buys this item, which codes do
+ * we hand over? The old screen buried that behind three dependent dropdowns and
+ * words like "combination" and "priority"; this one lists every item you sell
+ * with its rule visible, and says plainly when an item has no rule and would
+ * therefore fail to deliver.
  */
 export function FulfillmentPresetsPage() {
-  return (
-    <div className="space-y-6 animate-slide-up">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Fulfillment Presets</h1>
-        <p className="text-sm text-muted-foreground">
-          Pre-set which codes get delivered for each product variant (e.g. PS Essential 1 Month → $10 ×1 + $20 ×1). Fully editable anytime.
-        </p>
-      </div>
-      <PresetsExplorer />
-    </div>
-  );
-}
-
-function PresetsExplorer() {
   const queryClient = useQueryClient();
-  const [categoryId, setCategoryId] = useState('');
-  const [productId, setProductId] = useState('');
-  const [variantId, setVariantId] = useState('');
+  const [search, setSearch] = useState('');
+  const [editing, setEditing] = useState<any>(null);
 
-  const [showComboModal, setShowComboModal] = useState(false);
-  const [editingCombo, setEditingCombo] = useState<any>(null);
-  const [showVariantModal, setShowVariantModal] = useState(false);
-
-  const { data: hierarchy, isLoading: hierarchyLoading } = useQuery({
+  const { data: hierarchy, isLoading: loadingCatalog } = useQuery({
     queryKey: ['catalog-hierarchy'],
     queryFn: api.getCatalogHierarchy,
   });
-
-  const { data: variants, isLoading: variantsLoading } = useQuery({
-    queryKey: ['preset-variants', productId],
-    queryFn: () => api.listVariantsByProduct(productId),
-    enabled: !!productId,
+  const { data: rules, isLoading: loadingRules } = useQuery({
+    queryKey: ['all-combinations'],
+    queryFn: () => api.listCombinations(),
   });
 
-  const { data: combinations, isLoading: combosLoading } = useQuery({
-    queryKey: ['preset-combinations', variantId],
-    queryFn: () => api.listCombinations(variantId),
-    enabled: !!variantId,
-  });
+  // Every sellable item, flattened out of the catalogue tree with its product,
+  // region, denominations and whatever rules currently point at it.
+  const items = useMemo(() => {
+    const byVariant = new Map<string, any[]>();
+    for (const rule of rules || []) {
+      if (!byVariant.has(rule.variantId)) byVariant.set(rule.variantId, []);
+      byVariant.get(rule.variantId)!.push(rule);
+    }
 
-  const categories = hierarchy || [];
-  const products = categories.find((c: any) => c.id === categoryId)?.products || [];
-  const selectedProduct = products.find((p: any) => p.id === productId);
-  const selectedVariant = (variants || []).find((v: any) => v.id === variantId);
+    const flat: any[] = [];
+    for (const category of hierarchy || []) {
+      for (const product of category.products || []) {
+        for (const productRegion of product.productRegions || []) {
+          for (const variant of productRegion.variants || []) {
+            flat.push({
+              variant,
+              product,
+              region: productRegion.region,
+              denominations: product.denominations || [],
+              rules: byVariant.get(variant.id) || [],
+            });
+          }
+        }
+      }
+    }
 
-  const deleteComboMutation = useMutation({
-    mutationFn: (id: string) => api.deleteCombination(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['preset-combinations', variantId] });
-      queryClient.invalidateQueries({ queryKey: ['catalog-hierarchy'] });
-    },
-  });
+    const term = search.trim().toLowerCase();
+    return flat
+      .filter((item) =>
+        !term ||
+        `${item.variant.name} ${item.product.name} ${item.region?.code ?? ''}`.toLowerCase().includes(term))
+      .sort((a, b) =>
+        a.product.name.localeCompare(b.product.name) || a.variant.name.localeCompare(b.variant.name));
+  }, [hierarchy, rules, search]);
 
-  const toggleComboMutation = useMutation({
-    mutationFn: (combo: any) => api.updateCombination(combo.id, { active: !combo.active }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['preset-combinations', variantId] }),
-  });
-
-  if (hierarchyLoading) return <div className="text-muted-foreground">Loading catalog...</div>;
+  const missing = items.filter((item) => !item.rules.some((rule: any) => rule.active)).length;
+  const loading = loadingCatalog || loadingRules;
 
   return (
-    <div className="space-y-4">
-      {/* Selection cascade */}
-      <Card>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Select
-            label="Category"
-            value={categoryId}
-            onChange={(e) => {
-              setCategoryId(e.target.value);
-              setProductId('');
-              setVariantId('');
-            }}
-            options={[
-              { value: '', label: '— Select Category —' },
-              ...categories.map((c: any) => ({ value: c.id, label: c.name })),
-            ]}
-          />
-          <Select
-            label="Product"
-            value={productId}
-            onChange={(e) => {
-              setProductId(e.target.value);
-              setVariantId('');
-            }}
-            options={[
-              { value: '', label: categoryId ? '— Select Product —' : 'Select category first' },
-              ...products.map((p: any) => ({
-                value: p.id,
-                label: `${p.name} (${p.region})${p.status !== 'ACTIVE' ? ' ⚠ inactive' : ''}`,
-              })),
-            ]}
-          />
-          <Select
-            label="Variant"
-            value={variantId}
-            onChange={(e) => setVariantId(e.target.value)}
-            options={[
-              { value: '', label: productId ? '— Select Variant —' : 'Select product first' },
-              ...(variants || []).map((v: any) => ({
-                value: v.id,
-                label: `${v.name} — ${formatPrice(v.customerPrice, v.currency)}${v.active ? '' : ' ⚠ inactive'}`,
-              })),
-            ]}
-          />
-        </div>
-      </Card>
+    <div className="space-y-6 animate-slide-up">
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">Delivery rules</h1>
+        <p className="text-sm text-muted-foreground">
+          For each thing you sell, which codes get delivered when someone buys it. An item with no
+          rule cannot be delivered.
+        </p>
+      </div>
 
-      {selectedProduct && (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            <span>
-              Wallet denominations on this product:{' '}
-              {(selectedProduct.denominations || []).length === 0 ? (
-                <span className="text-red-500">none yet</span>
-              ) : (
-                <span className="font-medium text-foreground">
-                  {(selectedProduct.denominations || []).map((d: any) => `${d.currency === 'USD' ? '$' : d.currency + ' '}${d.faceValue}`).join(', ')}
-                </span>
-              )}
-            </span>
-          </div>
-          <Button onClick={() => setShowVariantModal(true)}>
-            <Plus className="mr-2 h-4 w-4" /> Add Variant
-          </Button>
-        </div>
-      )}
-
-      {variantId && (
-        <>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Layers className="h-5 w-5 text-primary" />
-              <h2 className="text-xl font-semibold">
-                Presets for “{selectedVariant?.name}”
-              </h2>
-              <Badge className={combinations?.some((c: any) => c.active) ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-800'}>
-                {combinations?.some((c: any) => c.active)
-                  ? 'ORDER → PRESET CODES'
-                  : 'NO PRESET — ORDER WILL FAIL'}
-              </Badge>
+      {missing > 0 && (
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+            <div>
+              <p className="font-semibold">
+                {missing} item{missing === 1 ? '' : 's'} cannot be delivered
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Orders for these will fail until you set a rule. They are marked below.
+              </p>
             </div>
-            <Button onClick={() => { setEditingCombo(null); setShowComboModal(true); }}>
-              <Plus className="mr-2 h-4 w-4" /> Add Preset
-            </Button>
-          </div>
-
-          {combosLoading ? (
-            <div className="text-muted-foreground">Loading presets...</div>
-          ) : !combinations?.length ? (
-            <Card>
-              <div className="flex flex-col items-center justify-center py-12 text-center">
-                <Layers className="mb-3 h-10 w-10 text-muted-foreground/50" />
-                <p className="font-medium">No preset configured for this variant yet.</p>
-                <p className="mt-1 max-w-md text-sm text-muted-foreground">
-                  When someone orders “{selectedVariant?.name}”, fulfillment fails until you add a preset telling the system which codes to deliver.
-                </p>
-              </div>
-            </Card>
-          ) : (
-            <div className="space-y-4">
-              {combinations.map((combo: any) => (
-                <Card key={combo.id} hover>
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded bg-secondary px-2 py-0.5 text-xs font-semibold text-secondary-foreground">
-                          Priority {combo.priority}
-                        </span>
-                        <h3 className="text-lg font-semibold">{combo.name}</h3>
-                        <Badge className={combo.active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}>
-                          {combo.active ? 'ACTIVE' : 'INACTIVE'}
-                        </Badge>
-                        {combo.fulfillable ? (
-                          <span className="flex items-center gap-1 text-sm text-emerald-600">
-                            <CheckCircle2 className="h-4 w-4" /> In stock
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1 text-sm text-red-600">
-                            <XCircle className="h-4 w-4" /> Not enough stock
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        {combo.items.map((item: any, idx: number) => (
-                          <div key={idx} className="rounded-lg border border-border bg-muted/40 px-3 py-1.5 text-sm">
-                            <span className="font-medium">
-                              {item.denomination?.currency === 'USD'
-                                ? `$${item.denomination?.faceValue}`
-                                : `${item.denomination?.faceValue} ${item.denomination?.currency}`}
-                            </span>
-                            <span className="ml-1 text-muted-foreground">× {item.quantity}</span>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="mt-3 flex items-center gap-2 text-sm">
-                        <span className="text-muted-foreground">Codes delivered:</span>
-                        <Badge className="bg-primary/10 text-primary">
-                          {combo.items.reduce((n: number, i: any) => n + i.quantity, 0)} code(s) · value {combo.totalValue}
-                        </Badge>
-                      </div>
-                    </div>
-
-                    <div className="flex shrink-0 flex-col gap-2">
-                      <Button variant="outline" size="sm" onClick={() => { setEditingCombo(combo); setShowComboModal(true); }}>
-                        <Pencil className="mr-2 h-4 w-4" /> Edit
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => toggleComboMutation.mutate(combo)}>
-                        {combo.active ? 'Deactivate' : 'Activate'}
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => { if (confirm('Delete this preset?')) deleteComboMutation.mutate(combo.id); }}>
-                        <Trash2 className="mr-2 h-4 w-4" /> Delete
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-
-      {!variantsLoading && productId && (variants || []).length === 0 && (
-        <Card>
-          <div className="py-8 text-center text-sm text-muted-foreground">
-            This product has no variants yet. Use “Add Variant” above (e.g. “PS Essential: 1 Month”).
           </div>
         </Card>
       )}
 
-      {/* Add / Edit preset modal */}
-      {showComboModal && (
-        <PresetModal
-          variant={selectedVariant}
-          denominations={selectedProduct?.denominations || []}
-          editing={editingCombo}
-          onClose={() => { setShowComboModal(false); setEditingCombo(null); }}
-          onSaved={() => { setShowComboModal(false); setEditingCombo(null); }}
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search item, product or region..."
+          className="w-full rounded-lg border border-input bg-background py-2.5 pl-10 pr-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/30"
         />
-      )}
+      </div>
 
-      {/* Add variant modal */}
-      {showVariantModal && productId && (
-        <VariantModal
-          productId={productId}
-          regionCurrency={selectedProduct?.productRegions?.[0]?.region?.currency || 'USD'}
-          existingCount={(variants || []).length}
-          onClose={() => setShowVariantModal(false)}
+      {loading && <p role="status" className="text-muted-foreground">Loading...</p>}
+
+      <div className="space-y-3">
+        {items.map((item) => (
+          <ItemRow key={item.variant.id} item={item} onEdit={() => setEditing(item)} />
+        ))}
+        {!loading && items.length === 0 && (
+          <Card className="py-12 text-center text-muted-foreground">
+            Nothing to configure yet. Items appear here once a product has variants.
+          </Card>
+        )}
+      </div>
+
+      {editing && (
+        <RuleEditor
+          item={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            queryClient.invalidateQueries({ queryKey: ['all-combinations'] });
+            queryClient.invalidateQueries({ queryKey: ['catalog-hierarchy'] });
+            setEditing(null);
+          }}
         />
       )}
     </div>
   );
 }
 
-function PresetModal({
-  variant,
-  denominations,
-  editing,
-  onClose,
-  onSaved,
-}: {
-  variant: any;
-  denominations: any[];
-  editing: any;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const queryClient = useQueryClient();
-  const [name, setName] = useState(editing?.name || '');
-  const [priority, setPriority] = useState<number>(editing?.priority ?? 1);
-  const [items, setItems] = useState<{ denominationId: string; quantity: number }[]>(
-    editing?.items?.map((i: any) => ({ denominationId: i.denominationId, quantity: i.quantity })) || [
-      { denominationId: '', quantity: 1 },
-    ],
-  );
-
-  const denomLabel = (d: any) => (d.currency === 'USD' ? `$${d.faceValue}` : `${d.faceValue} ${d.currency}`);
-
-  const saveMutation = useMutation({
-    mutationFn: () => {
-      const payloadItems = items.filter((i) => i.denominationId && i.quantity > 0);
-      if (editing) {
-        return api.updateCombination(editing.id, { name, priority, items: payloadItems });
-      }
-      return api.createCombination({
-        variantId: variant.id,
-        name: name || `Preset (${payloadItems.length} code type${payloadItems.length === 1 ? '' : 's'})`,
-        priority,
-        active: true,
-        items: payloadItems,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['preset-combinations', variant.id] });
-      onSaved();
-    },
-  });
-
-  const valid = items.some((i) => i.denominationId && i.quantity > 0);
+/** One sellable item and, in plain words, what it delivers. */
+function ItemRow({ item, onEdit }: { item: any; onEdit: () => void }) {
+  const active = item.rules.filter((rule: any) => rule.active);
+  const main = active[0];
+  const deliverable = !!main;
 
   return (
-    <Modal open onClose={onClose} title={editing ? `Edit Preset — ${variant?.name}` : `Add Preset — ${variant?.name}`}>
-      <div className="space-y-4">
-        <Input label="Preset name (optional)" value={name} onChange={(e) => setName(e.target.value)} placeholder={`e.g. ${variant?.name} bundle`} />
-        <Input
-          label="Priority (lower = tried first)"
-          type="number"
-          value={String(priority)}
-          onChange={(e) => setPriority(parseInt(e.target.value) || 1)}
-        />
-
-        <div>
-          <label className="mb-2 block text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Codes to deliver
-          </label>
-          <div className="space-y-2">
-            {items.map((item, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <div className="flex-1">
-                  <Select
-                    value={item.denominationId}
-                    onChange={(e) => {
-                      const next = [...items];
-                      next[idx] = { ...next[idx], denominationId: e.target.value };
-                      setItems(next);
-                    }}
-                    options={[
-                      { value: '', label: '— Select code value —' },
-                      ...denominations.map((d: any) => ({ value: d.id, label: denomLabel(d) })),
-                    ]}
-                  />
-                </div>
-                <div className="w-24">
-                  <Input
-                    type="number"
-                    value={String(item.quantity)}
-                    onChange={(e) => {
-                      const next = [...items];
-                      next[idx] = { ...next[idx], quantity: Math.max(1, parseInt(e.target.value) || 1) };
-                      setItems(next);
-                    }}
-                  />
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const next = items.filter((_, i) => i !== idx);
-                    setItems(next.length ? next : [{ denominationId: '', quantity: 1 }]);
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
+    <Card className={deliverable ? '' : 'border-amber-500/40'}>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="font-semibold">{item.variant.name}</h3>
+            <Badge className="bg-muted text-muted-foreground">
+              {item.product.name} · {item.region?.code || item.product.region}
+            </Badge>
+            <span className="text-sm text-muted-foreground">
+              {formatPrice(item.variant.customerPrice, item.variant.currency)}
+            </span>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-2"
-            onClick={() => setItems([...items, { denominationId: '', quantity: 1 }])}
-          >
-            <Plus className="mr-1 h-4 w-4" /> Add another code box
-          </Button>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Example: to deliver two codes ($10 + $20), pick $10 qty 1 and $20 qty 1. Need three codes? Click “Add another code box”.
-          </p>
+
+          {deliverable ? (
+            <div className="mt-2 space-y-1">
+              <p className="text-sm">
+                <span className="text-muted-foreground">Delivers </span>
+                <span className="font-medium">{describe(main)}</span>
+                {main.fulfillable ? (
+                  <span className="ml-2 inline-flex items-center gap-1 text-xs text-emerald-500">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> in stock
+                  </span>
+                ) : (
+                  <span className="ml-2 inline-flex items-center gap-1 text-xs text-amber-500">
+                    <AlertTriangle className="h-3.5 w-3.5" /> not enough stock
+                  </span>
+                )}
+              </p>
+              {active.slice(1).map((rule: any) => (
+                <p key={rule.id} className="text-xs text-muted-foreground">
+                  or, if that runs out: {describe(rule)}
+                </p>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-amber-500">
+              No rule set — an order for this would fail.
+            </p>
+          )}
         </div>
 
-        {saveMutation.isError && (
-          <p className="text-sm text-red-600">{(saveMutation.error as any)?.message || 'Failed to save preset'}</p>
+        <Button variant={deliverable ? 'outline' : 'primary'} onClick={onEdit}>
+          {deliverable ? 'Change' : 'Set rule'}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+/** "$10 × 1 + $20 × 1" */
+function describe(rule: any): string {
+  if (!rule.items?.length) return 'nothing';
+  return rule.items
+    .map((item: any) => {
+      const value = Number(item.denomination?.faceValue ?? 0);
+      return item.quantity > 1 ? `$${value} × ${item.quantity}` : `$${value}`;
+    })
+    .join(' + ');
+}
+
+/**
+ * Build a rule by picking how many of each code value to hand over. The running
+ * total is checked against the item's price, because the backend requires them
+ * to match and a mismatch is the usual reason saving fails.
+ */
+function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void; onSaved: () => void }) {
+  const existing = item.rules.find((rule: any) => rule.active) || item.rules[0];
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const initial: Record<string, number> = {};
+    for (const line of existing?.items || []) {
+      initial[line.denominationId] = line.quantity;
+    }
+    setQuantities(initial);
+  }, [existing?.id]);
+
+  const price = Number(item.variant.customerPrice);
+  const chosen = item.denominations
+    .map((denomination: any) => ({ denomination, quantity: quantities[denomination.id] || 0 }))
+    .filter((line: any) => line.quantity > 0);
+  const totalValue = chosen.reduce(
+    (sum: number, line: any) => sum + Number(line.denomination.faceValue) * line.quantity, 0);
+  const matches = Math.abs(totalValue - price) < 0.005;
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const items = chosen.map((line: any) => ({
+        denominationId: line.denomination.id,
+        quantity: line.quantity,
+      }));
+      if (existing) {
+        return api.updateCombination(existing.id, { items, active: true });
+      }
+      return api.createCombination({
+        variantId: item.variant.id,
+        name: `${item.variant.name} delivery`,
+        priority: 1,
+        active: true,
+        items,
+      });
+    },
+    onSuccess: onSaved,
+    onError: (err: any) => setError(err.message),
+  });
+
+  const remove = useMutation({
+    mutationFn: () => api.deleteCombination(existing.id),
+    onSuccess: onSaved,
+    onError: (err: any) => setError(err.message),
+  });
+
+  const step = (denominationId: string, delta: number) =>
+    setQuantities((current) => {
+      const next = Math.max(0, (current[denominationId] || 0) + delta);
+      return { ...current, [denominationId]: next };
+    });
+
+  return (
+    <Modal open onClose={onClose} title={`When someone buys "${item.variant.name}"`} size="lg">
+      <div className="space-y-5">
+        <p className="text-sm text-muted-foreground">
+          Choose how many of each code value to deliver. The total has to equal the item's price of{' '}
+          <span className="font-medium text-foreground">
+            {formatPrice(price, item.variant.currency)}
+          </span>.
+        </p>
+
+        {item.denominations.length === 0 ? (
+          <Card className="border-amber-500/40 bg-amber-500/5">
+            <div className="flex items-start gap-3">
+              <Package className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+              <p className="text-sm">
+                <span className="font-medium">{item.product.name}</span> has no code values yet. Add
+                denominations to the product first, then set the rule here.
+              </p>
+            </div>
+          </Card>
+        ) : (
+          <div className="space-y-2">
+            {item.denominations.map((denomination: any) => {
+              const quantity = quantities[denomination.id] || 0;
+              return (
+                <div
+                  key={denomination.id}
+                  className={`flex items-center justify-between rounded-lg border p-3 ${
+                    quantity > 0 ? 'border-primary/40 bg-primary/5' : 'border-border'
+                  }`}
+                >
+                  <span className="font-medium">
+                    ${Number(denomination.faceValue)}
+                    <span className="ml-2 text-xs text-muted-foreground">{denomination.currency}</span>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline" size="sm"
+                      aria-label={`One fewer $${Number(denomination.faceValue)} code`}
+                      disabled={quantity === 0}
+                      onClick={() => step(denomination.id, -1)}
+                    >
+                      −
+                    </Button>
+                    <span className="w-8 text-center tabular-nums">{quantity}</span>
+                    <Button
+                      variant="outline" size="sm"
+                      aria-label={`One more $${Number(denomination.faceValue)} code`}
+                      onClick={() => step(denomination.id, 1)}
+                    >
+                      +
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
 
-        <Button onClick={() => saveMutation.mutate()} disabled={!valid || saveMutation.isPending} className="w-full">
-          <Save className="mr-2 h-4 w-4" /> {editing ? 'Save Changes' : 'Create Preset'}
-        </Button>
+        <div className={`rounded-lg p-3 text-sm ${matches ? 'bg-emerald-500/10' : 'bg-muted'}`}>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Delivering</span>
+            <span className="font-medium">{chosen.length ? describeLines(chosen) : 'nothing yet'}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between">
+            <span className="text-muted-foreground">Total value</span>
+            <span className={`font-semibold ${matches ? 'text-emerald-500' : ''}`}>
+              {formatPrice(totalValue, item.variant.currency)} of{' '}
+              {formatPrice(price, item.variant.currency)}
+            </span>
+          </div>
+          {!matches && chosen.length > 0 && (
+            <p className="mt-2 text-xs text-amber-500">
+              These have to match before this can be saved.
+            </p>
+          )}
+        </div>
+
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancel</Button>
+          {existing && (
+            <Button
+              variant="outline"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate()}
+              title="Remove this rule — the item can no longer be delivered"
+            >
+              <Trash2 className="mr-2 h-4 w-4" /> Remove rule
+            </Button>
+          )}
+          <Button
+            className="flex-1"
+            disabled={!matches || chosen.length === 0 || save.isPending}
+            onClick={() => save.mutate()}
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            {save.isPending ? 'Saving...' : existing ? 'Save rule' : 'Create rule'}
+          </Button>
+        </div>
       </div>
     </Modal>
   );
 }
 
-function VariantModal({ productId, regionCurrency, existingCount, onClose }: { productId: string; regionCurrency: string; existingCount: number; onClose: () => void }) {
-  const queryClient = useQueryClient();
-  const [name, setName] = useState('');
-  const [price, setPrice] = useState('');
-  const [currency, setCurrency] = useState(regionCurrency);
-
-  const createMutation = useMutation({
-    mutationFn: () =>
-      api.createVariantForProduct(productId, {
-        name,
-        customerPrice: parseFloat(price),
-        currency,
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['preset-variants', productId] });
-      queryClient.invalidateQueries({ queryKey: ['catalog-hierarchy'] });
-      onClose();
-    },
-  });
-
-  return (
-    <Modal open onClose={onClose} title="Add Variant">
-      <div className="space-y-4">
-        <Input label="Variant name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. PS Essential: 1 Month" />
-        <Input
-          label="Currency (auto-detected from product region — override if needed)"
-          value={currency}
-          onChange={(e) => setCurrency(e.target.value.toUpperCase())}
-          placeholder="e.g. SAR"
-        />
-        <Input
-          label={`Customer price (${currency} ${getCurrencySymbol(currency)})`}
-          type="number"
-          value={price}
-          onChange={(e) => setPrice(e.target.value)}
-          placeholder="e.g. 1850"
-        />
-        {createMutation.isError && (
-          <p className="text-sm text-red-600">{(createMutation.error as any)?.message || 'Failed to create variant'}</p>
-        )}
-        <Button
-          onClick={() => createMutation.mutate()}
-          disabled={!name || !price || createMutation.isPending}
-          className="w-full"
-        >
-          <Plus className="mr-2 h-4 w-4" /> Create Variant ({existingCount} existing)
-        </Button>
-      </div>
-    </Modal>
-  );
+function describeLines(chosen: { denomination: any; quantity: number }[]): string {
+  return chosen
+    .map(({ denomination, quantity }) => {
+      const value = Number(denomination.faceValue);
+      return quantity > 1 ? `$${value} × ${quantity}` : `$${value}`;
+    })
+    .join(' + ');
 }
