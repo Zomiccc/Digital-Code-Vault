@@ -31,9 +31,13 @@ export type RegionDisplay = {
 
 /** Attach a region's local price to a USD amount, for display only. */
 export function localPrice(amountUsd: number, display: RegionDisplay) {
-  const amount = roundMoney(amountUsd * display.rate);
+  // Display code runs over whatever the catalogue holds, including a row with a
+  // missing face value. A price that cannot be computed shows as zero rather
+  // than throwing and taking the surrounding listing with it.
+  const safeUsd = Number.isFinite(amountUsd) ? amountUsd : 0;
+  const amount = roundMoney(safeUsd * display.rate);
   return {
-    amount_usd: roundMoney(amountUsd),
+    amount_usd: roundMoney(safeUsd),
     local_amount: amount,
     local_currency: display.currency,
     local_symbol: display.symbol,
@@ -102,27 +106,39 @@ export class CurrencyService {
     const code = (regionCode ?? '').trim();
     if (!code) return fallback;
 
-    const region = await this.prisma.region.findFirst({
-      where: { OR: [{ code }, { name: code }] },
-      select: { currency: true, symbol: true },
-    });
-    const currency = (region?.currency ?? BASE_CURRENCY).toUpperCase();
-    if (!region || currency === BASE_CURRENCY) {
-      return { ...fallback, symbol: region?.symbol || '$', currency };
-    }
+    // Showing a local price is a convenience layered on top of the catalogue. It
+    // must never be able to take the catalogue down with it, so every failure
+    // here — a missing table, an unmigrated database, a stale Prisma client —
+    // degrades to USD. Charging a wallet goes through getRate(), which still
+    // refuses rather than guessing.
+    try {
+      const region = await this.prisma.region.findFirst({
+        where: { OR: [{ code }, { name: code }] },
+        select: { currency: true, symbol: true },
+      });
+      const currency = (region?.currency ?? BASE_CURRENCY).toUpperCase();
+      if (!region || currency === BASE_CURRENCY) {
+        return { ...fallback, symbol: region?.symbol || '$', currency };
+      }
 
-    const row = await this.prisma.exchangeRate.findUnique({ where: { currency } });
-    if (!row) {
-      this.logger.warn(`Region ${code} prices in ${currency} but no rate is set; showing USD`);
+      const row = await this.prisma.exchangeRate?.findUnique({ where: { currency } });
+      if (!row) {
+        this.logger.warn(`Region ${code} prices in ${currency} but no rate is set; showing USD`);
+        return fallback;
+      }
+      return {
+        currency,
+        symbol: region.symbol || currency,
+        rate: Number(row.unitsPerUsd),
+        converted: true,
+        region: code,
+      };
+    } catch (err) {
+      this.logger.error(
+        `Could not resolve display currency for region ${code}; showing USD: ${(err as Error).message}`,
+      );
       return fallback;
     }
-    return {
-      currency,
-      symbol: region.symbol || currency,
-      rate: Number(row.unitsPerUsd),
-      converted: true,
-      region: code,
-    };
   }
 
   /** Resolve display currencies for many regions at once, without an N+1. */
