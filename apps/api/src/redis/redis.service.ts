@@ -78,6 +78,17 @@ export class RedisService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Current Redis state, for the health endpoint. Derived from the connection and
+   * circuit breaker rather than issuing a PING, so a frequently polled health
+   * check does not itself consume the request quota.
+   */
+  getStatus(): { configured: boolean; available: boolean; usingFallback: boolean; errorCount: number } {
+    const configured = !!this.configService.get<string>('REDIS_URL');
+    const available = this.isRedisAvailable();
+    return { configured, available, usingFallback: !available, errorCount: this.redisErrorCount };
+  }
+
   private isRedisAvailable(): boolean {
     if (!this.connected || !this.redis) return false;
     if (this.redisRetryAt > 0 && Date.now() < this.redisRetryAt) return false;

@@ -81,7 +81,21 @@ export class WebhookService implements OnModuleDestroy {
         async (job: { data: WebhookJobData }) => {
           await this.deliverWebhook(job.data);
         },
-        { connection, concurrency: 5 },
+        {
+          connection,
+          concurrency: 5,
+          // A BullMQ worker polls Redis continuously while idle, and on a metered
+          // Redis (Upstash) that alone exhausted a 500k monthly request quota.
+          // `drainDelay` is how long an idle worker blocks waiting for work: a
+          // longer block means far fewer commands, and it costs no latency for
+          // new jobs because adding one wakes the blocked call immediately.
+          drainDelay: this.configService.get<number>('WEBHOOK_DRAIN_DELAY_SECONDS', 60),
+          // Stalled-job scans are pure overhead when nothing is stalled.
+          stalledInterval: this.configService.get<number>('WEBHOOK_STALLED_INTERVAL_MS', 300_000),
+          // The lock must outlive a delivery attempt, and comfortably exceed the
+          // gap between stalled scans, or healthy jobs get treated as stalled.
+          lockDuration: this.configService.get<number>('WEBHOOK_LOCK_DURATION_MS', 90_000),
+        },
       );
 
       this.worker.on('completed', (job: any) => {

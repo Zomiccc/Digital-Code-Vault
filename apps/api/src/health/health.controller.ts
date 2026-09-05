@@ -33,12 +33,15 @@ export class HealthController {
       checks.database = 'error';
     }
 
-    // Check Redis (in-memory)
-    try {
-      checks.redis = 'ok';
-    } catch {
-      checks.redis = 'error';
-    }
+    // Report the real Redis state. This previously always said "ok", which hid a
+    // Redis outage completely: the platform silently ran on the in-memory
+    // fallback while health claimed everything was fine.
+    const redis = this.redisService.getStatus();
+    checks.redis = !redis.configured
+      ? 'not_configured'
+      : redis.available
+        ? 'ok'
+        : 'degraded_in_memory_fallback';
 
     const version = loadVersion();
     const allOk = Object.values(checks).every((v) => v === 'ok');
