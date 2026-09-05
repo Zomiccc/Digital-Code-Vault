@@ -146,6 +146,15 @@ export const api = {
     apiFetch(`/admin/products/${productId}/type`, { method: 'PATCH', body: JSON.stringify({ product_type: productType }) }),
   updateProductCategory: (productId: string, categoryId: string | null) =>
     apiFetch(`/admin/products/${productId}/category`, { method: 'PATCH', body: JSON.stringify({ category_id: categoryId }) }),
+  listSkus: (search?: string) =>
+    apiFetch(`/admin/skus${search ? `?${new URLSearchParams({ search })}` : ''}`),
+  generateMissingSkus: () => apiFetch('/admin/skus/generate-missing', { method: 'POST' }),
+  setProductSku: (productId: string, sku: string | null) =>
+    apiFetch(`/admin/skus/product/${productId}`, { method: 'PATCH', body: JSON.stringify({ sku }) }),
+  setDenominationSku: (denominationId: string, sku: string | null) =>
+    apiFetch(`/admin/skus/denomination/${denominationId}`, { method: 'PATCH', body: JSON.stringify({ sku }) }),
+  resyncDenominationSkus: (productId: string) =>
+    apiFetch(`/admin/skus/product/${productId}/resync`, { method: 'POST' }),
   suggestSku: (name: string, region: string) =>
     apiFetch(`/admin/products/suggest-sku?${new URLSearchParams({ name, region })}`),
   updateProductSku: (productId: string, sku: string | null) =>

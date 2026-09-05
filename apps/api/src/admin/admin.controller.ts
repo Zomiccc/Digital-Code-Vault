@@ -11,6 +11,7 @@ import { EssentialsService } from '../essentials/essentials.service';
 import { AuthService } from '../auth/auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrencyService } from '../currency/currency.service';
+import { SkuService } from '../products/sku.service';
 import { resolveProductSkuBase, uniqueSku, denominationSku } from '../products/sku';
 import { WalletService } from '../wallet/wallet.service';
 import { DeliveryService } from '../delivery/delivery.service';
@@ -44,6 +45,7 @@ export class AdminController {
     private supportService: SupportService,
     private fulfillmentService: FulfillmentService,
     private currencyService: CurrencyService,
+    private skuService: SkuService,
   ) {}
 
   @Get('stats')
@@ -204,6 +206,44 @@ export class AdminController {
       productType: body.product_type,
       sku: body.sku,
     });
+  }
+
+  // ─── SKUs (products and their denominations) ───
+
+  @Get('skus')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER', 'SUPPORT', 'FINANCE')
+  async listSkus(@Query('search') search?: string) {
+    return this.skuService.list(search);
+  }
+
+  @Post('skus/generate-missing')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async generateMissingSkus(@CurrentUser() user: any, @Req() req: any) {
+    return this.skuService.generateMissing(user.id, req.ip);
+  }
+
+  @Patch('skus/product/:id')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async setProductSku(
+    @Param('id') id: string, @Body() body: { sku: string | null },
+    @CurrentUser() user: any, @Req() req: any,
+  ) {
+    return this.skuService.setProductSku(id, body.sku, user.id, req.ip);
+  }
+
+  @Patch('skus/denomination/:id')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async setDenominationSku(
+    @Param('id') id: string, @Body() body: { sku: string | null },
+    @CurrentUser() user: any, @Req() req: any,
+  ) {
+    return this.skuService.setDenominationSku(id, body.sku, user.id, req.ip);
+  }
+
+  @Post('skus/product/:id/resync')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async resyncDenominationSkus(@Param('id') id: string, @CurrentUser() user: any, @Req() req: any) {
+    return this.skuService.resyncDenominations(id, user.id, req.ip);
   }
 
   @Get('products/suggest-sku')

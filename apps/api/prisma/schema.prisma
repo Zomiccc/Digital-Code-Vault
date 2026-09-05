@@ -270,6 +270,9 @@ model Denomination {
   productId  String
   faceValue  Decimal
   currency   String   @default("USD")
+  // Sub-product SKU, e.g. PSN-USA-10. Derived from the product SKU by default
+  // but editable, and it is what a storefront line item is matched against.
+  sku        String?
   createdAt  DateTime @default(now())
 
   product   Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -280,6 +283,7 @@ model Denomination {
 
   @@unique([productId, faceValue, currency])
   @@index([productId])
+  @@index([sku])
 }
 
 model CodeItem {

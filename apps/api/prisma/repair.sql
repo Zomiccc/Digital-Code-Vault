@@ -29,6 +29,9 @@ CREATE TABLE IF NOT EXISTS "ExchangeRate" (
 CREATE INDEX IF NOT EXISTS "CodeBatch_denominationId_priority_idx"
   ON "CodeBatch" ("denominationId", "priority");
 
+ALTER TABLE "Denomination" ADD COLUMN IF NOT EXISTS "sku" TEXT;
+CREATE INDEX IF NOT EXISTS "Denomination_sku_idx" ON "Denomination" ("sku");
+
 -- Carry over the single USD->PKR rate the platform used before rates were a
 -- table, so no configured rate is silently lost.
 INSERT INTO "ExchangeRate" ("currency", "unitsPerUsd", "updatedAt")

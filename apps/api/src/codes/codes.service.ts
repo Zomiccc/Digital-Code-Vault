@@ -447,12 +447,23 @@ export class CodesService {
       stockMap[ac.denominationId][ac.status] = ac._count;
     }
 
+    // Batch counts per denomination, so the tile can say how many batches sit
+    // behind it before the admin drills in.
+    const batchCounts = await this.prisma.codeBatch.groupBy({
+      by: ['denominationId'],
+      _count: { _all: true },
+    });
+    const batchMap = new Map(batchCounts.map((b) => [b.denominationId, b._count._all]));
+
     return denominations.map((d) => ({
       id: d.id,
       face_value: d.faceValue,
       currency: d.currency,
+      sku: d.sku,
       product: d.product.name,
+      product_id: d.productId,
       region: d.product.region,
+      batch_count: batchMap.get(d.id) || 0,
       total_codes: d._count.codeItems,
       available: stockMap[d.id]?.['AVAILABLE'] || 0,
       delivered: stockMap[d.id]?.['DELIVERED'] || 0,
