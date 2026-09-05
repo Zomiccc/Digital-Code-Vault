@@ -1322,6 +1322,24 @@ export class WebhookService implements OnModuleDestroy {
       // so we must NEVER use it directly for denomination matching unless it's USD and matches.
       const orderQuantity = (webhook as any).quantity ? Number((webhook as any).quantity) : 1;
       let fulfillmentAmount = 0;
+
+      // A pack SKU resolved to a variant. Its price is the amount and its
+      // delivery rule chooses the codes, so the denomination guessing below must
+      // not run — it would otherwise fall through to "use the smallest value"
+      // and hand over a $10 code for a subscription.
+      if (matchedVariantId) {
+        const matchedVariant = await this.prisma.variant.findUnique({
+          where: { id: matchedVariantId },
+        });
+        if (matchedVariant) {
+          fulfillmentAmount = Number(matchedVariant.customerPrice) * orderQuantity;
+          this.logger.log(
+            `[WEBHOOK] Pack "${matchedVariant.name}" — charging its price ` +
+            `${matchedVariant.currency} ${Number(matchedVariant.customerPrice)} × ${orderQuantity}, ` +
+            `codes chosen by its delivery rule`,
+          );
+        }
+      }
       let fulfillmentDenominationId: string | null = exactDenominationId;
 
       if (cpMapping?.dcvDenominationId) {
