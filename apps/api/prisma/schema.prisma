@@ -316,6 +316,8 @@ model FulfillmentRequest {
   merchantId      String
   productId       String
   amount          Decimal            @default(0)
+  // Fixed manual-order discount; amount remains the original allocation value.
+  discountAmount  Decimal            @default(0)
   currency        String             @default("USD")
   idempotencyKey  String
   referenceId     String?

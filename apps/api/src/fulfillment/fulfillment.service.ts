@@ -1,3 +1,4 @@
+import { manualOrderPricing } from './manual-order-pricing';
 import {
   Injectable,
   Logger,
@@ -49,8 +50,13 @@ export class FulfillmentService {
     inventorySource?: string; // 'DCV' | 'MERCHANT' | 'AUTO' (default: 'DCV')
     denominationId?: string; // exact denomination to use (from SKU mapping)
     variantId?: string; // variant to use for FulfillmentCombination lookup
+    discountAmount?: number; // ADMIN only; reduces recorded revenue, never allocation
   }) {
     const { merchantId, productId, amount, currency, referenceId, idempotencyKey, sandbox, customerEmail, customerName, customerAddress, actorId, actorType, ip } = params;
+    if (params.discountAmount !== undefined && actorType !== 'ADMIN') {
+      throw new BadRequestException('Manual-order discounts are only available to admins');
+    }
+    const pricing = actorType === 'ADMIN' ? manualOrderPricing(amount, params.discountAmount) : undefined;
 
     // ─── Emergency stop: pause ALL code delivery platform-wide ───
     if (actorType !== 'ADMIN') {
@@ -535,6 +541,10 @@ export class FulfillmentService {
     }
 
     const reservationTtl = this.configService.get<number>('RESERVATION_TTL_MINUTES', 15);
+    // This helper uses the root Prisma connection. Resolve before opening the
+    // transaction so it cannot wait on locks held by its own fulfillment.
+    const revenueWalletId = (!skipWallet || (pricing && !sandbox))
+      ? await this.walletService.getOrCreateAdminWallet() : null;
 
     // Execute everything in a transaction with retry for stock conflicts
     const MAX_RETRIES = 3;
@@ -640,6 +650,7 @@ export class FulfillmentService {
               idempotencyKey,
               referenceId,
               status: 'PENDING',
+              discountAmount: pricing?.discount_amount ?? 0,
               sandbox: sandbox || false,
               customerEmail: customerEmail || null,
               customerName: customerName || null,
@@ -700,7 +711,7 @@ export class FulfillmentService {
             });
 
             // 4b. Credit admin/platform wallet atomically
-            const adminWalletId = await this.walletService.getOrCreateAdminWallet();
+            const adminWalletId = revenueWalletId!;
             const updatedAdminWallet = await tx.adminWallet.update({
               where: { id: adminWalletId },
               data: { balance: { increment: totalCost } },
@@ -714,6 +725,26 @@ export class FulfillmentService {
                 referenceId: fulfillmentReq.id,
                 source: 'FULFILLMENT',
                 description: `Fulfillment revenue from merchant ${merchantId}`,
+              },
+            });
+          }
+
+          // Manual sales record net platform revenue without debiting a merchant.
+          if (pricing && !sandbox) {
+            const adminWalletId = revenueWalletId!;
+            const updatedAdminWallet = await tx.adminWallet.update({
+              where: { id: adminWalletId },
+              data: { balance: { increment: pricing.net_amount } },
+            });
+            await tx.adminWalletTransaction.create({
+              data: {
+                adminWalletId,
+                type: 'CREDIT',
+                amount: pricing.net_amount,
+                balanceAfter: updatedAdminWallet.balance,
+                referenceId: fulfillmentReq.id,
+                source: 'FULFILLMENT',
+                description: `Manual order: original ${amount}, discount ${pricing.discount_amount}, net ${pricing.net_amount} ${currency}`,
               },
             });
           }
@@ -789,6 +820,7 @@ export class FulfillmentService {
         amount,
         allocation: combination.map((c) => `$${c.faceValue} x${c.count}`),
         walletBalanceAfter: result.walletBalanceAfter,
+        ...(pricing ? { pricing } : {}),
       },
       ip,
     });
@@ -862,6 +894,7 @@ export class FulfillmentService {
       allocation: combination.map((c) => `$${c.faceValue}`),
       delivery_link: deliveryLink,
       wallet_balance_after: result.walletBalanceAfter,
+      ...(pricing ? { ...pricing, currency } : {}),
     };
 
     // Store idempotency record
@@ -983,13 +1016,53 @@ export class FulfillmentService {
 
     if (req.status === 'REVERSED') {
       throw new ConflictException('Fulfillment already reversed');
-      }
+    }
 
-    const refundAmount = req.walletTxn ? req.walletTxn.amount : 0;
+    let refundAmount = req.walletTxn ? req.walletTxn.amount : 0;
+    const revenueWalletId = req.walletTxn
+      ? await this.walletService.getOrCreateAdminWallet() : null;
 
     const result = await this.prisma.$transaction(async (tx) => {
+      // Compare-and-set takes a row lock and rechecks the status in the database.
+      // Only one reversal may proceed; a concurrent status change also loses
+      // the claim. The claim rolls back with any failed allocation/ledger write.
+      const claim = await tx.fulfillmentRequest.updateMany({
+        where: { id: fulfillmentId, status: req.status },
+        data: { status: 'REVERSED' },
+      });
+      if (claim.count !== 1) {
+        throw new ConflictException('Fulfillment status changed; reversal was not applied');
+      }
+
       // Release codes back to AVAILABLE
       await this.allocationEngine.reverseAllocation(tx, fulfillmentId);
+
+      // Manual orders have no merchant debit to refund. Reverse only the actual
+      // platform credit (legacy manual orders may not have a revenue record).
+      if (!req.walletTxn) {
+        const revenue = await tx.adminWalletTransaction.findFirst({
+          where: { referenceId: fulfillmentId, source: 'FULFILLMENT', type: 'CREDIT' },
+        });
+        if (revenue) {
+          refundAmount = revenue.amount;
+          const wallet = await tx.adminWallet.update({
+            where: { id: revenue.adminWalletId },
+            data: { balance: { decrement: revenue.amount } },
+          });
+          await tx.adminWalletTransaction.create({
+            data: {
+              adminWalletId: revenue.adminWalletId,
+              type: 'DEBIT',
+              amount: revenue.amount,
+              balanceAfter: wallet.balance,
+              referenceId: fulfillmentId,
+              source: 'REFUND',
+              description: `Reversal of manual fulfillment ${fulfillmentId}`,
+            },
+          });
+        }
+        return tx.fulfillmentRequest.update({ where: { id: fulfillmentId }, data: { status: 'REVERSED' } });
+      }
 
       // Credit wallet back
       const updatedMerchant = await tx.merchant.update({
@@ -1010,7 +1083,7 @@ export class FulfillmentService {
       });
 
       // Reverse admin wallet credit (debit it back)
-      const adminWalletId = await this.walletService.getOrCreateAdminWallet();
+      const adminWalletId = revenueWalletId!;
       const updatedAdminWallet = await tx.adminWallet.update({
         where: { id: adminWalletId },
         data: { balance: { decrement: refundAmount } },
@@ -1063,6 +1136,10 @@ export class FulfillmentService {
       status: req.status,
       reference_id: req.referenceId,
       created_at: req.createdAt,
+      original_amount: Number(req.amount),
+      discount_amount: Number(req.discountAmount ?? 0),
+      net_amount: (Math.round(Number(req.amount) * 100) - Math.round(Number(req.discountAmount ?? 0) * 100)) / 100,
+      currency: req.currency,
       allocation: req.allocations?.[0]?.codeItemIds
         ? [`${JSON.parse(req.allocations[0].codeItemIds || '[]').length} codes`]
         : [],
@@ -1109,6 +1186,7 @@ export class FulfillmentService {
         }
 
         const reservationTtl = this.configService.get<number>('RESERVATION_TTL_MINUTES', 15);
+        const adminWalletId = await this.walletService.getOrCreateAdminWallet();
 
         const result = await this.prisma.$transaction(async (tx) => {
           let allocationResults: AllocationResult[];
@@ -1153,7 +1231,6 @@ export class FulfillmentService {
           });
 
           // Credit admin/platform wallet atomically
-          const adminWalletId = await this.walletService.getOrCreateAdminWallet();
           const updatedAdminWallet = await tx.adminWallet.update({
             where: { id: adminWalletId },
             data: { balance: { increment: totalCost } },

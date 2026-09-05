@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Eye, Ban, RefreshCw, Search, ShieldAlert, Copy, Check,
-  ChevronRight, Package, Layers, ArrowLeft,
+  ChevronRight, Layers, ArrowLeft,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Select, Table, Th, Td, Badge, Modal } from '@/components/ui';
@@ -14,26 +14,29 @@ export function InventoryPage() {
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => { setDebouncedSearch(search); setBatchPage(0); }, 250);
+    return () => clearTimeout(timer);
+  }, [search]);
   const [revealItem, setRevealItem] = useState<any>(null);
   const [revealedCode, setRevealedCode] = useState('');
   const [copied, setCopied] = useState(false);
 
-  // Denomination stock summary
-  const { data: denomStock, isLoading: stockLoading } = useQuery({
-    queryKey: ['denomination-stock'],
-    queryFn: api.getDenominationStock,
-  });
+  const [batchPage, setBatchPage] = useState(0);
+  const [codePage, setCodePage] = useState(0);
+  const pageSize = 50;
 
   // Batches list
-  const { data: batchesData, isLoading: batchesLoading } = useQuery({
-    queryKey: ['batches'],
-    queryFn: () => api.listBatches(),
+  const { data: batchesData, isLoading: batchesLoading, error: batchesError } = useQuery({
+    queryKey: ['batches', batchPage, debouncedSearch],
+    queryFn: () => api.listBatches({ limit: String(pageSize), offset: String(batchPage * pageSize), search: debouncedSearch }),
   });
 
   // Codes for selected batch
-  const { data: batchCodes, isLoading: batchCodesLoading } = useQuery({
-    queryKey: ['codes', 'batch', selectedBatchId, statusFilter],
-    queryFn: () => api.listCodes({ batchId: selectedBatchId!, ...(statusFilter ? { status: statusFilter } : {}) }),
+  const { data: batchCodes, isLoading: batchCodesLoading, error: codesError } = useQuery({
+    queryKey: ['codes', 'batch', selectedBatchId, statusFilter, codePage],
+    queryFn: () => api.listCodes({ batchId: selectedBatchId!, limit: String(pageSize), offset: String(codePage * pageSize), ...(statusFilter ? { status: statusFilter } : {}) }),
     enabled: !!selectedBatchId,
   });
 
@@ -84,26 +87,17 @@ export function InventoryPage() {
     setSelectedBatchId(batchId);
     setView('batch');
     setStatusFilter('');
+    setCodePage(0);
   };
 
   const backToOverview = () => {
     setView('overview');
     setSelectedBatchId(null);
     setStatusFilter('');
+    setCodePage(0);
   };
 
-  const filteredBatches = useMemo(() => {
-    if (!batchesData?.items) return [];
-    if (!search.trim()) return batchesData.items;
-    const q = search.toLowerCase();
-    return batchesData.items.filter(
-      (b: any) =>
-        b.denomination.product.toLowerCase().includes(q) ||
-        b.denomination.region.toLowerCase().includes(q) ||
-        b.batch_name?.toLowerCase().includes(q) ||
-        b.id.toLowerCase().includes(q),
-    );
-  }, [batchesData?.items, search]);
+  const filteredBatches = batchesData?.items || [];
 
   const filteredBatchCodes = useMemo(() => {
     if (!batchCodes?.items) return [];
@@ -139,10 +133,14 @@ export function InventoryPage() {
           </div>
 
           {/* Batch stats */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="rounded-lg bg-muted/50 p-3 text-center">
+              <p className="text-2xl font-semibold">{selectedBatch?.quantity || 0}</p>
+              <p className="text-xs text-muted-foreground">Total codes</p>
+            </div>
             <div className="rounded-lg bg-muted/50 p-3 text-center">
               <p className="text-2xl font-semibold text-emerald-400">{selectedBatch?.available || 0}</p>
-              <p className="text-xs text-muted-foreground">Available</p>
+              <p className="text-xs text-muted-foreground">Left to deliver</p>
             </div>
             <div className="rounded-lg bg-muted/50 p-3 text-center">
               <p className="text-2xl font-semibold text-blue-400">{selectedBatch?.allocated || 0}</p>
@@ -177,18 +175,19 @@ export function InventoryPage() {
         <div className="w-full sm:w-48">
           <Select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => { setStatusFilter(e.target.value); setCodePage(0); }}
             options={[
               { value: '', label: 'All Statuses' },
               { value: 'AVAILABLE', label: 'Available' },
               { value: 'RESERVED', label: 'Reserved' },
               { value: 'ALLOCATED', label: 'Allocated' },
               { value: 'DELIVERED', label: 'Delivered' },
-              { value: 'VOID', label: 'Void' },
+              { value: 'VOIDED', label: 'Voided' },
             ]}
           />
         </div>
 
+        {codesError && <p role="alert" className="text-destructive">Could not load codes. {codesError.message}</p>}
         {/* Codes table */}
         <Card className="p-0">
           {batchCodesLoading ? (
@@ -199,18 +198,22 @@ export function InventoryPage() {
             <Table>
               <thead>
                 <tr>
+                  <Th>Code</Th>
                   <Th>Status</Th>
-                  <Th>Created</Th>
+                  <Th>Added</Th>
+                  <Th>Delivered</Th>
                   <Th className="text-right">Actions</Th>
                 </tr>
               </thead>
               <tbody>
-                {filteredBatchCodes.map((item: any, idx: number) => (
+                {filteredBatchCodes.map((item: any) => (
                   <tr key={item.id} className="group hover:bg-muted/30">
+                    <Td className="font-mono text-xs">{item.id.slice(0, 8)}</Td>
                     <Td>
                       <Badge className={statusColor(item.status)}>{item.status}</Badge>
                     </Td>
                     <Td className="text-muted-foreground">{formatDate(item.created_at)}</Td>
+                    <Td className="text-muted-foreground">{item.revealed_at ? formatDate(item.revealed_at) : '—'}</Td>
                     <Td className="text-right">
                       <div className="flex justify-end gap-1">
                         <Button
@@ -223,7 +226,7 @@ export function InventoryPage() {
                           <Eye className="h-4 w-4" />
                         </Button>
                         {item.status === 'AVAILABLE' && (
-                          <Button variant="ghost" size="sm" onClick={() => voidMutation.mutate(item.id)} title="Void code">
+                          <Button variant="ghost" size="sm" disabled={voidMutation.isPending} onClick={() => voidMutation.mutate(item.id)} title="Void code">
                             <Ban className="h-4 w-4 text-destructive" />
                           </Button>
                         )}
@@ -233,7 +236,7 @@ export function InventoryPage() {
                 ))}
                 {filteredBatchCodes.length === 0 && (
                   <tr>
-                    <Td colSpan={3} className="py-12 text-center text-muted-foreground">
+                    <Td colSpan={5} className="py-12 text-center text-muted-foreground">
                       No codes found in this batch.
                     </Td>
                   </tr>
@@ -243,6 +246,8 @@ export function InventoryPage() {
           )}
         </Card>
 
+        <Pagination page={codePage} total={batchCodes?.total || 0} onChange={setCodePage} />
+        {voidMutation.isError && <p role="alert" className="text-destructive">{voidMutation.error.message}</p>}
         <RevealModal
           revealItem={revealItem}
           revealedCode={revealedCode}
@@ -256,62 +261,21 @@ export function InventoryPage() {
   }
 
   // ─── Overview view (default) ───
-  const isLoading = stockLoading || batchesLoading;
+  const isLoading = batchesLoading;
 
-  if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center text-muted-foreground">
-        <RefreshCw className="mr-2 h-5 w-5 animate-spin" /> Loading inventory...
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6 animate-slide-up">
+      {batchesError && <p role="alert" className="text-destructive">Could not load batches. {batchesError.message}</p>}
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Inventory</h1>
-          <p className="text-sm text-muted-foreground">Batch-based code inventory management</p>
+          <p className="text-sm text-muted-foreground">Open a batch to see delivered codes and remaining stock.</p>
         </div>
       </div>
 
-      {/* Denomination stock summary */}
-      <div>
-        <h2 className="mb-3 text-lg font-semibold">Stock by Denomination</h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {denomStock?.map((d: any) => (
-            <Card key={d.id} className="space-y-2" hover>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium">{d.product}</p>
-                  <p className="text-xs text-muted-foreground">{d.region}</p>
-                </div>
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Package className="h-4 w-4" />
-                </div>
-              </div>
-              <div className="flex items-baseline gap-2">
-                <p className="text-2xl font-semibold">${d.face_value}</p>
-                <Badge className={d.available > 0 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-destructive/10 text-destructive'}>
-                  {d.available} available
-                </Badge>
-              </div>
-              <div className="flex gap-3 text-xs text-muted-foreground">
-                <span>{d.total_codes} total</span>
-                <span>{d.delivered} delivered</span>
-                <span>{d.voided} voided</span>
-              </div>
-            </Card>
-          ))}
-          {denomStock?.length === 0 && (
-            <Card className="col-span-full py-8 text-center text-muted-foreground">
-              No denominations found.
-            </Card>
-          )}
-        </div>
-      </div>
-
+      {isLoading && <p role="status" className="text-muted-foreground">Loading batches...</p>}
       {/* Batches section */}
       <div>
         <h2 className="mb-3 text-lg font-semibold">Batches</h2>
@@ -323,7 +287,7 @@ export function InventoryPage() {
             <input
               type="text"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); }}
               placeholder="Search batch name, product, region..."
               className="w-full rounded-lg border border-input bg-background py-2.5 pl-10 pr-3 text-sm outline-none transition-all placeholder:text-muted-foreground/50 focus:border-primary focus:ring-1 focus:ring-primary/30"
             />
@@ -338,7 +302,7 @@ export function InventoryPage() {
                 <Th>Batch Name</Th>
                 <Th>Product</Th>
                 <Th>Denomination</Th>
-                <Th>Available</Th>
+                <Th>Left</Th>
                 <Th>Delivered</Th>
                 <Th>Total</Th>
                 <Th>Created</Th>
@@ -351,9 +315,12 @@ export function InventoryPage() {
                   key={b.id}
                   className="group cursor-pointer hover:bg-muted/30"
                   onClick={() => openBatch(b.id)}
+                  tabIndex={0}
+                  role="button"
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBatch(b.id); } }}
                 >
                   <Td>
-                    <div className="font-medium">{b.batch_name || <span className="text-muted-foreground">Unnamed batch</span>}</div>
+                    <div className="font-medium">{b.batch_name || `Batch ${b.id.slice(0, 8)}`}</div>
                     <div className="text-xs font-mono text-muted-foreground">{b.id.slice(0, 12)}</div>
                   </Td>
                   <Td>
@@ -386,6 +353,7 @@ export function InventoryPage() {
         </Card>
       </div>
 
+      <Pagination page={batchPage} total={batchesData?.total || 0} onChange={setBatchPage} />
       <RevealModal
         revealItem={revealItem}
         revealedCode={revealedCode}
@@ -414,7 +382,7 @@ function RevealModal({
       {isPending ? (
         <div className="flex flex-col items-center gap-3 py-8 text-muted-foreground">
           <RefreshCw className="h-8 w-8 animate-spin text-primary" />
-          <p className="text-sm">Decrypting AES-256-GCM ciphertext...</p>
+          <p className="text-sm">Revealing your code...</p>
         </div>
       ) : revealedCode ? (
         <div className="space-y-4">
@@ -452,4 +420,15 @@ function RevealModal({
       )}
     </Modal>
   );
+}
+
+function Pagination({ page, total, onChange }: { page: number; total: number; onChange: (page: number) => void }) {
+  if (total <= 50) return null;
+  return <div className="flex items-center justify-between gap-3 text-sm">
+    <span className="text-muted-foreground">{page * 50 + 1}–{Math.min((page + 1) * 50, total)} of {total}</span>
+    <div className="flex gap-2">
+      <Button variant="outline" size="sm" disabled={page === 0} onClick={() => onChange(page - 1)}>Previous</Button>
+      <Button variant="outline" size="sm" disabled={(page + 1) * 50 >= total} onClick={() => onChange(page + 1)}>Next</Button>
+    </div>
+  </div>;
 }

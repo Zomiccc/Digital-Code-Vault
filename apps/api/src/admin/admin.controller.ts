@@ -1,3 +1,4 @@
+import { manualOrderPricing } from '../fulfillment/manual-order-pricing';
 import {
   Controller, Get, Post, Patch, Delete, Body, Param, Query, Req,
   UseGuards, NotFoundException, BadRequestException,
@@ -344,9 +345,11 @@ export class AdminController {
     @Query('denominationId') denominationId?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
+    @Query('search') search?: string,
   ) {
     return this.codesService.listBatches({
       denominationId,
+      search,
       limit: limit ? parseInt(limit) : 50,
       offset: offset ? parseInt(offset) : 0,
     });
@@ -363,11 +366,12 @@ export class AdminController {
   @Roles('SUPER_ADMIN', 'SUPPORT', 'FINANCE')
   async createManualOrder(@Body() body: {
     merchantId?: string; productId: string; amount: number; currency?: string;
-    variantId?: string; customerEmail?: string; customerName?: string;
+    variantId?: string; customerEmail?: string; customerName?: string; discountAmount?: number;
   }, @CurrentUser() user: any, @Req() req: any) {
     if (!body.productId || !body.amount) {
       throw new BadRequestException('productId and amount are required');
     }
+    manualOrderPricing(body.amount, body.discountAmount);
 
     // Admin manual orders are the platform's own responsibility — they are attached
     // to an internal platform merchant and NO merchant wallet is charged.
@@ -390,6 +394,7 @@ export class AdminController {
       merchantId: platformMerchant.id,
       productId: body.productId,
       amount: Number(body.amount),
+      discountAmount: body.discountAmount,
       currency: body.currency || 'USD',
       referenceId: `admin-${user.id.slice(0, 8)}-${Date.now()}`,
       idempotencyKey: `admin-manual-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,

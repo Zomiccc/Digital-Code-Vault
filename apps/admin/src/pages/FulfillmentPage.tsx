@@ -12,7 +12,13 @@ export function FulfillmentPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [orderResult, setOrderResult] = useState<any>(null);
   const [copied, setCopied] = useState(false);
-  const [orderForm, setOrderForm] = useState({ productId: '', variantId: '', amount: '', customerEmail: '', customerName: '' });
+  const [orderForm, setOrderForm] = useState({ productId: '', variantId: '', amount: '', discountAmount: '', customerEmail: '', customerName: '' });
+  const amount = Number(orderForm.amount);
+  const discount = Number(orderForm.discountAmount);
+  const validMoney = (value: number) => Number.isFinite(value) && Number.isSafeInteger(Math.round(value * 100)) && Math.abs(value * 100 - Math.round(value * 100)) < 1e-7;
+  const validAmount = validMoney(amount) && amount > 0;
+  const validDiscount = validMoney(discount) && discount >= 0 && discount <= amount;
+  const netAmount = (Math.round(amount * 100) - Math.round(discount * 100)) / 100;
 
   const { data: hierarchyForOrder } = useQuery({ queryKey: ['catalog-hierarchy'], queryFn: api.getCatalogHierarchy, enabled: showCreate });
   const orderProducts = (hierarchyForOrder || []).flatMap((c: any) => c.products);
@@ -24,6 +30,7 @@ export function FulfillmentPage() {
     mutationFn: () => api.createManualOrder({
       productId: orderForm.productId,
       amount: parseFloat(orderForm.amount),
+      discountAmount: orderForm.discountAmount === '' ? undefined : discount,
       variantId: orderForm.variantId || undefined,
       customerEmail: orderForm.customerEmail || undefined,
       customerName: orderForm.customerName || undefined,
@@ -31,7 +38,7 @@ export function FulfillmentPage() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['fulfillment'] });
       setOrderResult(data);
-      setOrderForm({ productId: '', variantId: '', amount: '', customerEmail: '', customerName: '' });
+      setOrderForm({ productId: '', variantId: '', amount: '', discountAmount: '', customerEmail: '', customerName: '' });
     },
   });
 
@@ -77,6 +84,9 @@ export function FulfillmentPage() {
               <div><span className="text-muted-foreground">Fulfillment ID:</span> <span className="font-mono">{orderResult.fulfillment_id}</span></div>
               <div><span className="text-muted-foreground">Status:</span> <span className="font-medium">{orderResult.status}</span></div>
               <div><span className="text-muted-foreground">Allocation:</span> {orderResult.allocation?.join(', ')}</div>
+              <div>Original value: {formatPrice(orderResult.original_amount, orderResult.currency)}</div>
+              <div>Discount: {formatPrice(orderResult.discount_amount, orderResult.currency)}</div>
+              <div className="font-semibold">Net price: {formatPrice(orderResult.net_amount, orderResult.currency)}</div>
               {orderResult.delivery_link && (
                 <div className="pt-2">
                   <div className="text-muted-foreground mb-1">Delivery Link:</div>
@@ -102,7 +112,7 @@ export function FulfillmentPage() {
           <Select
             label="Product"
             value={orderForm.productId}
-            onChange={(e) => setOrderForm({ ...orderForm, productId: e.target.value, variantId: '', amount: '' })}
+            onChange={(e) => setOrderForm({ ...orderForm, productId: e.target.value, variantId: '', amount: '', discountAmount: '' })}
             options={[
               { value: '', label: '— Select product —' },
               ...orderProducts.map((p: any) => ({ value: p.id, label: `${p.name} (${p.region})` })),
@@ -143,7 +153,17 @@ export function FulfillmentPage() {
               </div>
             </div>
           )}
-          <Input label="Amount (USD charged to wallet)" type="number" value={orderForm.amount} onChange={(e) => setOrderForm({ ...orderForm, amount: e.target.value })} placeholder="30.00" />
+          <Input label="Original code value (USD)" type="number" min="0.01" step="0.01" value={orderForm.amount} onChange={(e) => setOrderForm({ ...orderForm, amount: e.target.value })} placeholder="30.00" />
+          <Input label="Discount (USD, optional)" type="number" min="0" max={validAmount ? amount : undefined} step="0.01" value={orderForm.discountAmount} onChange={(e) => setOrderForm({ ...orderForm, discountAmount: e.target.value })} placeholder="0.00" />
+          {!validDiscount && <p role="alert" className="text-sm text-destructive">Discount must be between zero and the original value, with at most two decimal places.</p>}
+          {validAmount && validDiscount && (
+            <div className="rounded-lg bg-secondary p-3 text-sm">
+              <div>Original value: {formatPrice(amount, 'USD')}</div>
+              <div>Discount: {formatPrice(discount, 'USD')}</div>
+              <div className="font-semibold">Net price: {formatPrice(netAmount, 'USD')}</div>
+              <p className="mt-1 text-xs text-muted-foreground">The discount does not change which codes are allocated. No wallet is charged.</p>
+            </div>
+          )}
           <Input label="Customer email (sends delivery link)" type="email" value={orderForm.customerEmail} onChange={(e) => setOrderForm({ ...orderForm, customerEmail: e.target.value })} placeholder="customer@example.com" />
           <Input label="Customer name (optional)" value={orderForm.customerName} onChange={(e) => setOrderForm({ ...orderForm, customerName: e.target.value })} placeholder="John Doe" />
           {createOrderMutation.isError && (
@@ -152,7 +172,7 @@ export function FulfillmentPage() {
           {createOrderMutation.isSuccess && !showCreate ? null : null}
           <Button
             className="w-full"
-            disabled={!orderForm.productId || !orderForm.amount || parseFloat(orderForm.amount) <= 0 || createOrderMutation.isPending}
+            disabled={!orderForm.productId || !validAmount || !validDiscount || createOrderMutation.isPending}
             onClick={() => createOrderMutation.mutate()}
           >
             {createOrderMutation.isPending ? 'Creating...' : 'Create & Deliver'}
@@ -169,7 +189,7 @@ export function FulfillmentPage() {
               <Th>Merchant</Th>
               <Th>Merchant Address</Th>
               <Th>Product</Th>
-              <Th>Amount</Th>
+              <Th>Original / Net Price</Th>
               <Th>Status</Th>
               <Th>Customer Address</Th>
               <Th>Created</Th>
@@ -183,7 +203,15 @@ export function FulfillmentPage() {
                 <Td className="font-medium">{req.merchant?.name}</Td>
                 <Td><AddressWithMapsLink address={req.merchant?.address} /></Td>
                 <Td className="text-muted-foreground">{req.product?.name}</Td>
-                <Td className="font-medium">{formatCurrency(req.amount)}</Td>
+                <Td className="font-medium">
+                  {formatPrice(req.amount, req.currency)}
+                  {Number(req.discountAmount) > 0 && (
+                    <div className="text-xs text-muted-foreground">
+                      Discount: {formatPrice(req.discountAmount, req.currency)}<br />
+                      Net: {formatPrice((Math.round(Number(req.amount) * 100) - Math.round(Number(req.discountAmount) * 100)) / 100, req.currency)}
+                    </div>
+                  )}
+                </Td>
                 <Td><Badge className={statusColor(req.status)}>{req.status}</Badge></Td>
                 <Td><AddressWithMapsLink address={req.customer_address} /></Td>
                 <Td className="text-muted-foreground">{formatDate(req.createdAt)}</Td>
@@ -213,7 +241,9 @@ export function FulfillmentPage() {
             Are you sure you want to reverse fulfillment <span className="font-mono">{reverseItem?.id?.slice(0, 16)}</span>?
           </p>
           <p className="text-sm text-muted-foreground">
-            This will release allocated codes back to inventory and refund {formatCurrency(reverseItem?.amount)} to the merchant wallet.
+            {reverseItem?.walletCharged
+              ? `This will release allocated codes back to inventory and refund ${formatCurrency(reverseItem?.amount)} to the merchant wallet.`
+              : 'This will release allocated codes back to inventory and reverse any recorded platform revenue. No merchant wallet refund is due.'}
           </p>
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => setReverseItem(null)} className="flex-1">Cancel</Button>

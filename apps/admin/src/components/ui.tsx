@@ -90,7 +90,7 @@ export function Button({
 }
 
 export function Input({
-  label, type = 'text', value, onChange, placeholder, required, leftIcon, className,
+  label, type = 'text', value, onChange, placeholder, required, leftIcon, className, min, max, step,
 }: {
   label?: string;
   type?: string;
@@ -98,6 +98,9 @@ export function Input({
   onChange?: (e: any) => void;
   placeholder?: string;
   required?: boolean;
+  min?: number | string;
+  max?: number | string;
+  step?: number | string;
   leftIcon?: ReactNode;
   className?: string;
 }) {
@@ -116,6 +119,9 @@ export function Input({
           onChange={onChange}
           placeholder={placeholder}
           required={required}
+          min={min}
+          max={max}
+          step={step}
           className={cn(
             'w-full rounded-lg border border-input bg-background py-2.5 text-sm outline-none transition-all duration-200 placeholder:text-muted-foreground/50 focus:border-primary focus:ring-1 focus:ring-primary/30 min-h-[42px]',
             leftIcon ? 'pl-10' : 'px-3',

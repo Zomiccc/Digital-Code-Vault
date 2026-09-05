@@ -32,16 +32,6 @@ cd packages/shared
 npm run build
 cd ../..
 
-# Step 2: Build the API
-echo "--- Building API ---"
-cd apps/api
-chmod +x node_modules/.bin/* 2>/dev/null || true
-npx tsc -p tsconfig.build.json
-# Ensure version.json is in dist/ (tsc may not copy it)
-cp src/version.json dist/version.json 2>/dev/null || true
-echo "OK: version.json copied to dist/"
-cd ../..
-
 # Step 3: Set the Prisma provider and generate client
 echo "--- Setting Prisma provider ---"
 cd apps/api
@@ -67,6 +57,20 @@ else
   find . -path "*/.prisma/client" -type d 2>/dev/null | head -5
   find ../.. -path "*/.prisma/client" -type d 2>/dev/null | head -5
 fi
+
+cd ../..
+
+# Step 2: Build the API
+echo "--- Building API ---"
+cd apps/api
+chmod +x node_modules/.bin/* 2>/dev/null || true
+npx tsc -p tsconfig.build.json
+# Ensure version.json is in dist/ (tsc may not copy it)
+cp src/version.json dist/version.json 2>/dev/null || true
+echo "OK: version.json copied to dist/"
+cd ../..
+
+cd apps/api
 
 # Step 4b: Apply pending database migrations
 echo "--- Applying Prisma migrations ---"

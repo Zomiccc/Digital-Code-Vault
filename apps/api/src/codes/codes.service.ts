@@ -43,51 +43,46 @@ export class CodesService {
       errors: [],
     };
 
-    // Get existing hashes for this denomination to detect duplicates
-    const existingHashes = new Set<string>();
-    const existingItems = await this.prisma.codeItem.findMany({
-      where: { denominationId },
-      select: { codeHash: true },
-    });
-    for (const item of existingItems) {
-      existingHashes.add(item.codeHash);
-    }
-
+    const rows: { denominationId: string; encryptedCode: string; codeHash: string; status: string; batchId: string; supplierId?: string }[] = [];
+    const seen = new Set<string>();
     for (let i = 0; i < codes.length; i++) {
       const code = codes[i].trim();
       if (!code) {
         results.errors.push(`Row ${i + 1}: empty code`);
         continue;
       }
-
       const codeHash = this.encryptionService.hashCode(code);
-
-      // Check for duplicates within the batch and existing
-      if (existingHashes.has(codeHash)) {
+      if (seen.has(codeHash)) {
         results.duplicates++;
         continue;
       }
-      existingHashes.add(codeHash);
-
-      // Encrypt the code
-      const encryptedCode = this.encryptionService.encrypt(code);
-
-      try {
-        await this.prisma.codeItem.create({
-          data: {
-            denominationId,
-            encryptedCode,
-            codeHash,
-            status: 'AVAILABLE',
-            batchId,
-            supplierId,
-          },
-        });
-        results.inserted++;
-      } catch (err) {
-        results.errors.push(`Row ${i + 1}: ${(err as Error).message}`);
-      }
+      seen.add(codeHash);
+      rows.push({ denominationId, encryptedCode: this.encryptionService.encrypt(code), codeHash,
+        status: 'AVAILABLE', batchId, supplierId });
     }
+
+    // Serialize uploads for this denomination and commit codes with their named batch.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${denominationId}))`;
+      const existing = await tx.codeItem.findMany({
+        where: { denominationId, codeHash: { in: rows.map(row => row.codeHash) } },
+        select: { codeHash: true },
+      });
+      const existingHashes = new Set(existing.map(item => item.codeHash));
+      const newRows = rows.filter(row => !existingHashes.has(row.codeHash));
+      results.duplicates += rows.length - newRows.length;
+      await tx.codeBatch.create({ data: {
+        id: batchId, denominationId, batchName: costInfo?.batchName?.trim() || null,
+        quantity: 0, supplierId: supplierId || null,
+        costPerCode: costInfo?.costPerCode ?? null, currency: costInfo?.currency || 'USD',
+        note: costInfo?.note || null, createdBy: adminId,
+      } });
+      if (newRows.length) {
+        const inserted = await tx.codeItem.createMany({ data: newRows });
+        results.inserted = inserted.count;
+      }
+      await tx.codeBatch.update({ where: { id: batchId }, data: { quantity: results.inserted } });
+    });
 
     await this.auditService.log({
       actorType: 'ADMIN',
@@ -107,21 +102,6 @@ export class CodesService {
       },
       ip,
     });
-
-    // Record batch cost/supplier info for bookkeeping (even if 0 inserted, keep record)
-    await this.prisma.codeBatch.create({
-      data: {
-        id: batchId,
-        denominationId,
-        batchName: costInfo?.batchName || null,
-        quantity: codes.length,
-        supplierId: supplierId || null,
-        costPerCode: costInfo?.costPerCode ?? null,
-        currency: costInfo?.currency || 'USD',
-        note: costInfo?.note || null,
-        createdBy: adminId,
-      },
-    }).catch(() => {});
 
     this.logger.log(
       `Bulk upload: ${results.inserted} inserted, ${results.duplicates} duplicates, ${results.errors.length} errors (batch ${batchId})`,
@@ -167,8 +147,8 @@ export class CodesService {
           },
         },
         orderBy: { createdAt: 'desc' },
-        take: options.limit || 50,
-        skip: options.offset || 0,
+        take: Number.isFinite(options.limit) ? Math.max(1, Math.min(100, options.limit!)) : 50,
+        skip: Number.isFinite(options.offset) ? Math.max(0, options.offset!) : 0,
       }),
       this.prisma.codeItem.count({ where }),
     ]);
@@ -286,11 +266,19 @@ export class CodesService {
    */
   async listBatches(options: {
     denominationId?: string;
+    search?: string;
     limit?: number;
     offset?: number;
   }) {
-    const where: Record<string, unknown> = {};
+    const where: any = {};
     if (options.denominationId) where.denominationId = options.denominationId;
+    const search = options.search?.trim();
+    if (search) where.OR = [
+      { batchName: { contains: search, mode: 'insensitive' } },
+      { id: { contains: search, mode: 'insensitive' } },
+      { denomination: { product: { name: { contains: search, mode: 'insensitive' } } } },
+      { denomination: { product: { region: { contains: search, mode: 'insensitive' } } } },
+    ];
 
     const [batches, total] = await Promise.all([
       this.prisma.codeBatch.findMany({
@@ -302,8 +290,8 @@ export class CodesService {
           supplier: true,
         },
         orderBy: { createdAt: 'desc' },
-        take: options.limit || 50,
-        skip: options.offset || 0,
+        take: Number.isFinite(options.limit) ? Math.max(1, Math.min(100, options.limit!)) : 50,
+        skip: Number.isFinite(options.offset) ? Math.max(0, options.offset!) : 0,
       }),
       this.prisma.codeBatch.count({ where }),
     ]);
@@ -334,7 +322,7 @@ export class CodesService {
           product: b.denomination.product.name,
           region: b.denomination.product.region,
         },
-        quantity: b.quantity,
+        quantity: Object.values(countMap[b.id] || {}).reduce((sum, count) => sum + count, 0),
         supplier: b.supplier?.name || null,
         cost_per_code: b.costPerCode,
         currency: b.currency,
@@ -530,8 +518,8 @@ export class CodesService {
           },
         },
         orderBy: { createdAt: 'desc' },
-        take: options.limit || 50,
-        skip: options.offset || 0,
+        take: Number.isFinite(options.limit) ? Math.max(1, Math.min(100, options.limit!)) : 50,
+        skip: Number.isFinite(options.offset) ? Math.max(0, options.offset!) : 0,
       }),
       this.prisma.codeItem.count({ where }),
     ]);

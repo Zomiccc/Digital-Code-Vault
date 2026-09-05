@@ -1,3 +1,4 @@
+import { deliveryEmail } from './delivery-email';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 const PDFKit = require('pdfkit');
@@ -458,23 +459,7 @@ export class EmailService {
     revealLink: string,
     fulfillmentId: string,
   ): Promise<boolean> {
-    const content = `
-      <p style="color:#0f172a;font-size:15px;margin:0 0 16px;">Hello ${customerName},</p>
-      <p style="color:#475569;font-size:15px;margin:0 0 16px;">Thank you for your purchase.</p>
-      <p style="color:#475569;font-size:15px;margin:0 0 24px;">Your digital code has been securely stored. To reveal your code, click the button below.</p>
-      <div style="text-align:center;margin:32px 0;">
-        <a href="${revealLink}" style="display:inline-block;background:#6366f1;color:#fff;font-weight:600;font-size:16px;padding:14px 36px;border-radius:12px;text-decoration:none;box-shadow:0 4px 12px rgba(99,102,241,0.3);">Reveal My Code</a>
-      </div>
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;margin:24px 0;">
-        <p style="margin:0;font-size:13px;color:#64748b;">
-          Fulfillment ID: <span style="font-family:monospace;color:#0f172a;font-weight:600;">${fulfillmentId}</span><br/>
-          If the button doesn't work, copy and paste this link:<br/>
-          <span style="font-family:monospace;font-size:12px;color:#6366f1;word-break:break-all;">${revealLink}</span>
-        </p>
-      </div>
-    `;
-
-    const html = this.emailShell('Your Digital Code is Ready', content);
+    const html = deliveryEmail({ customerName, productName, reference: fulfillmentId, link: revealLink });
 
     const text = `Your Digital Code is Ready\n\nHello ${customerName},\n\nThank you for your purchase.\nYour digital code has been securely stored.\n\nTo reveal your code, click: ${revealLink}\n\nFulfillment ID: ${fulfillmentId}`;
 
@@ -688,34 +673,7 @@ export class EmailService {
     fulfillmentId: string,
     expiryMinutes?: number,
   ): Promise<boolean> {
-    const expiryWarning = expiryMinutes
-      ? `<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:12px;padding:14px 16px;margin:24px 0;">
-            <p style="color:#92400e;font-size:14px;margin:0;">
-              <strong>This link expires in ${expiryMinutes} minutes.</strong> Click it soon to reveal your codes.
-            </p>
-          </div>`
-      : '';
-
-    const content = `
-      <p style="color:#0f172a;font-size:15px;margin:0 0 16px;">Hi ${merchantName},</p>
-      <p style="color:#475569;font-size:15px;margin:0 0 24px;">
-        Your order for <strong style="color:#0f172a;">${productName}</strong> has been fulfilled and your product codes are ready.
-      </p>
-      <p style="color:#475569;font-size:15px;margin:0 0 24px;">Click the button below to reveal your codes:</p>
-      <div style="text-align:center;margin:32px 0;">
-        <a href="${deliveryLink}" style="display:inline-block;background:#6366f1;color:#fff;font-weight:600;font-size:16px;padding:14px 36px;border-radius:12px;text-decoration:none;box-shadow:0 4px 12px rgba(99,102,241,0.3);">Reveal My Codes</a>
-      </div>
-      ${expiryWarning}
-      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;">
-        <p style="margin:0;font-size:13px;color:#64748b;">
-          Fulfillment ID: <span style="font-family:monospace;color:#0f172a;font-weight:600;">${fulfillmentId}</span><br/>
-          If the button doesn't work, copy and paste this link:<br/>
-          <span style="font-family:monospace;font-size:12px;color:#6366f1;word-break:break-all;">${deliveryLink}</span>
-        </p>
-      </div>
-    `;
-
-    const html = this.emailShell('Your Codes Are Ready', content);
+    const html = deliveryEmail({ customerName: merchantName, productName, reference: fulfillmentId, link: deliveryLink, expiryMinutes });
 
     const text = `Your ${productName} codes are ready — Code Vault\n\nHi ${merchantName},\n\nYour order for ${productName} has been fulfilled and your product codes are ready.\n\nFulfillment ID: ${fulfillmentId}\nDelivery Link: ${deliveryLink}`;
 
@@ -760,60 +718,11 @@ export class EmailService {
     amount: string,
     deliveryLink: string,
   ): Promise<boolean> {
-    const html = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Your Digital Code is Ready</title>
-</head>
-<body style="margin:0;padding:0;background:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#e2e8f0;">
-  <div style="max-width:600px;margin:0 auto;padding:20px;">
-    <div style="background:#1e293b;border:1px solid #334155;border-radius:16px;overflow:hidden;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
-      <div style="background:#0f172a;padding:24px;text-align:center;border-bottom:1px solid #334155;">
-        <div style="display:inline-flex;align-items:center;justify-content:center;width:56px;height:56px;background:#6366f1;border-radius:12px;font-size:28px;margin-bottom:16px;">🔐</div>
-        <h1 style="margin:0;font-size:22px;color:#fff;">Your Digital Code is Ready</h1>
-      </div>
-      <div style="padding:32px 24px;">
-        <p style="color:#e2e8f0;font-size:15px;margin:0 0 16px;">Hello ${customerName},</p>
-        <p style="color:#94a3b8;font-size:15px;margin:0 0 24px;">Your order has been processed successfully.</p>
-        <div style="background:#0f172a;border:1px solid #334155;border-radius:12px;padding:20px;margin:0 0 24px;">
-          <table style="width:100%;border-collapse:collapse;">
-            <tr>
-              <td style="padding:8px 0;font-size:14px;color:#64748b;width:120px;">Order ID</td>
-              <td style="padding:8px 0;font-size:14px;color:#e2e8f0;font-family:monospace;">${orderId}</td>
-            </tr>
-            <tr>
-              <td style="padding:8px 0;font-size:14px;color:#64748b;">Product</td>
-              <td style="padding:8px 0;font-size:14px;color:#e2e8f0;font-weight:600;">${productName}</td>
-            </tr>
-            <tr>
-              <td style="padding:8px 0;font-size:14px;color:#64748b;">Amount</td>
-              <td style="padding:8px 0;font-size:14px;color:#e2e8f0;font-weight:600;">${amount}</td>
-            </tr>
-          </table>
-        </div>
-        <p style="color:#94a3b8;font-size:14px;margin:0 0 16px;">Click below to access your secure delivery page:</p>
-        <div style="text-align:center;margin:24px 0;">
-          <a href="${deliveryLink}" style="display:inline-block;background:#6366f1;color:#fff;font-weight:600;font-size:16px;padding:14px 32px;border-radius:12px;text-decoration:none;">Access My Delivery Page</a>
-        </div>
-        <div style="background:#1e3a8a;border:1px solid #3b82f6;border-radius:8px;padding:12px 16px;margin:24px 0;">
-          <p style="color:#93c5fd;font-size:13px;margin:0;">🔗 This delivery link is permanent and can be used again if needed.</p>
-        </div>
-        <p style="color:#64748b;font-size:13px;margin:24px 0 0;">If the button doesn't work, copy and paste this link into your browser:</p>
-        <p style="color:#6366f1;font-size:12px;font-family:monospace;word-break:break-all;margin:8px 0 0;">${deliveryLink}</p>
-      </div>
-      <div style="background:#0f172a;padding:16px 24px;text-align:center;border-top:1px solid #334155;">
-        <p style="color:#64748b;font-size:12px;margin:0;">Thank you for your purchase.<br/>CodeHub — Delivered securely</p>
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
+    const html = deliveryEmail({ customerName, productName, reference: orderId, amount, link: deliveryLink });
 
     const text = `Your Digital Code is Ready\n\nHello ${customerName},\n\nYour order has been processed successfully.\n\nOrder ID: ${orderId}\nProduct: ${productName}\nAmount: ${amount}\n\nClick below to access your secure delivery page:\n${deliveryLink}\n\nThis delivery link is permanent and can be used again if needed.\n\nThank you for your purchase.\nCodeHub — Delivered securely`;
 
     return this.sendEmail(to, 'Your Digital Code is Ready', html, { text, template: 'delivery_ready' });
   }
 }
+

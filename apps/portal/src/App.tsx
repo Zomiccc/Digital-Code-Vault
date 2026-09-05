@@ -1,254 +1,309 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from "react";
 import {
-  Gift, Lock, Eye, Copy, Check, AlertCircle, Loader2, Shield, Clock,
-} from 'lucide-react';
-import { clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+  ArrowRight,
+  Check,
+  Copy,
+  Eye,
+  Gift,
+  LockKeyhole,
+  ShieldCheck,
+  Loader2,
+  AlertCircle,
+} from "lucide-react";
 
-function cn(...inputs: any[]) {
-  return twMerge(clsx(inputs));
-}
-
-function formatCurrency(value: number | string): string {
-  const num = typeof value === 'string' ? parseFloat(value) : value;
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(num);
-}
-
-function formatDate(date: string | null): string {
-  if (!date) return '—';
-  return new Date(date).toLocaleString('en-US', {
-    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
-}
-
-// ─── API ───
-const API_BASE = import.meta.env.DEV ? 'http://localhost:3000/api/v1' : '/api/v1';
-
-async function fetchDeliveryInfo(token: string) {
-  const res = await fetch(`${API_BASE}/d/${token}`);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: 'Invalid or expired delivery link' }));
-    throw new Error(err.message || 'Invalid or expired delivery link');
-  }
-  return res.json();
-}
-
-async function revealCodes(token: string) {
-  const res = await fetch(`${API_BASE}/d/${token}/reveal`, { method: 'POST' });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: 'Failed to reveal codes' }));
-    throw new Error(err.message || 'Failed to reveal codes');
-  }
-  return res.json();
-}
-
-// ─── App ───
-export default function App() {
-  const path = window.location.pathname;
-  const token = path.startsWith('/d/') ? path.slice(3) : '';
-
-  if (!token) {
-    return <InvalidLink />;
-  }
-
-  return <DeliveryPage token={token} />;
-}
-
-function InvalidLink() {
-  return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <div className="max-w-md text-center space-y-4">
-        <AlertCircle className="h-16 w-16 text-destructive mx-auto" />
-        <h1 className="text-2xl font-bold">Invalid Link</h1>
-        <p className="text-muted-foreground">
-          This delivery link is not valid. Please check your link and try again.
-        </p>
-      </div>
-    </div>
+type Delivery = {
+  product_name: string;
+  reference_id: string | null;
+  fulfillment_id: string;
+  is_revealed: boolean;
+};
+type Code = { denomination: string; code: string };
+const API_BASE = import.meta.env.DEV
+  ? "http://localhost:3000/api/v1"
+  : "/api/v1";
+async function request(token: string, reveal = false) {
+  const res = await fetch(
+    `${API_BASE}/d/${encodeURIComponent(token)}${reveal ? "/reveal" : ""}`,
+    {
+      method: reveal ? "POST" : "GET",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+    },
   );
+  if (!res.ok)
+    throw new Error(
+      res.status === 404 && !reveal
+        ? "This delivery link is unavailable. Open the original link in your delivery email, or contact your seller."
+        : "We couldn’t load your delivery. Please try again or contact your seller with your order reference.",
+    );
+  return res.json();
 }
-
-function DeliveryPage({ token }: { token: string }) {
-  const [info, setInfo] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [revealed, setRevealed] = useState<any>(null);
-  const [revealing, setRevealing] = useState(false);
-  const [revealError, setRevealError] = useState('');
+export default function App() {
+  const token = window.location.pathname.startsWith("/d/")
+    ? window.location.pathname.slice(3).replace(/\/$/, "")
+    : "";
+  const [info, setInfo] = useState<Delivery | null>(null);
+  const [codes, setCodes] = useState<Code[] | null>(null);
+  const [loading, setLoading] = useState(!!token);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [copied, setCopied] = useState<number | null>(null);
-
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    fetchDeliveryInfo(token)
-      .then((data) => { setInfo(data); setLoading(false); })
-      .catch((err) => { setError(err.message); setLoading(false); });
-  }, [token]);
-
-  const handleReveal = async () => {
-    setRevealing(true);
-    setRevealError('');
+    if (!token) return;
+    let active = true;
+    setLoading(true);
+    setError("");
+    request(token)
+      .then((data) => {
+        if (active) setInfo(data);
+      })
+      .catch((err) => {
+        if (active) setError(err.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [token, attempt]);
+  async function reveal() {
+    setBusy(true);
+    setError("");
     try {
-      const data = await revealCodes(token);
-      setRevealed(data);
-    } catch (err: any) {
-      setRevealError(err.message);
+      const data = await request(token, true);
+      if (!data.codes?.length)
+        throw new Error(
+          "Your codes couldn’t be retrieved. Please try again or contact your seller.",
+        );
+      setCodes(data.codes);
+    } catch (err) {
+      setError((err as Error).message);
     } finally {
-      setRevealing(false);
+      setBusy(false);
     }
-  };
-
-  const handleCopy = (code: string, index: number) => {
-    navigator.clipboard.writeText(code);
-    setCopied(index);
-    setTimeout(() => setCopied(null), 2000);
-  };
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="flex items-center gap-3 text-muted-foreground">
-          <Loader2 className="h-6 w-6 animate-spin" />
-          <span>Loading your delivery...</span>
-        </div>
-      </div>
-    );
   }
-
-  if (error) {
-    return (
-      <div className="flex min-h-screen items-center justify-center p-4">
-        <div className="max-w-md text-center space-y-4">
-          <AlertCircle className="h-16 w-16 text-destructive mx-auto" />
-          <h1 className="text-2xl font-bold">Link Expired or Invalid</h1>
-          <p className="text-muted-foreground">{error}</p>
-          <p className="text-sm text-muted-foreground">
-            If you believe this is an error, please contact the merchant who sent you this link.
-          </p>
-        </div>
-      </div>
-    );
+  async function copy(code: string, index: number) {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(index);
+      setNotice(`Code ${index + 1} copied to clipboard.`);
+    } catch {
+      setCopied(null);
+      setNotice("Copy isn’t available. Select the code and copy it manually.");
+    }
   }
-
-  const isRevealed = info?.revealed || revealed;
-  const codes = revealed?.codes || [];
-
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <div className="w-full max-w-lg space-y-6">
-        {/* Header */}
-        <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10">
-            <Gift className="h-8 w-8 text-primary" />
-          </div>
-          <h1 className="text-2xl font-bold">Your Digital Code Delivery</h1>
-          <p className="text-muted-foreground">{info?.merchant_name}</p>
-        </div>
-
-        {/* Order Info Card */}
-        <div className="rounded-2xl border border-border bg-card p-6 shadow-lg space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">Product</p>
-              <p className="font-bold text-lg">{info?.product_name}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-sm text-muted-foreground">Total Value</p>
-              <p className="font-bold text-lg text-primary">{formatCurrency(info?.amount || 0)}</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="text-muted-foreground">Reference</p>
-              <p className="font-mono text-xs">{info?.reference_id || '—'}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Codes</p>
-              <p>{info?.code_count || 0} item(s)</p>
-            </div>
-          </div>
-
-          {info?.expires_at && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Clock className="h-4 w-4" />
-              <span>Expires: {formatDate(info.expires_at)}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Reveal Section */}
-        {!isRevealed ? (
-          <div className="rounded-2xl border border-border bg-card p-6 shadow-lg space-y-4">
-            <div className="flex items-center gap-3">
-              <Lock className="h-5 w-5 text-primary" />
-              <h2 className="font-bold">Your codes are ready</h2>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Click the button below to reveal your digital codes. This action can only be performed once
-              and will be logged for security purposes.
+    <div className="delivery-shell">
+      <header className="brand-bar">
+        <a className="brand" href="#main">
+          <span className="brand-icon">
+            <LockKeyhole size={19} />
+          </span>
+          CodeHub
+          <span className="brand-divider" />
+          Delivery
+        </a>
+        <span className="private-label">
+          <ShieldCheck size={16} /> Private delivery
+        </span>
+      </header>
+      <main id="main">
+        <div className="eyebrow">YOUR DIGITAL DELIVERY</div>
+        <h1>
+          {loading
+            ? "Getting your order ready."
+            : !token || (!info && error)
+              ? "Let’s find your delivery."
+              : codes
+                ? "All yours. Ready to use."
+                : "Something good is ready."}
+        </h1>
+        <p className="intro">
+          {codes
+            ? "Copy your codes below and redeem them with the product provider."
+            : "Your purchase, in one place. Reveal your codes when you’re ready."}
+        </p>
+        {loading ? (
+          <section className="panel state-panel" role="status">
+            <Loader2 className="spinner" />
+            <h2>Loading your delivery</h2>
+            <p>This should only take a moment.</p>
+          </section>
+        ) : !token || !info ? (
+          <section className="panel state-panel">
+            <AlertCircle size={32} />
+            <h2>Delivery link unavailable</h2>
+            <p>
+              {error ||
+                "Open the secure link in your delivery email to access your order."}
             </p>
-            {revealError && (
-              <div className="rounded-lg bg-destructive/10 px-4 py-3 text-sm text-destructive flex items-center gap-2">
-                <AlertCircle className="h-4 w-4" />
-                {revealError}
-              </div>
+            {token && (
+              <button
+                className="primary"
+                onClick={() => setAttempt(attempt + 1)}
+              >
+                Try again <ArrowRight size={18} />
+              </button>
             )}
-            <button
-              onClick={handleReveal}
-              disabled={revealing}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-base font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-            >
-              {revealing ? (
-                <><Loader2 className="h-5 w-5 animate-spin" /> Revealing...</>
-              ) : (
-                <><Eye className="h-5 w-5" /> Reveal My Codes</>
-              )}
-            </button>
-          </div>
+          </section>
         ) : (
-          <div className="rounded-2xl border border-border bg-card p-6 shadow-lg space-y-4">
-            <div className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-emerald-500" />
-              <h2 className="font-bold">Your Digital Codes</h2>
-            </div>
-            <p className="text-sm text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
-              ⚠️ Save these codes now — this page will not be accessible again after you leave.
-            </p>
-            <div className="space-y-3">
-              {codes.map((item: any, i: number) => (
-                <div key={i} className="rounded-xl border border-border bg-background p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div>
-                      <p className="text-xs text-muted-foreground">
-                        {item.product} — {formatCurrency(item.face_value)}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleCopy(item.code, i)}
-                      className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
-                    >
-                      {copied === i ? (
-                        <><Check className="h-3 w-3" /> Copied</>
-                      ) : (
-                        <><Copy className="h-3 w-3" /> Copy</>
-                      )}
-                    </button>
-                  </div>
-                  <p className="font-mono text-lg font-bold break-all text-primary">{item.code}</p>
+          <div className="delivery-grid">
+            <section
+              className="panel order-panel"
+              aria-labelledby="order-heading"
+            >
+              <span className="status">
+                <span /> Order ready
+              </span>
+              <div className="product-icon">
+                <Gift size={34} strokeWidth={1.5} />
+              </div>
+              <p className="eyebrow">YOUR PURCHASE</p>
+              <h2 id="order-heading">{info.product_name}</h2>
+              <dl>
+                <div>
+                  <dt>Order reference</dt>
+                  <dd>{info.reference_id || info.fulfillment_id}</dd>
                 </div>
-              ))}
-            </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground pt-2 border-t border-border">
-              <Shield className="h-3 w-3" />
-              <span>Revealed on {formatDate(revealed?.revealed_at || new Date().toISOString())}</span>
-            </div>
+                <div>
+                  <dt>Delivery method</dt>
+                  <dd>Digital code</dd>
+                </div>
+                <div>
+                  <dt>Link availability</dt>
+                  <dd>Permanent access</dd>
+                </div>
+              </dl>
+              <div className="order-note">
+                <ShieldCheck size={19} />
+                <p>
+                  Keep this link private. Anyone with it can view your codes.
+                </p>
+              </div>
+            </section>
+            <section
+              className="panel reveal-panel"
+              aria-labelledby="codes-heading"
+            >
+              <div className="section-heading">
+                <span className="step">
+                  {codes ? <Check size={20} /> : <Eye size={20} />}
+                </span>
+                <span className="eyebrow">
+                  {codes ? "DELIVERY OPENED" : "READY WHEN YOU ARE"}
+                </span>
+              </div>
+              <h2 id="codes-heading">
+                {codes
+                  ? `Your digital code${codes.length === 1 ? "" : "s"}`
+                  : "Unlock your next experience."}
+              </h2>
+              <p>
+                {codes
+                  ? "Use each code with the matching product and region."
+                  : "Your codes stay hidden until you choose to reveal them. You can return to this link to view them again."}
+              </p>
+              {!codes && (
+                <>
+                  <div className="locked-preview" aria-hidden="true">
+                    <LockKeyhole size={22} />
+                    <span>•••• — •••• — ••••</span>
+                    <small>Waiting to be revealed</small>
+                  </div>
+                  <button className="primary" disabled={busy} onClick={reveal}>
+                    {busy ? (
+                      <>
+                        <Loader2 className="spinner" size={18} /> Revealing your
+                        codes…
+                      </>
+                    ) : (
+                      <>
+                        {info.is_revealed
+                          ? "View my codes again"
+                          : "Reveal my codes"}
+                        <ArrowRight size={18} />
+                      </>
+                    )}
+                  </button>
+                  <p className="micro">Code access is recorded for security.</p>
+                </>
+              )}
+              {error && (
+                <p className="error" role="alert">
+                  {error}
+                </p>
+              )}
+              {codes && (
+                <div className="code-list">
+                  {codes.map((item, index) => (
+                    <article className="code-item" key={index}>
+                      <div className="code-top">
+                        <span>
+                          Code {String(index + 1).padStart(2, "0")}{" "}
+                          <strong>{item.denomination}</strong>
+                        </span>
+                        <button
+                          className="copy"
+                          onClick={() => copy(item.code, index)}
+                          aria-label={`Copy code ${index + 1}`}
+                        >
+                          {copied === index ? (
+                            <Check size={16} />
+                          ) : (
+                            <Copy size={16} />
+                          )}
+                          {copied === index ? "Copied" : "Copy"}
+                        </button>
+                      </div>
+                      <code tabIndex={0}>{item.code}</code>
+                    </article>
+                  ))}
+                </div>
+              )}
+              <p className="copy-notice" role="status" aria-live="polite">
+                {notice}
+              </p>
+              <div className="next-step">
+                <span>01</span>
+                <div>
+                  <h3>
+                    {codes ? "Redeem with your provider" : "Reveal your codes"}
+                  </h3>
+                  <p>
+                    {codes
+                      ? "Open the provider’s app or website and follow their redemption instructions."
+                      : "Use the button above to securely view your purchase."}
+                  </p>
+                </div>
+              </div>
+              <div className="next-step">
+                <span>02</span>
+                <div>
+                  <h3>Keep your delivery email</h3>
+                  <p>
+                    Your link never expires. Return whenever you need your
+                    codes.
+                  </p>
+                </div>
+              </div>
+            </section>
           </div>
         )}
-
-        {/* Footer */}
-        <div className="text-center text-xs text-muted-foreground">
-          <p>Secured by Digital Code Vault</p>
-        </div>
-      </div>
+        <aside className="help">
+          <strong>Need a hand?</strong> Contact the seller who sent your
+          delivery email and include your order reference.
+        </aside>
+      </main>
+      <footer>
+        <span className="brand">CodeHub</span>
+        <span>Digital goods. Thoughtfully delivered.</span>
+        <span>
+          <LockKeyhole size={13} /> Keep your codes private
+        </span>
+      </footer>
     </div>
   );
 }

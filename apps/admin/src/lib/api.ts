@@ -168,7 +168,7 @@ export const api = {
     return apiFetch(`/admin/codes/batches${qs}`);
   },
   getDenominationStock: () => apiFetch('/admin/codes/denomination-stock'),
-  createManualOrder: (data: { productId: string; amount: number; currency?: string; variantId?: string; customerEmail?: string; customerName?: string }) =>
+  createManualOrder: (data: { productId: string; amount: number; discountAmount?: number; currency?: string; variantId?: string; customerEmail?: string; customerName?: string }) =>
     apiFetch('/admin/orders/create', { method: 'POST', body: JSON.stringify(data) }),
   getEmergencyStop: () => apiFetch('/admin/system/emergency'),
   setEmergencyStop: (enabled: boolean) =>
