@@ -1,6 +1,6 @@
 import { manualOrderPricing } from '../fulfillment/manual-order-pricing';
 import {
-  Controller, Get, Post, Patch, Put, Delete, Body, Param, Query, Req,
+  Controller, Get, Post, Patch, Put, Delete, Body, Param, Query, Req, Inject, forwardRef,
   UseGuards, NotFoundException, BadRequestException,
 } from '@nestjs/common';
 import { AdminService } from './admin.service';
@@ -13,6 +13,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CurrencyService } from '../currency/currency.service';
 import { SkuService } from '../products/sku.service';
 import { EmergencyService } from './emergency.service';
+import { WebhookService } from '../webhooks/webhook.service';
 import { resolveProductSkuBase, uniqueSku, denominationSku } from '../products/sku';
 import { WalletService } from '../wallet/wallet.service';
 import { DeliveryService } from '../delivery/delivery.service';
@@ -48,6 +49,7 @@ export class AdminController {
     private currencyService: CurrencyService,
     private skuService: SkuService,
     private emergencyService: EmergencyService,
+    @Inject(forwardRef(() => WebhookService)) private webhookService: WebhookService,
   ) {}
 
   @Get('stats')
@@ -478,6 +480,12 @@ export class AdminController {
   ) {
     const status = await this.emergencyService.setGlobalStop(body.enabled, body.message, user.id, req.ip);
     return { active: status.global_stop, ...status };
+  }
+
+  @Post('webhooks/recover-pending')
+  @Roles('SUPER_ADMIN', 'SUPPORT', 'INVENTORY_MANAGER')
+  async recoverPendingWebhooks() {
+    return this.webhookService.recoverPendingWebhooks('manual');
   }
 
   @Get('emergency/targets')

@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy, BadRequestException, forwardRef, Inject } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy, BadRequestException, forwardRef, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { EncryptionService } from '../encryption/encryption.service';
@@ -14,13 +14,16 @@ interface WebhookJobData {
 }
 
 @Injectable()
-export class WebhookService implements OnModuleDestroy {
+export class WebhookService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(WebhookService.name);
   private queue: any = null;
   private worker: any = null;
   private readonly maxRetries: number;
   private readonly redisUrl: string;
   private processingQueue: Promise<void> = Promise.resolve();
+  /** Sweeps up webhooks left PENDING by a restart. */
+  private recoveryInterval?: ReturnType<typeof setInterval>;
+  private recovering = false;
   private readonly isProduction: boolean;
 
   constructor(
@@ -617,6 +620,68 @@ export class WebhookService implements OnModuleDestroy {
       });
 
     return { success: true, message: 'Webhook received and queued for processing', webhookId: webhook.id, eventId };
+  }
+
+  onModuleInit() {
+    // A webhook is stored, then processed on an in-process promise chain. If the
+    // process goes away between the two — every deploy restarts it — that chain
+    // dies and the row is left PENDING forever, because nothing ever looked for
+    // PENDING rows again. The order is paid for and simply never delivered.
+    //
+    // So on boot, and periodically after, anything still PENDING is picked up
+    // and processed. Re-processing is safe: fulfillment is keyed by
+    // `webhook-<eventId>-qty-<n>`, so an order that did complete is recognised
+    // as a duplicate rather than delivered twice.
+    void this.recoverPendingWebhooks('startup');
+    this.recoveryInterval = setInterval(
+      () => void this.recoverPendingWebhooks('sweep'),
+      this.recoverySweepMs,
+    );
+    this.recoveryInterval.unref?.();
+  }
+
+  private readonly recoverySweepMs = 120000;
+  /** Old enough that the original attempt is not simply still running. */
+  private readonly recoveryMinAgeMs = 60000;
+
+  async recoverPendingWebhooks(reason: 'startup' | 'sweep' | 'manual' = 'manual') {
+    if (this.recovering) return { recovered: 0, skipped: 'already running' };
+    this.recovering = true;
+    try {
+      const stuck = await this.prisma.incomingWebhook.findMany({
+        where: {
+          processingStatus: 'PENDING',
+          createdAt: { lt: new Date(Date.now() - this.recoveryMinAgeMs) },
+        },
+        orderBy: { createdAt: 'asc' },
+        take: 50,
+      });
+      if (!stuck.length) return { recovered: 0 };
+
+      this.logger.warn(
+        `[WEBHOOK] ${reason}: found ${stuck.length} webhook(s) left PENDING — reprocessing`,
+      );
+      for (const webhook of stuck) {
+        try {
+          // rawPayload is the only surviving copy of what arrived, so normalise
+          // it again rather than relying on anything held in memory.
+          const payload = JSON.parse(webhook.rawPayload || '{}');
+          const headers = JSON.parse(webhook.rawHeaders || '{}');
+          const normalized = ProviderDetector.normalize(headers, payload);
+          await this.processWebhookAsync(webhook.id, normalized);
+        } catch (err) {
+          this.logger.error(
+            `[WEBHOOK] Could not recover webhook ${webhook.id}: ${(err as Error).message}`,
+          );
+        }
+      }
+      return { recovered: stuck.length };
+    } catch (err) {
+      this.logger.error(`[WEBHOOK] Pending-webhook sweep failed: ${(err as Error).message}`);
+      return { recovered: 0, error: (err as Error).message };
+    } finally {
+      this.recovering = false;
+    }
   }
 
   private parseWebhookPayload(payload: any) {
@@ -1840,6 +1905,7 @@ export class WebhookService implements OnModuleDestroy {
   }
 
   async onModuleDestroy() {
+    if (this.recoveryInterval) clearInterval(this.recoveryInterval);
     if (this.processingInterval) clearInterval(this.processingInterval);
     if (this.worker) await this.worker.close();
     if (this.queue) await this.queue.close();

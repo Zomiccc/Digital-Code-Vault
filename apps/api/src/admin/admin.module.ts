@@ -1,6 +1,7 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { EmergencyModule } from './emergency.module';
+import { WebhooksModule } from '../webhooks/webhooks.module';
 import { AdminController } from './admin.controller';
 import { MerchantsModule } from '../merchants/merchants.module';
 import { ProductsModule } from '../products/products.module';
@@ -13,7 +14,7 @@ import { DeliveryModule } from '../delivery/delivery.module';
 import { CurrencyModule } from '../currency/currency.module';
 
 @Module({
-  imports: [MerchantsModule, ProductsModule, CodesModule, FulfillmentModule, AuthModule, PassportModule, EssentialsModule, DeliveryModule, CurrencyModule, EmergencyModule],
+  imports: [MerchantsModule, ProductsModule, CodesModule, FulfillmentModule, AuthModule, PassportModule, EssentialsModule, DeliveryModule, CurrencyModule, EmergencyModule, forwardRef(() => WebhooksModule)],
   providers: [AdminService],
   controllers: [AdminController],
 })
