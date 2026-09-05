@@ -7,6 +7,8 @@ import { FulfillmentService } from './fulfillment.service';
 
 function fixture(options: { walletCurrency: string; balance: number; rate?: number }) {
   let saved: any;
+  let preset: any = null;
+  let stock: any[] = [{ denominationId: 'denom100', faceValue: 100, availableCount: 4 }];
   let cached: any;
   const walletRows: any[] = [];
   const revenueRecords: any[] = [];
@@ -45,6 +47,11 @@ function fixture(options: { walletCurrency: string; balance: number; rate?: numb
       platformBalance += Number(data.balance.increment ?? 0) - Number(data.balance.decrement ?? 0);
       return { balance: platformBalance };
     } },
+    fulfillmentCombination: {
+      findMany: async () => preset
+        ? [{ id: 'combo', name: 'Pack', items: preset }]
+        : [],
+    },
     adminWalletTransaction: {
       create: async ({ data }: any) => { revenueRecords.push(data); return data; },
       findFirst: async () => revenueRecords.find((r) => r.type === 'CREDIT'),
@@ -52,10 +59,12 @@ function fixture(options: { walletCurrency: string; balance: number; rate?: numb
     $transaction: async (callback: any) => callback(prisma),
   };
   const engine: any = {
-    getAvailableStock: async () => [{ denominationId: 'denom100', faceValue: 100, availableCount: 4 }],
+    getAvailableStock: async () => stock,
     findBestCombination: (_stock: any, amount: number) => amount === 100
       ? [{ denominationId: 'denom100', faceValue: 100, count: 1 }] : null,
-    reserveCodes: async () => [{ codeItemIds: ['code1'] }],
+    reserveCodes: async (_tx: any, _id: any, combination: any) => combination.map(() => ({
+      codeItemIds: ['code1'],
+    })),
     confirmAllocation: async () => {},
     reverseAllocation: async () => {},
   };
@@ -76,6 +85,8 @@ function fixture(options: { walletCurrency: string; balance: number; rate?: numb
   );
   return {
     service, walletRows, revenueRecords, merchantUpdates, merchant,
+    setPreset: (items: any) => { preset = items; },
+    engineStock: (next: any[]) => { stock = next; },
     get platformBalance() { return platformBalance; },
     get saved() { return saved; },
     get rateLookups() { return rateLookups; },
@@ -156,4 +167,43 @@ test('the rate is read once per order so a mid-order change cannot split the cha
   const f = fixture({ walletCurrency: 'PKR', balance: 67000, rate: 300 });
   await f.service.createFulfillment({ ...order });
   assert.equal(f.rateLookups, 1);
+});
+
+// ─── A pack preset decides what is delivered, and what is charged ───
+
+test('a preset delivers its codes even though they do not add up to the shelf price', async () => {
+  // "PS Essential: 1 Month" sells for 9.99 but is delivered as $10 + $20. The
+  // order used to be rejected with "no combination exactly sums to 9.99".
+  const f = fixture({ walletCurrency: 'USD', balance: 500, rate: undefined });
+  f.engineStock([
+    { denominationId: 'd10', faceValue: 10, availableCount: 5 },
+    { denominationId: 'd20', faceValue: 20, availableCount: 5 },
+  ]);
+  f.setPreset([
+    { denominationId: 'd10', quantity: 1, denomination: { faceValue: 10 } },
+    { denominationId: 'd20', quantity: 1, denomination: { faceValue: 20 } },
+  ]);
+
+  const result = await f.service.createFulfillment({
+    ...order, amount: 9.99, variantId: 'v-ess-1m',
+  });
+
+  assert.equal(result.status, 'ALLOCATED');
+  // Charged the value handed over, not the shelf price.
+  assert.deepEqual(f.merchantUpdates, [{ walletBalance: { decrement: 30 } }]);
+  assert.equal(f.saved.chargedAmount, 30);
+});
+
+test('without a preset, a price that matches no combination is still refused', async () => {
+  const f = fixture({ walletCurrency: 'USD', balance: 500, rate: undefined });
+  f.engineStock([{ denominationId: 'd10', faceValue: 10, availableCount: 5 }]);
+
+  await assert.rejects(
+    () => f.service.createFulfillment({ ...order, amount: 9.99 }),
+    (error: any) => {
+      assert.match(error.response?.message ?? error.message, /9\.99/);
+      return true;
+    },
+  );
+  assert.deepEqual(f.merchantUpdates, [], 'no debit for an unfulfillable amount');
 });

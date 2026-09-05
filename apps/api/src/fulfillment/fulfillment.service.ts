@@ -463,9 +463,18 @@ export class FulfillmentService {
     // For variant presets (e.g. "PS Essential 1 Month" = $10 + $20), the totalCost is $30.
     let totalCost = combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
 
-    // Validate combination total exactly matches the requested amount
-    // Skip this check when denomination is explicitly mapped (amount is derived from denomination)
-    if (totalCost !== amount && !exactDenominationId) {
+    // Validate combination total exactly matches the requested amount.
+    //
+    // Skipped when the codes were chosen deliberately rather than derived from
+    // the amount: an explicitly mapped denomination, or a variant preset. A
+    // preset is the admin's own statement of what a pack delivers — "PS
+    // Essential 1 Month sends $10 + $20" — and a pack's shelf price has no
+    // reason to equal the face value of the codes behind it. Rejecting the
+    // order because $30 of codes does not equal a $9.99 price would make
+    // presets unusable for exactly the subscriptions they exist for.
+    //
+    // The merchant is still charged totalCost, the value actually handed over.
+    if (totalCost !== amount && !exactDenominationId && !usedVariantPreset) {
       this.logger.error(`[Fulfillment] Combination total ${totalCost} does not match requested amount ${amount}`);
       const failedReq = await this.prisma.fulfillmentRequest.create({
         data: {

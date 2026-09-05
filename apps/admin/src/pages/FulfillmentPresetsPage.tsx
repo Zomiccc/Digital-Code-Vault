@@ -228,6 +228,7 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
     .filter((line: any) => line.quantity > 0);
   const totalValue = chosen.reduce(
     (sum: number, line: any) => sum + Number(line.denomination.faceValue) * line.quantity, 0);
+  // Kept only to describe the rule, never to block saving it.
   const matches = Math.abs(totalValue - price) < 0.005;
 
   const save = useMutation({
@@ -267,10 +268,13 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
     <Modal open onClose={onClose} title={`When someone buys "${item.variant.name}"`} size="lg">
       <div className="space-y-5">
         <p className="text-sm text-muted-foreground">
-          Choose how many of each code value to deliver. The total has to equal the item's price of{' '}
+          Choose which codes to hand over when someone buys this. The codes do not have to add up
+          to the shelf price of{' '}
           <span className="font-medium text-foreground">
             {formatPrice(price, item.variant.currency)}
-          </span>.
+          </span>{' '}
+          — a subscription is priced independently of the cards behind it. The merchant wallet is
+          charged the value of the codes actually delivered.
         </p>
 
         {item.denominations.length === 0 ? (
@@ -322,23 +326,19 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
           </div>
         )}
 
-        <div className={`rounded-lg p-3 text-sm ${matches ? 'bg-emerald-500/10' : 'bg-muted'}`}>
+        <div className="rounded-lg bg-muted p-3 text-sm">
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">Delivering</span>
             <span className="font-medium">{chosen.length ? describeLines(chosen) : 'nothing yet'}</span>
           </div>
           <div className="mt-1 flex items-center justify-between">
-            <span className="text-muted-foreground">Total value</span>
-            <span className={`font-semibold ${matches ? 'text-emerald-500' : ''}`}>
-              {formatPrice(totalValue, item.variant.currency)} of{' '}
-              {formatPrice(price, item.variant.currency)}
-            </span>
+            <span className="text-muted-foreground">Merchant wallet charged</span>
+            <span className="font-semibold">{formatPrice(totalValue, item.variant.currency)}</span>
           </div>
-          {!matches && chosen.length > 0 && (
-            <p className="mt-2 text-xs text-amber-500">
-              These have to match before this can be saved.
-            </p>
-          )}
+          <div className="mt-1 flex items-center justify-between">
+            <span className="text-muted-foreground">Shelf price</span>
+            <span>{formatPrice(price, item.variant.currency)}</span>
+          </div>
         </div>
 
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
@@ -357,7 +357,7 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
           )}
           <Button
             className="flex-1"
-            disabled={!matches || chosen.length === 0 || save.isPending}
+            disabled={chosen.length === 0 || save.isPending}
             onClick={() => save.mutate()}
           >
             <Plus className="mr-2 h-4 w-4" />
