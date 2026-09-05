@@ -98,3 +98,42 @@ export function uniqueSku(base: string, taken: Iterable<string>): string {
 export function denominationSku(productSku: string, faceValue: number): string {
   return `${normaliseSku(productSku)}-${faceValue}`;
 }
+
+/**
+ * A short token for a variant, so a pack SKU stays readable:
+ *   "PS Essential: 1 Month"  -> ESS-1M
+ *   "PS Extra: 3 Months"     -> EXT-3M
+ *   "PS Premium: 12 Months"  -> PRE-12M
+ *   "Xbox Game Pass Ultimate: 1 Month" -> GAM-1M
+ *
+ * The tier comes from the first meaningful word (platform prefixes like "PS"
+ * carry no information, since the product SKU already says the platform), and
+ * the duration from any "<n> month/year/week/day" in the name.
+ */
+const PLATFORM_WORDS = new Set(['PS', 'PSN', 'PLAYSTATION', 'XBOX', 'NINTENDO', 'STEAM', 'APPLE', 'GOOGLE']);
+
+export function variantSkuSuffix(name: string): string {
+  const cleaned = String(name || '').toUpperCase().replace(/[^A-Z0-9\s:]/g, ' ');
+  const [tierPart, ...rest] = cleaned.split(':');
+  const durationSource = rest.join(' ') || cleaned;
+
+  const words = tierPart.split(/\s+/).filter(Boolean).filter((word) => !PLATFORM_WORDS.has(word));
+  // Skip a leading number so "1 Month Pass" does not become the tier "1".
+  const tierWord = words.find((word) => !/^\d+$/.test(word));
+  const tier = tierWord ? tierWord.slice(0, 3) : '';
+
+  const duration = durationSource.match(/(\d+)\s*(MONTH|YEAR|WEEK|DAY)/);
+  const durationToken = duration ? `${Number(duration[1])}${duration[2][0]}` : '';
+
+  const parts = [tier, durationToken].filter(Boolean);
+  if (parts.length) return parts.join('-');
+
+  // Nothing recognisable: fall back to the initials of the name.
+  const initials = cleaned.split(/\s+/).filter(Boolean).map((word) => word[0]).join('');
+  return initials.slice(0, 4) || 'VAR';
+}
+
+/** The full variant SKU, hanging off the product SKU: PSN-KSA-ESS-1M. */
+export function variantSku(productSku: string, variantName: string): string {
+  return `${normaliseSku(productSku)}-${variantSkuSuffix(variantName)}`;
+}

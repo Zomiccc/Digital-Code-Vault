@@ -26,6 +26,7 @@ export const REQUIRED_SCHEMA: { table: string; column: string }[] = [
   { table: 'WalletTransaction', column: 'currency' },
   { table: 'ExchangeRate', column: 'unitsPerUsd' },
   { table: 'Denomination', column: 'sku' },
+  { table: 'Variant', column: 'sku' },
 ];
 
 /**
@@ -51,6 +52,8 @@ export const REPAIR_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS "CodeBatch_denominationId_priority_idx" ON "CodeBatch" ("denominationId", "priority")`,
   `ALTER TABLE "Denomination" ADD COLUMN IF NOT EXISTS "sku" TEXT`,
   `CREATE INDEX IF NOT EXISTS "Denomination_sku_idx" ON "Denomination" ("sku")`,
+  `ALTER TABLE "Variant" ADD COLUMN IF NOT EXISTS "sku" TEXT`,
+  `CREATE INDEX IF NOT EXISTS "Variant_sku_idx" ON "Variant" ("sku")`,
   // Carry the pre-table USD->PKR rate across so no configured rate is lost.
   `INSERT INTO "ExchangeRate" ("currency", "unitsPerUsd", "updatedAt")
    SELECT 'PKR', "value"::decimal, CURRENT_TIMESTAMP FROM "PlatformSetting"

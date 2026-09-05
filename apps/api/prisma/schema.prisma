@@ -178,6 +178,9 @@ model Variant {
   description    String?
   customerPrice  Decimal
   currency       String   @default("USD")
+  // Variant SKU, e.g. PSN-KSA-ESS-1M. Unique per region because the same pack
+  // sells at a different price in each one.
+  sku            String?
   active         Boolean  @default(true)
   sortOrder      Int      @default(0)
   createdAt      DateTime @default(now())
@@ -188,6 +191,7 @@ model Variant {
 
   @@unique([productRegionId, slug])
   @@index([productRegionId])
+  @@index([sku])
 }
 
 model FulfillmentCombination {

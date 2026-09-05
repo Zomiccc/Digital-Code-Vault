@@ -242,6 +242,15 @@ export class AdminController {
     return this.skuService.setDenominationSku(id, body.sku, user.id, req.ip);
   }
 
+  @Patch('skus/variant/:id')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async setVariantSku(
+    @Param('id') id: string, @Body() body: { sku: string | null },
+    @CurrentUser() user: any, @Req() req: any,
+  ) {
+    return this.skuService.setVariantSku(id, body.sku, user.id, req.ip);
+  }
+
   @Post('skus/product/:id/resync')
   @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
   async resyncDenominationSkus(@Param('id') id: string, @CurrentUser() user: any, @Req() req: any) {

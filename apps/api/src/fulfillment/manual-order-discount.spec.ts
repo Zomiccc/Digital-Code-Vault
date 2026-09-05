@@ -95,6 +95,8 @@ function fixture() {
       walletLookups++;
       return 'admin-wallet';
     } } as any,
+    // An admin order skips the wallet, so no rate should ever be requested here.
+    { getRate: async () => { throw new Error('admin orders must not consult a rate'); } } as any,
   );
   return { service, prisma, engine, audits, revenueRecords, get reversals() { return reversals; }, get walletLookups() { return walletLookups; }, get platformBalance() { return platformBalance; }, get saved() { return saved; }, get reserved() { return reserved; }, get reservations() { return reservations; }, clearCache() { cached = undefined; } };
 }

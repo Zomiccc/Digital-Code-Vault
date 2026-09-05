@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { Search, Wand2, RefreshCw, ChevronRight, ChevronDown } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Badge } from '@/components/ui';
+import { formatPrice } from '@/lib/utils';
 
 /**
  * Every SKU in one place: the product SKU and each denomination's sub-product
@@ -37,7 +38,10 @@ export function SkuMappingPage() {
   const products = data?.items || [];
   const missingCount = products.reduce(
     (total: number, product: any) =>
-      total + (product.sku ? 0 : 1) + product.denominations.filter((d: any) => !d.sku).length,
+      total
+      + (product.sku ? 0 : 1)
+      + product.denominations.filter((d: any) => !d.sku).length
+      + (product.variants || []).filter((v: any) => !v.sku).length,
     0,
   );
 
@@ -83,7 +87,9 @@ export function SkuMappingPage() {
       <div className="space-y-3">
         {products.map((product: any) => {
           const open = expanded[product.id] ?? false;
-          const missingHere = product.denominations.filter((d: any) => !d.sku).length;
+          const missingHere =
+            product.denominations.filter((d: any) => !d.sku).length
+            + (product.variants || []).filter((v: any) => !v.sku).length;
           return (
             <Card key={product.id} className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -100,10 +106,10 @@ export function SkuMappingPage() {
                   </span>
                 </button>
                 <div className="flex items-center gap-2">
-                  {product.denominations.length > 0 && (
+                  {(product.denominations.length + (product.variants || []).length) > 0 && (
                     <Badge className="bg-muted text-muted-foreground">
-                      {product.denominations.length} sub-product
-                      {product.denominations.length === 1 ? '' : 's'}
+                      {product.denominations.length + (product.variants || []).length} sub-product
+                      {product.denominations.length + (product.variants || []).length === 1 ? '' : 's'}
                       {missingHere > 0 && ` · ${missingHere} without SKU`}
                     </Badge>
                   )}
@@ -126,27 +132,68 @@ export function SkuMappingPage() {
               </div>
 
               {open && (
-                <div className="space-y-2 border-t border-border pt-3">
-                  {product.denominations.length === 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      No denominations on this product — it is sold as variants only.
+                <div className="space-y-4 border-t border-border pt-3">
+                  {/* Code values */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Code values
                     </p>
-                  )}
-                  {product.denominations.map((denomination: any) => (
-                    <div key={denomination.id} className="flex items-center justify-between gap-3">
-                      <span className="text-sm">
-                        ${denomination.face_value}
-                        <span className="ml-2 text-xs text-muted-foreground">{denomination.currency}</span>
-                      </span>
-                      <SkuField
-                        value={denomination.sku}
-                        suggestion={denomination.suggested_sku}
-                        label={`SKU for ${product.name} ${denomination.face_value}`}
-                        onSave={(sku) => api.setDenominationSku(denomination.id, sku)}
-                        onSaved={refresh}
-                      />
+                    {product.denominations.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        None — this product is sold as packs only.
+                      </p>
+                    )}
+                    {product.denominations.map((denomination: any) => (
+                      <div key={denomination.id} className="flex items-center justify-between gap-3">
+                        <span className="text-sm">
+                          ${denomination.face_value}
+                          <span className="ml-2 text-xs text-muted-foreground">{denomination.currency}</span>
+                        </span>
+                        <SkuField
+                          value={denomination.sku}
+                          suggestion={denomination.suggested_sku}
+                          label={`SKU for ${product.name} ${denomination.face_value}`}
+                          onSave={(sku) => api.setDenominationSku(denomination.id, sku)}
+                          onSaved={refresh}
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Packs, grouped by the region they belong to, because the same
+                      pack is a separate item with its own SKU in each region. */}
+                  {(product.variants || []).length > 0 && (
+                    <div className="space-y-3 border-t border-border pt-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        Packs & subscriptions
+                      </p>
+                      {groupByRegion(product.variants).map(([region, variants]) => (
+                        <div key={region} className="space-y-2">
+                          <Badge className="bg-primary/10 text-primary">{region}</Badge>
+                          {variants.map((variant: any) => (
+                            <div key={variant.id} className="flex items-center justify-between gap-3 pl-1">
+                              <span className="min-w-0 text-sm">
+                                <span className="truncate">{variant.name}</span>
+                                <span className="ml-2 text-xs text-muted-foreground">
+                                  {formatPrice(variant.price, variant.currency)}
+                                </span>
+                                {!variant.active && (
+                                  <span className="ml-2 text-xs text-muted-foreground">(inactive)</span>
+                                )}
+                              </span>
+                              <SkuField
+                                value={variant.sku}
+                                suggestion={variant.suggested_sku}
+                                label={`SKU for ${variant.name} in ${region}`}
+                                onSave={(sku) => api.setVariantSku(variant.id, sku)}
+                                onSaved={refresh}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
             </Card>
@@ -210,4 +257,15 @@ function SkuField({
       {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
     </div>
   );
+}
+
+/** Packs keyed by region code, so each region's SKUs sit together. */
+function groupByRegion(variants: any[]): [string, any[]][] {
+  const grouped = new Map<string, any[]>();
+  for (const variant of variants) {
+    const region = variant.region || '—';
+    if (!grouped.has(region)) grouped.set(region, []);
+    grouped.get(region)!.push(variant);
+  }
+  return [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b));
 }

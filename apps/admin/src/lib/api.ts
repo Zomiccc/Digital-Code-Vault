@@ -153,6 +153,8 @@ export const api = {
     apiFetch(`/admin/skus/product/${productId}`, { method: 'PATCH', body: JSON.stringify({ sku }) }),
   setDenominationSku: (denominationId: string, sku: string | null) =>
     apiFetch(`/admin/skus/denomination/${denominationId}`, { method: 'PATCH', body: JSON.stringify({ sku }) }),
+  setVariantSku: (variantId: string, sku: string | null) =>
+    apiFetch(`/admin/skus/variant/${variantId}`, { method: 'PATCH', body: JSON.stringify({ sku }) }),
   resyncDenominationSkus: (productId: string) =>
     apiFetch(`/admin/skus/product/${productId}/resync`, { method: 'POST' }),
   suggestSku: (name: string, region: string) =>

@@ -1,13 +1,14 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { resolveProductSkuBase, uniqueSku, normaliseSku, denominationSku } from './sku';
+import { resolveProductSkuBase, uniqueSku, normaliseSku, denominationSku, variantSku } from './sku';
 
 /**
- * One place that owns SKUs for both levels: the product ("PSN USA Digital Code"
- * → PSN-USA) and its sub-products, the denominations (PSN-USA-10). A SKU is how
- * a storefront line item is matched back to what to deliver, so both levels must
- * be visible, generatable and editable.
+ * One place that owns SKUs at all three levels: the product ("PSN USA Digital
+ * Code" → PSN-USA), its denominations (PSN-USA-10), and its variants — the
+ * subscription packs (PSN-USA-ESS-1M). A SKU is how a storefront line item is
+ * matched back to what to deliver, so every level must be visible, generatable
+ * and editable, and each region's pack needs its own.
  */
 @Injectable()
 export class SkuService {
@@ -31,7 +32,12 @@ export class SkuService {
             ],
           }
         : undefined,
-      include: { denominations: { orderBy: { faceValue: 'asc' } } },
+      include: {
+        denominations: { orderBy: { faceValue: 'asc' } },
+        productRegions: {
+          include: { region: true, variants: { orderBy: { sortOrder: 'asc' } } },
+        },
+      },
       orderBy: [{ name: 'asc' }],
     });
 
@@ -53,6 +59,23 @@ export class SkuService {
             Number(denomination.faceValue),
           ),
         })),
+        // Packs, listed under the region they belong to, since the same pack is
+        // a different item - and a different SKU - in each region.
+        variants: product.productRegions.flatMap((productRegion) =>
+          productRegion.variants.map((variant) => ({
+            id: variant.id,
+            name: variant.name,
+            region: productRegion.region?.code || product.region,
+            price: Number(variant.customerPrice),
+            currency: variant.currency,
+            active: variant.active,
+            sku: variant.sku,
+            suggested_sku: variantSku(
+              product.sku || resolveProductSkuBase(product.name, product.region),
+              variant.name,
+            ),
+          })),
+        ),
       })),
       total: products.length,
     };
@@ -60,12 +83,13 @@ export class SkuService {
 
   /** All SKUs currently taken at either level, for collision checks. */
   private async takenSkus(): Promise<Set<string>> {
-    const [products, denominations] = await Promise.all([
+    const [products, denominations, variants] = await Promise.all([
       this.prisma.product.findMany({ where: { sku: { not: null } }, select: { sku: true } }),
       this.prisma.denomination.findMany({ where: { sku: { not: null } }, select: { sku: true } }),
+      this.prisma.variant.findMany({ where: { sku: { not: null } }, select: { sku: true } }),
     ]);
     return new Set(
-      [...products, ...denominations].map((row) => normaliseSku(row.sku!)),
+      [...products, ...denominations, ...variants].map((row) => normaliseSku(row.sku!)),
     );
   }
 
@@ -75,11 +99,17 @@ export class SkuService {
    */
   async generateMissing(adminId: string, ip?: string) {
     const products = await this.prisma.product.findMany({
-      include: { denominations: { orderBy: { faceValue: 'asc' } } },
+      include: {
+        denominations: { orderBy: { faceValue: 'asc' } },
+        productRegions: { include: { region: true, variants: true } },
+      },
       orderBy: { name: 'asc' },
     });
     const taken = await this.takenSkus();
-    const assigned: { level: 'product' | 'denomination'; id: string; name: string; sku: string }[] = [];
+    const assigned: {
+      level: 'product' | 'denomination' | 'variant';
+      id: string; name: string; sku: string;
+    }[] = [];
 
     for (const product of products) {
       let productSku = product.sku;
@@ -102,6 +132,21 @@ export class SkuService {
           sku,
         });
       }
+
+      for (const productRegion of product.productRegions) {
+        for (const variant of productRegion.variants) {
+          if (variant.sku) continue;
+          const sku = uniqueSku(variantSku(productSku, variant.name), taken);
+          taken.add(normaliseSku(sku));
+          await this.prisma.variant.update({ where: { id: variant.id }, data: { sku } });
+          assigned.push({
+            level: 'variant',
+            id: variant.id,
+            name: `${product.name} - ${variant.name}`,
+            sku,
+          });
+        }
+      }
     }
 
     await this.auditService.log({
@@ -113,8 +158,11 @@ export class SkuService {
   }
 
   /** Reject a SKU already used by any product or denomination but this one. */
-  private async assertFree(sku: string, ignore: { productId?: string; denominationId?: string }) {
-    const [product, denomination] = await Promise.all([
+  private async assertFree(
+    sku: string,
+    ignore: { productId?: string; denominationId?: string; variantId?: string },
+  ) {
+    const [product, denomination, variant] = await Promise.all([
       this.prisma.product.findFirst({
         where: { sku, ...(ignore.productId ? { id: { not: ignore.productId } } : {}) },
         select: { name: true },
@@ -123,6 +171,10 @@ export class SkuService {
         where: { sku, ...(ignore.denominationId ? { id: { not: ignore.denominationId } } : {}) },
         include: { product: { select: { name: true } } },
       }),
+      this.prisma.variant.findFirst({
+        where: { sku, ...(ignore.variantId ? { id: { not: ignore.variantId } } : {}) },
+        select: { name: true },
+      }),
     ]);
     if (product) throw new BadRequestException(`SKU ${sku} is already used by "${product.name}"`);
     if (denomination) {
@@ -130,6 +182,25 @@ export class SkuService {
         `SKU ${sku} is already used by "${denomination.product.name} $${Number(denomination.faceValue)}"`,
       );
     }
+    if (variant) throw new BadRequestException(`SKU ${sku} is already used by "${variant.name}"`);
+  }
+
+  /** A pack's SKU. Each region's copy of a pack carries its own. */
+  async setVariantSku(variantId: string, sku: string | null, adminId: string, ip?: string) {
+    const variant = await this.prisma.variant.findUnique({ where: { id: variantId } });
+    if (!variant) throw new NotFoundException('Variant not found');
+
+    const value = sku?.trim() ? normaliseSku(sku) : null;
+    if (value) await this.assertFree(value, { variantId });
+
+    const updated = await this.prisma.variant.update({
+      where: { id: variantId }, data: { sku: value },
+    });
+    await this.auditService.log({
+      actorType: 'ADMIN', actorId: adminId, action: 'sku.set_variant',
+      entity: 'Variant', entityId: variantId, metadata: { from: variant.sku, to: value }, ip,
+    });
+    return { id: updated.id, sku: updated.sku };
   }
 
   async setProductSku(productId: string, sku: string | null, adminId: string, ip?: string) {
@@ -168,28 +239,51 @@ export class SkuService {
   }
 
   /**
-   * Re-derive a product's denomination SKUs from its product SKU. Used after the
-   * product SKU is renamed, so the sub-product SKUs do not drift from it.
+   * Re-derive a product's sub-product SKUs — both code values and packs — from
+   * its product SKU. Used after the product SKU is renamed, so the sub-product
+   * SKUs do not drift from it.
    */
   async resyncDenominations(productId: string, adminId: string, ip?: string) {
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
-      include: { denominations: { orderBy: { faceValue: 'asc' } } },
+      include: {
+        denominations: { orderBy: { faceValue: 'asc' } },
+        productRegions: { include: { variants: true } },
+      },
     });
     if (!product) throw new NotFoundException('Product not found');
     if (!product.sku) throw new BadRequestException('Set the product SKU first');
 
     const taken = await this.takenSkus();
     const updated: { id: string; sku: string }[] = [];
+
+    // Free the row's own current SKU before asking for a unique one, or it would
+    // collide with itself and gain a pointless numeric suffix.
+    const claim = (current: string | null, target: string) => {
+      taken.delete(normaliseSku(current ?? ''));
+      const sku = uniqueSku(target, taken);
+      taken.add(normaliseSku(sku));
+      return sku;
+    };
+
     for (const denomination of product.denominations) {
       const target = denominationSku(product.sku, Number(denomination.faceValue));
       if (denomination.sku && normaliseSku(denomination.sku) === target) continue;
-      taken.delete(normaliseSku(denomination.sku ?? ''));
-      const sku = uniqueSku(target, taken);
-      taken.add(normaliseSku(sku));
+      const sku = claim(denomination.sku, target);
       await this.prisma.denomination.update({ where: { id: denomination.id }, data: { sku } });
       updated.push({ id: denomination.id, sku });
     }
+
+    for (const productRegion of product.productRegions) {
+      for (const variant of productRegion.variants) {
+        const target = variantSku(product.sku, variant.name);
+        if (variant.sku && normaliseSku(variant.sku) === target) continue;
+        const sku = claim(variant.sku, target);
+        await this.prisma.variant.update({ where: { id: variant.id }, data: { sku } });
+        updated.push({ id: variant.id, sku });
+      }
+    }
+
     await this.auditService.log({
       actorType: 'ADMIN', actorId: adminId, action: 'sku.resync_denominations',
       entity: 'Product', entityId: productId, metadata: { updated: updated.length }, ip,
