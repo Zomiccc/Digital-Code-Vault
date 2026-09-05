@@ -189,9 +189,48 @@ test('a preset delivers its codes even though they do not add up to the shelf pr
   });
 
   assert.equal(result.status, 'ALLOCATED');
-  // Charged the value handed over, not the shelf price.
-  assert.deepEqual(f.merchantUpdates, [{ walletBalance: { decrement: 30 } }]);
-  assert.equal(f.saved.chargedAmount, 30);
+  // Charged the shelf price, not the $30 of codes handed over.
+  assert.deepEqual(f.merchantUpdates, [{ walletBalance: { decrement: 9.99 } }]);
+  assert.equal(f.saved.chargedAmount, 9.99);
+  const debit = f.walletRows.find((row: any) => row.type === 'DEBIT');
+  assert.equal(debit.amount, 9.99);
+});
+
+test('the platform is credited the shelf price for a pack, not the code value', async () => {
+  const f = fixture({ walletCurrency: 'USD', balance: 500, rate: undefined });
+  f.engineStock([
+    { denominationId: 'd10', faceValue: 10, availableCount: 5 },
+    { denominationId: 'd20', faceValue: 20, availableCount: 5 },
+  ]);
+  f.setPreset([
+    { denominationId: 'd10', quantity: 1, denomination: { faceValue: 10 } },
+    { denominationId: 'd20', quantity: 1, denomination: { faceValue: 20 } },
+  ]);
+  await f.service.createFulfillment({ ...order, amount: 9.99, variantId: 'v-ess-1m' });
+  assert.equal(f.revenueRecords.find((r: any) => r.type === 'CREDIT').amount, 9.99);
+});
+
+test('a pack on a PKR wallet is charged the shelf price converted, not the code value', async () => {
+  const f = fixture({ walletCurrency: 'PKR', balance: 67000, rate: 300 });
+  f.engineStock([
+    { denominationId: 'd10', faceValue: 10, availableCount: 5 },
+    { denominationId: 'd20', faceValue: 20, availableCount: 5 },
+  ]);
+  f.setPreset([
+    { denominationId: 'd10', quantity: 1, denomination: { faceValue: 10 } },
+    { denominationId: 'd20', quantity: 1, denomination: { faceValue: 20 } },
+  ]);
+  await f.service.createFulfillment({ ...order, amount: 9.99, variantId: 'v-ess-1m' });
+  // 9.99 x 300, not 30 x 300.
+  assert.deepEqual(f.merchantUpdates, [{ walletBalance: { decrement: 2997 } }]);
+});
+
+test('an amount-matched order still charges the code value it allocated', async () => {
+  // No preset: the codes were chosen to match the amount, so the two agree and
+  // the shelf-price rule must not touch this path.
+  const f = fixture({ walletCurrency: 'USD', balance: 500, rate: undefined });
+  await f.service.createFulfillment({ ...order });
+  assert.deepEqual(f.merchantUpdates, [{ walletBalance: { decrement: 100 } }]);
 });
 
 test('without a preset, a price that matches no combination is still refused', async () => {

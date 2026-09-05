@@ -268,13 +268,12 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
     <Modal open onClose={onClose} title={`When someone buys "${item.variant.name}"`} size="lg">
       <div className="space-y-5">
         <p className="text-sm text-muted-foreground">
-          Choose which codes to hand over when someone buys this. The codes do not have to add up
-          to the shelf price of{' '}
+          Choose which codes to hand over when someone buys this. They do not have to add up to the
+          price — a subscription is priced independently of the cards behind it. The merchant is
+          charged the price of{' '}
           <span className="font-medium text-foreground">
             {formatPrice(price, item.variant.currency)}
-          </span>{' '}
-          — a subscription is priced independently of the cards behind it. The merchant wallet is
-          charged the value of the codes actually delivered.
+          </span>, whatever codes go out.
         </p>
 
         {item.denominations.length === 0 ? (
@@ -332,12 +331,12 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
             <span className="font-medium">{chosen.length ? describeLines(chosen) : 'nothing yet'}</span>
           </div>
           <div className="mt-1 flex items-center justify-between">
-            <span className="text-muted-foreground">Merchant wallet charged</span>
-            <span className="font-semibold">{formatPrice(totalValue, item.variant.currency)}</span>
+            <span className="text-muted-foreground">Merchant charged</span>
+            <span className="font-semibold">{formatPrice(price, item.variant.currency)}</span>
           </div>
           <div className="mt-1 flex items-center justify-between">
-            <span className="text-muted-foreground">Shelf price</span>
-            <span>{formatPrice(price, item.variant.currency)}</span>
+            <span className="text-muted-foreground">Value of codes sent</span>
+            <span>{formatPrice(totalValue, item.variant.currency)}</span>
           </div>
         </div>
 

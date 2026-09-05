@@ -458,10 +458,19 @@ export class FulfillmentService {
       });
     }
 
-    // Calculate total cost — always the sum of allocated denomination face values.
-    // This ensures consistent USD-based pricing across NORMAL and ESSENTIALS products.
-    // For variant presets (e.g. "PS Essential 1 Month" = $10 + $20), the totalCost is $30.
+    // Calculate total cost — normally the sum of allocated denomination face
+    // values, which for an amount-matched order equals the amount requested.
     let totalCost = combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
+
+    // A pack is sold at its shelf price, not at the face value of the codes
+    // behind it. The preset says what to hand over — "PS Essential 1 Month sends
+    // $10 + $20" — and the pack's price says what that sale costs, so a $9.99
+    // subscription is charged 9.99 even though $30 of codes are delivered.
+    // A discount reduces the sale price, and therefore the charge, without
+    // changing which codes go out.
+    if (usedVariantPreset) {
+      totalCost = pricing ? pricing.net_amount : amount;
+    }
 
     // Validate combination total exactly matches the requested amount.
     //
