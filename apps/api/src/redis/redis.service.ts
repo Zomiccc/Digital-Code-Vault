@@ -25,8 +25,11 @@ export class RedisService implements OnModuleDestroy {
     this.redisUrl = this.configService.get<string>('REDIS_URL', 'redis://localhost:6379');
     this.initRedis();
 
-    // Periodic cleanup of expired in-memory keys
+    // Periodic cleanup of expired in-memory keys. Unreferenced so this timer
+    // alone never keeps the process alive — it would otherwise hang any script
+    // or test that constructs the service.
     this.cleanupInterval = setInterval(() => this.cleanup(), 60000);
+    this.cleanupInterval.unref?.();
   }
 
   private async initRedis() {
@@ -225,7 +228,21 @@ export class RedisService implements OnModuleDestroy {
         pipe.zcount(rateLimitKey, windowStart, now);
         pipe.pexpire(rateLimitKey, windowSeconds * 1000);
         const results = await pipe.exec();
-        const count = results[2][1] as number;
+
+        // ioredis resolves a pipeline as [error, result] pairs and does NOT throw
+        // when individual commands fail. Reading the count without checking left
+        // it undefined whenever Redis was refusing commands — and `undefined <=
+        // limit` is false, so a broken Redis locked every caller out instead of
+        // letting them through. Treat any command error as a Redis failure and
+        // fall through to the in-memory counter below.
+        const failure = results?.find((entry: [Error | null, unknown]) => entry?.[0])?.[0];
+        if (failure) throw failure;
+
+        const count = results?.[2]?.[1];
+        if (typeof count !== 'number' || !Number.isFinite(count)) {
+          throw new Error('Rate limit count unavailable from Redis');
+        }
+
         const allowed = count <= limit;
         const remaining = Math.max(0, limit - count);
         const resetAt = now + windowSeconds * 1000;
