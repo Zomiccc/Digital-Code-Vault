@@ -992,8 +992,11 @@ export class WebhookService implements OnModuleInit, OnModuleDestroy {
                 if (liProduct) this.logger.log(`[WEBHOOK] Item ${liIndex + 1}: Strategy 2 matched by exact SKU: ${liSku}`);
               }
 
-              // Strategy 2a: Stored SKU on a code value or a pack.
-              if (!liProduct && liSku) {
+              // Strategy 2a: Stored SKU on a code value or a pack. Runs even with a
+              // product already matched, because a mapping naming only a product
+              // would otherwise shadow the pack this SKU actually identifies.
+              if (liSku && !liCpMapping?.dcvVariantId && !liCpMapping?.dcvDenominationId
+                  && !liExactDenominationId && !liVariantId) {
                 const resolved = await this.resolveSku(liSku);
                 if (resolved) {
                   liProduct = resolved.product;
@@ -1246,7 +1249,19 @@ export class WebhookService implements OnModuleInit, OnModuleDestroy {
       }
 
       // Strategy 2a: Stored SKU on a code value or a pack.
-      if (!product && searchSku) {
+      //
+      // This runs even when Strategy 1 already found a product. A Connected
+      // Product mapping that names only a product is the *less* specific answer,
+      // and it is written automatically the first time a SKU is matched — so
+      // once that happened, every later order for a pack took the mapping,
+      // arrived with no variant, and fell through to guessing a denomination
+      // from the order amount. That is how a 9.99 pack set to send $10 + $20
+      // delivered two $25 codes instead.
+      //
+      // A mapping that names a variant or denomination is a deliberate admin
+      // choice and still wins; this only fills in what the mapping left blank.
+      const mappingIsSpecific = !!(cpMapping?.dcvVariantId || cpMapping?.dcvDenominationId);
+      if (searchSku && !mappingIsSpecific && !exactDenominationId && !matchedVariantId) {
         const resolved = await this.resolveSku(searchSku);
         if (resolved) {
           product = resolved.product;
@@ -1407,7 +1422,13 @@ export class WebhookService implements OnModuleInit, OnModuleDestroy {
       }
       let fulfillmentDenominationId: string | null = exactDenominationId;
 
-      if (cpMapping?.dcvDenominationId) {
+      if (matchedVariantId) {
+        // Already priced by the pack above, and its delivery rule picks the
+        // codes. Everything below guesses a denomination from the amount and
+        // would both overwrite that price and pin a single denomination,
+        // discarding the preset — which is what delivered two $25 codes for a
+        // 9.99 pack set to send $10 + $20.
+      } else if (cpMapping?.dcvDenominationId) {
         // Explicit denomination mapping — use it directly × quantity
         const mappedDenom = await this.prisma.denomination.findUnique({
           where: { id: cpMapping.dcvDenominationId },
@@ -1620,8 +1641,10 @@ export class WebhookService implements OnModuleInit, OnModuleDestroy {
               if (liProduct) this.logger.log(`[WEBHOOK] Line item ${liIndex + 1}: Strategy 2 matched product by exact SKU: ${liSku}`);
             }
 
-            // Strategy 2a: Stored SKU on a code value or a pack.
-            if (!liProduct && liSku) {
+            // Strategy 2a: Stored SKU on a code value or a pack. Runs even with a
+            // product already matched, for the same reason as above.
+            if (liSku && !liCpMapping?.dcvVariantId && !liCpMapping?.dcvDenominationId
+                && !liExactDenominationId && !liVariantId) {
               const resolved = await this.resolveSku(liSku);
               if (resolved) {
                 liProduct = resolved.product;
