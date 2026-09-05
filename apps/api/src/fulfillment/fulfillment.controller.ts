@@ -14,6 +14,7 @@ import { FulfillmentService } from './fulfillment.service';
 import { ApiKeyGuard } from '../auth/guards/api-key.guard';
 import { Scopes } from '../auth/decorators/scopes.decorator';
 import { CreateFulfillmentDto } from '../dto';
+import { ProductsService } from '../products/products.service';
 
 @Controller('fulfillment')
 export class FulfillmentController {
@@ -84,6 +85,42 @@ export class OrdersController {
   @Scopes('read', 'fulfillment')
   async getOrderStatus(@Param('id') id: string, @Req() req: any) {
     return this.fulfillmentService.getOrderStatus(id, req.merchantId);
+  }
+}
+
+/**
+ * The SKU catalogue a storefront pulls to connect its own products. A store
+ * product carrying the same SKU is matched to this product when its orders
+ * arrive, which is what links the two systems together.
+ */
+@Controller('catalog')
+export class CatalogSkuController {
+  constructor(private productsService: ProductsService) {}
+
+  @Get('skus')
+  @UseGuards(ApiKeyGuard)
+  @Scopes('read', 'fulfillment')
+  async listSkus(@Req() req: any) {
+    const products = await this.productsService.listProductsForMerchant(req.merchantId);
+    return {
+      items: products
+        .filter((product: any) => product.sku)
+        .map((product: any) => ({
+          sku: product.sku,
+          name: product.name,
+          region: product.region,
+          currency: product.regional_currency,
+          symbol: product.regional_symbol,
+          denominations: product.denominations.map((denomination: any) => ({
+            sku: `${product.sku}-${Number(denomination.faceValue)}`,
+            face_value: Number(denomination.faceValue),
+            price_usd: denomination.amount_usd,
+            price_local: denomination.local_amount,
+            price_formatted: denomination.local_formatted,
+            in_stock: denomination.availableCount ?? null,
+          })),
+        })),
+    };
   }
 }
 
