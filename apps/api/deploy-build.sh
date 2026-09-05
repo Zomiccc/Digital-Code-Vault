@@ -72,6 +72,23 @@ cd ../..
 
 cd apps/api
 
+# Step 4a: Reconcile the schema directly.
+# The recorded migration history cannot be trusted here: it lists migrations as
+# applied whose DDL never ran, so `migrate deploy` succeeds while changing
+# nothing and the app ships against a database missing its columns. This runs
+# idempotent IF NOT EXISTS DDL straight at the database, independent of that
+# history. It only adds; it never drops.
+echo "--- Reconciling schema (prisma/repair.sql) ---"
+if [ -f node_modules/.bin/prisma ]; then
+  PRISMA_BIN=node_modules/.bin/prisma
+elif [ -f ../../node_modules/.bin/prisma ]; then
+  PRISMA_BIN=../../node_modules/.bin/prisma
+else
+  PRISMA_BIN="npx prisma"
+fi
+$PRISMA_BIN db execute --file prisma/repair.sql --schema=prisma/schema.prisma
+echo "OK: schema reconciled"
+
 # Step 4b: Apply pending database migrations
 echo "--- Applying Prisma migrations ---"
 if [ -f node_modules/.bin/prisma ]; then
