@@ -143,7 +143,12 @@ export function CustomerProductsPage() {
             {p.denominations?.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-2">
                 {p.denominations.map((d: any) => (
-                  <Badge key={d.id} className="bg-secondary text-secondary-foreground">${d.faceValue}</Badge>
+                  <Badge key={d.id} className="bg-secondary text-secondary-foreground">
+                    ${d.faceValue}
+                    {d.local_currency && d.local_currency !== 'USD' && (
+                      <span className="ml-1.5 opacity-70">{d.local_formatted}</span>
+                    )}
+                  </Badge>
                 ))}
               </div>
             )}

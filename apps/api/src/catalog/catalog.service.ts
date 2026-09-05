@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { CurrencyService, localPrice } from '../currency/currency.service';
 
 function slugify(text: string): string {
   return text.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -13,6 +14,7 @@ export class CatalogService {
   constructor(
     private prisma: PrismaService,
     private auditService: AuditService,
+    private currencyService: CurrencyService,
   ) {}
 
   // ─── Brands (top of hierarchy: BRAND → CATEGORY → PRODUCT → VARIANT) ───
@@ -551,7 +553,56 @@ export class CatalogService {
       orderBy: { sortOrder: 'asc' },
     });
 
-    return categories;
+    // Denomination face values are stored in USD. Each product-region also reports
+    // its price in that region's own currency, so a Turkish listing reads in Lira
+    // and a Pakistani one in rupees, all derived from the one USD number.
+    const displays = await this.currencyService.displayCurrenciesForRegions(
+      categories.flatMap((category) =>
+        category.products.flatMap((product) => [
+          product.region,
+          ...product.productRegions.map((pr) => pr.region?.code),
+        ]),
+      ),
+    );
+    const usd = { currency: 'USD', symbol: '$', rate: 1, converted: false, region: null };
+
+    return categories.map((category) => ({
+      ...category,
+      products: category.products.map((product) => {
+        const productDisplay = displays.get((product.region ?? '').trim()) ?? usd;
+        return {
+          ...product,
+          regional_currency: productDisplay.currency,
+          regional_symbol: productDisplay.symbol,
+          denominations: product.denominations.map((denomination) => ({
+            ...denomination,
+            ...localPrice(Number(denomination.faceValue), productDisplay),
+          })),
+          productRegions: product.productRegions.map((productRegion) => {
+            const display = displays.get((productRegion.region?.code ?? '').trim()) ?? usd;
+            return {
+              ...productRegion,
+              denomination_prices: product.denominations.map((denomination) => ({
+                denomination_id: denomination.id,
+                ...localPrice(Number(denomination.faceValue), display),
+              })),
+              variants: productRegion.variants.map((variant) => ({
+                ...variant,
+                // A variant already priced in the region's currency is shown as
+                // entered; only USD-priced ones are converted.
+                ...(variant.currency === display.currency
+                  ? {
+                      local_amount: Number(variant.customerPrice),
+                      local_currency: variant.currency,
+                      local_symbol: display.symbol,
+                    }
+                  : localPrice(Number(variant.customerPrice), display)),
+              })),
+            };
+          }),
+        };
+      }),
+    }));
   }
 
   // ─── Dashboard Stats ───

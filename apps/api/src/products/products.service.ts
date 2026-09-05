@@ -1,9 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CurrencyService, localPrice } from '../currency/currency.service';
+import { resolveProductSkuBase, uniqueSku, normaliseSku } from './sku';
 
 @Injectable()
 export class ProductsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private currencyService: CurrencyService,
+  ) {}
 
   async listProductsForMerchant(merchantId: string) {
     const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
@@ -15,7 +20,7 @@ export class ProductsService {
       where.id = { in: allowedIds };
     }
 
-    return this.prisma.product.findMany({
+    const products = await this.prisma.product.findMany({
       where,
       include: {
         supplier: true,
@@ -24,6 +29,32 @@ export class ProductsService {
         },
       },
       orderBy: { name: 'asc' },
+    });
+    return this.withRegionalPrices(products);
+  }
+
+  /**
+   * Face values are stored in USD. Each product also carries the price in its own
+   * region's currency, so a Turkish product reads in Lira and a Pakistani one in
+   * rupees without the caller needing to know any rates.
+   */
+  private async withRegionalPrices<T extends { region: string; denominations: any[] }>(products: T[]) {
+    const displays = await this.currencyService.displayCurrenciesForRegions(
+      products.map((product) => product.region),
+    );
+    return products.map((product) => {
+      const display = displays.get((product.region ?? '').trim());
+      return {
+        ...product,
+        regional_currency: display?.currency ?? 'USD',
+        regional_symbol: display?.symbol ?? '$',
+        denominations: product.denominations.map((denomination: any) => ({
+          ...denomination,
+          ...(display
+            ? localPrice(Number(denomination.faceValue), display)
+            : {}),
+        })),
+      };
     });
   }
 
@@ -50,13 +81,15 @@ export class ProductsService {
       : [];
     const countMap = new Map(counts.map((c) => [c.denominationId, c._count._all]));
 
-    return products.map((p) => ({
-      ...p,
-      denominations: p.denominations.map((d: any) => ({
-        ...d,
-        availableCount: countMap.get(d.id) || 0,
+    return this.withRegionalPrices(
+      products.map((p) => ({
+        ...p,
+        denominations: p.denominations.map((d: any) => ({
+          ...d,
+          availableCount: countMap.get(d.id) || 0,
+        })),
       })),
-    }));
+    );
   }
 
   async getProduct(productId: string) {
@@ -69,26 +102,54 @@ export class ProductsService {
   }
 
   async getDenominations(productId: string) {
-    const denominations = await this.prisma.denomination.findMany({
-      where: { productId },
-      include: {
-        codeItems: {
-          where: { status: 'AVAILABLE' },
-          select: { id: true },
+    const [product, denominations] = await Promise.all([
+      this.prisma.product.findUnique({ where: { id: productId }, select: { region: true } }),
+      this.prisma.denomination.findMany({
+        where: { productId },
+        include: {
+          codeItems: {
+            where: { status: 'AVAILABLE' },
+            select: { id: true },
+          },
         },
-      },
-      orderBy: { faceValue: 'asc' },
-    });
+        orderBy: { faceValue: 'asc' },
+      }),
+    ]);
 
+    const display = await this.currencyService.displayCurrencyForRegion(product?.region);
     return denominations.map((d) => ({
       id: d.id,
       face_value: d.faceValue,
       currency: d.currency,
       available_stock: d.codeItems.length,
+      ...localPrice(Number(d.faceValue), display),
     }));
   }
 
+  /**
+   * Suggest the SKU a product would get, without creating anything. The admin UI
+   * previews this while typing so the SKU is visible before the product exists.
+   */
+  async suggestSku(name: string, region: string) {
+    const base = resolveProductSkuBase(name || '', region || '');
+    const taken = await this.prisma.product.findMany({
+      where: { sku: { not: null } },
+      select: { sku: true },
+    });
+    return { sku: uniqueSku(base, taken.map((p) => p.sku!)) };
+  }
+
   async createProduct(data: { name: string; region: string; supplierId?: string; productType?: string; categoryId?: string; sku?: string }) {
+    // Every product gets a SKU, because it is what matches incoming storefront
+    // orders to this product. An explicit one is respected; otherwise one is
+    // generated, and either way a collision is resolved rather than rejected.
+    const taken = await this.prisma.product.findMany({
+      where: { sku: { not: null } },
+      select: { sku: true },
+    });
+    const base = data.sku?.trim() || resolveProductSkuBase(data.name, data.region);
+    const sku = uniqueSku(base, taken.map((p) => p.sku!));
+
     return this.prisma.product.create({
       data: {
         name: data.name,
@@ -96,7 +157,7 @@ export class ProductsService {
         supplierId: data.supplierId,
         productType: data.productType || 'NORMAL',
         categoryId: data.categoryId || null,
-        sku: data.sku || null,
+        sku,
       },
     });
   }
@@ -115,9 +176,23 @@ export class ProductsService {
   async updateProductSku(productId: string, sku: string | null) {
     const product = await this.prisma.product.findUnique({ where: { id: productId } });
     if (!product) throw new NotFoundException('Product not found');
+
+    // Incoming storefront orders are matched to a product by SKU, so two products
+    // sharing one would route orders to whichever the database returned first.
+    const normalised = sku?.trim() ? normaliseSku(sku) : null;
+    if (normalised) {
+      const clash = await this.prisma.product.findFirst({
+        where: { sku: normalised, id: { not: productId } },
+        select: { id: true, name: true },
+      });
+      if (clash) {
+        throw new BadRequestException(`SKU ${normalised} is already used by "${clash.name}"`);
+      }
+    }
+
     return this.prisma.product.update({
       where: { id: productId },
-      data: { sku },
+      data: { sku: normalised },
     });
   }
 

@@ -146,6 +146,8 @@ export const api = {
     apiFetch(`/admin/products/${productId}/type`, { method: 'PATCH', body: JSON.stringify({ product_type: productType }) }),
   updateProductCategory: (productId: string, categoryId: string | null) =>
     apiFetch(`/admin/products/${productId}/category`, { method: 'PATCH', body: JSON.stringify({ category_id: categoryId }) }),
+  suggestSku: (name: string, region: string) =>
+    apiFetch(`/admin/products/suggest-sku?${new URLSearchParams({ name, region })}`),
   updateProductSku: (productId: string, sku: string | null) =>
     apiFetch(`/admin/products/${productId}/sku`, { method: 'PATCH', body: JSON.stringify({ sku }) }),
   createDenomination: (productId: string, faceValue: number, currency?: string) =>

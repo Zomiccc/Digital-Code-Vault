@@ -151,6 +151,13 @@ export function ProductsPage() {
   const [form, setForm] = useState({ name: '', region: '', supplierId: '', product_type: 'NORMAL', category_id: '', sku: '' });
   const [denomValue, setDenomValue] = useState('');
 
+  // Preview the SKU the product will get, so it is visible before creating it.
+  const { data: suggestedSku } = useQuery({
+    queryKey: ['suggest-sku', form.name, form.region],
+    queryFn: () => api.suggestSku(form.name, form.region),
+    enabled: showCreate && form.name.trim().length > 1,
+  });
+
   const createMutation = useMutation({
     mutationFn: () => api.createProduct({ name: form.name, region: form.region, supplierId: form.supplierId || undefined, product_type: form.product_type, category_id: form.category_id || undefined, sku: form.sku || undefined }),
     onSuccess: () => {
@@ -207,7 +214,7 @@ export function ProductsPage() {
               <div>
                 <h3 className="text-lg font-semibold tracking-tight">{p.name}</h3>
                 <p className="text-sm text-muted-foreground">{p.region}</p>
-                {p.sku && <p className="text-xs text-muted-foreground/70">SKU: {p.sku}</p>}
+                <SkuEditor product={p} />
                 <div className="mt-3 flex items-center gap-2">
                   <Badge className={statusColor(p.status)}>{p.status}</Badge>
                   <Badge className={p.productType === 'ESSENTIALS' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}>
@@ -263,7 +270,32 @@ export function ProductsPage() {
         <div className="space-y-4">
           <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. PSN" />
           <Input label="Region" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} placeholder="e.g. USA" />
-          <Input label="SKU (optional — for auto-matching webhook orders)" value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="e.g. PSN-USA-10" />
+          <div className="space-y-2">
+            <Input
+              label="SKU — matches storefront orders to this product"
+              value={form.sku}
+              onChange={(e) => setForm({ ...form, sku: e.target.value })}
+              placeholder={suggestedSku?.sku || 'e.g. PSN-USA'}
+            />
+            {suggestedSku?.sku && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>Suggested: <span className="font-mono text-primary">{suggestedSku.sku}</span></span>
+                {form.sku !== suggestedSku.sku && (
+                  <button
+                    type="button"
+                    className="rounded border border-input px-2 py-0.5 hover:bg-muted"
+                    onClick={() => setForm({ ...form, sku: suggestedSku.sku })}
+                  >
+                    Use this
+                  </button>
+                )}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Leave blank and this SKU is assigned automatically. Enter the same SKU on the
+              product in your store so its orders match this product.
+            </p>
+          </div>
           <Select
             label="Supplier"
             value={form.supplierId}
@@ -467,6 +499,76 @@ function EssentialsDeliverySummary({ productId }: { productId: string }) {
       <Badge className={availability.ready ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}>
         {availability.ready ? 'READY ✓' : 'INSUFFICIENT INVENTORY'}
       </Badge>
+    </div>
+  );
+}
+
+/**
+ * The SKU is how a storefront order finds this product, so it is editable in
+ * place rather than buried in a separate screen. Saving rejects a SKU already
+ * used by another product, because a duplicate would route orders ambiguously.
+ */
+function SkuEditor({ product }: { product: any }) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(product.sku || '');
+  const [error, setError] = useState('');
+
+  const save = useMutation({
+    mutationFn: () => api.updateProductSku(product.id, value.trim() || null),
+    onSuccess: () => {
+      setEditing(false);
+      setError('');
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['sku-export'] });
+    },
+    onError: (err: any) => setError(err.message),
+  });
+
+  if (!editing) {
+    return (
+      <p className="text-xs text-muted-foreground/70">
+        SKU: {product.sku
+          ? <span className="font-mono text-foreground/80">{product.sku}</span>
+          : <span className="italic">not set</span>}
+        <button
+          type="button"
+          className="ml-2 underline hover:text-foreground"
+          onClick={() => { setValue(product.sku || ''); setEditing(true); }}
+        >
+          Edit
+        </button>
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-1 space-y-1" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center gap-1">
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value.toUpperCase())}
+          aria-label={`SKU for ${product.name}`}
+          className="w-36 rounded border border-input bg-background px-2 py-1 font-mono text-xs"
+          placeholder="PSN-KSA"
+        />
+        <button
+          type="button"
+          className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50"
+          disabled={save.isPending}
+          onClick={() => save.mutate()}
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          className="rounded border border-input px-2 py-1 text-xs"
+          onClick={() => { setEditing(false); setError(''); }}
+        >
+          Cancel
+        </button>
+      </div>
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }

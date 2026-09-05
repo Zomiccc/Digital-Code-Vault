@@ -19,6 +19,31 @@ export type ConvertedPrice = {
   amountUsd: number;
 };
 
+/** How one region's prices should be presented. */
+export type RegionDisplay = {
+  currency: string;
+  symbol: string;
+  rate: number;
+  /** False when the price is still USD, either by design or for lack of a rate. */
+  converted: boolean;
+  region: string | null;
+};
+
+/** Attach a region's local price to a USD amount, for display only. */
+export function localPrice(amountUsd: number, display: RegionDisplay) {
+  const amount = roundMoney(amountUsd * display.rate);
+  return {
+    amount_usd: roundMoney(amountUsd),
+    local_amount: amount,
+    local_currency: display.currency,
+    local_symbol: display.symbol,
+    local_formatted: `${display.symbol}${amount.toLocaleString('en-US', {
+      minimumFractionDigits: 2, maximumFractionDigits: 2,
+    })}`,
+    fx_rate: display.rate,
+  };
+}
+
 @Injectable()
 export class CurrencyService {
   private readonly logger = new Logger(CurrencyService.name);
@@ -63,6 +88,50 @@ export class CurrencyService {
     const code = normaliseCurrency(currency);
     if (code === BASE_CURRENCY) return roundMoney(amount);
     return convertToUsd(amount, await this.getRate(code));
+  }
+
+  /**
+   * How prices should be shown for a region. Unlike charging a wallet, display
+   * must never break a catalogue: a region with no Region record, or one whose
+   * currency has no rate yet, falls back to USD and says so via `converted`.
+   */
+  async displayCurrencyForRegion(regionCode: string | null | undefined): Promise<RegionDisplay> {
+    const fallback: RegionDisplay = {
+      currency: BASE_CURRENCY, symbol: '$', rate: 1, converted: false, region: regionCode ?? null,
+    };
+    const code = (regionCode ?? '').trim();
+    if (!code) return fallback;
+
+    const region = await this.prisma.region.findFirst({
+      where: { OR: [{ code }, { name: code }] },
+      select: { currency: true, symbol: true },
+    });
+    const currency = (region?.currency ?? BASE_CURRENCY).toUpperCase();
+    if (!region || currency === BASE_CURRENCY) {
+      return { ...fallback, symbol: region?.symbol || '$', currency };
+    }
+
+    const row = await this.prisma.exchangeRate.findUnique({ where: { currency } });
+    if (!row) {
+      this.logger.warn(`Region ${code} prices in ${currency} but no rate is set; showing USD`);
+      return fallback;
+    }
+    return {
+      currency,
+      symbol: region.symbol || currency,
+      rate: Number(row.unitsPerUsd),
+      converted: true,
+      region: code,
+    };
+  }
+
+  /** Resolve display currencies for many regions at once, without an N+1. */
+  async displayCurrenciesForRegions(regionCodes: (string | null | undefined)[]) {
+    const unique = [...new Set(regionCodes.map((code) => (code ?? '').trim()).filter(Boolean))];
+    const entries = await Promise.all(
+      unique.map(async (code) => [code, await this.displayCurrencyForRegion(code)] as const),
+    );
+    return new Map(entries);
   }
 
   /** Every configured rate, with USD included so callers see a complete table. */
