@@ -132,6 +132,52 @@ export class WebhookService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * Resolve an incoming storefront SKU against every level a SKU can live at.
+   *
+   * A SKU identifies a product (PSN-USA), one of its code values (PSN-USA-10),
+   * or one of its packs (PSN-USA-ESS-1M). Matching only looked at Product.sku,
+   * so a value or pack SKU was rejected as unmapped even though it was set —
+   * the stored Denomination.sku and Variant.sku columns were never consulted.
+   *
+   * A pack resolves to its variant, which is what selects the delivery rule; a
+   * code value resolves to that exact denomination.
+   */
+  private async resolveSku(sku: string): Promise<{
+    product: any; denominationId?: string; variantId?: string; matchedOn: string;
+  } | null> {
+    const value = (sku || '').trim();
+    if (!value) return null;
+
+    const product = await this.prisma.product.findFirst({
+      where: { sku: value, status: 'ACTIVE' },
+    });
+    if (product) return { product, matchedOn: 'product SKU' };
+
+    const denomination = await this.prisma.denomination.findFirst({
+      where: { sku: value },
+      include: { product: true },
+    });
+    if (denomination?.product && denomination.product.status === 'ACTIVE') {
+      return {
+        product: denomination.product,
+        denominationId: denomination.id,
+        matchedOn: 'code value SKU',
+      };
+    }
+
+    const variant = await this.prisma.variant.findFirst({
+      where: { sku: value },
+      include: { productRegion: { include: { product: true } } },
+    });
+    const variantProduct = variant?.productRegion?.product;
+    if (variant && variantProduct && variantProduct.status === 'ACTIVE') {
+      return { product: variantProduct, variantId: variant.id, matchedOn: 'pack SKU' };
+    }
+
+    return null;
+  }
+
   private async deliverWebhook(data: WebhookJobData): Promise<void> {
     const body = JSON.stringify(data.payload);
     const signature = crypto
@@ -853,6 +899,7 @@ export class WebhookService implements OnModuleDestroy {
               // Product matching — same strategies as single-item path
               let liProduct = null;
               let liExactDenominationId: string | null = null;
+              let liVariantId: string | null = null;
 
               // Strategy 1: ConnectedProduct by SKU
               let liCpMapping: any = null;
@@ -878,6 +925,19 @@ export class WebhookService implements OnModuleDestroy {
               if (!liProduct && liSku) {
                 liProduct = await this.prisma.product.findFirst({ where: { sku: liSku, status: 'ACTIVE' } });
                 if (liProduct) this.logger.log(`[WEBHOOK] Item ${liIndex + 1}: Strategy 2 matched by exact SKU: ${liSku}`);
+              }
+
+              // Strategy 2a: Stored SKU on a code value or a pack.
+              if (!liProduct && liSku) {
+                const resolved = await this.resolveSku(liSku);
+                if (resolved) {
+                  liProduct = resolved.product;
+                  if (resolved.denominationId) liExactDenominationId = resolved.denominationId;
+                  if (resolved.variantId) liVariantId = resolved.variantId;
+                  this.logger.log(
+                    `[WEBHOOK] Line item ${liIndex + 1}: matched by ${resolved.matchedOn}: ${liSku}`,
+                  );
+                }
               }
 
               // Strategy 2b: Denomination SKU match (PSN-USA-150 → product PSN-USA, denom $150)
@@ -977,7 +1037,7 @@ export class WebhookService implements OnModuleDestroy {
                       actorId: 'webhook-processor',
                       inventorySource: liInventorySource,
                       denominationId: liFulfillmentDenominationId || undefined,
-                      variantId: liCpMapping?.dcvVariantId || undefined,
+                      variantId: liCpMapping?.dcvVariantId || liVariantId || undefined,
                     });
                     break;
                   } catch (err: any) {
@@ -1050,6 +1110,8 @@ export class WebhookService implements OnModuleDestroy {
       this.logger.log(`[WEBHOOK] Looking for product: ${webhook.productName || webhook.productId} (SKU: ${webhook.productSku || 'N/A'})`);
       let product = null;
       let exactDenominationId: string | null = null;
+      // Set when the SKU resolved to a pack, so its delivery rule is used.
+      let matchedVariantId: string | null = null;
       const searchName = webhook.productName || '';
       const searchId = webhook.productId || '';
       const searchSku = webhook.productSku || '';
@@ -1113,6 +1175,31 @@ export class WebhookService implements OnModuleDestroy {
               data: { dcvProductId: product.id },
             }).catch((err) => {
               this.logger.warn(`[WEBHOOK] Failed to persist SKU auto-match on ConnectedProduct: ${(err as Error).message}`);
+            });
+          }
+        }
+      }
+
+      // Strategy 2a: Stored SKU on a code value or a pack.
+      if (!product && searchSku) {
+        const resolved = await this.resolveSku(searchSku);
+        if (resolved) {
+          product = resolved.product;
+          if (resolved.denominationId) exactDenominationId = resolved.denominationId;
+          if (resolved.variantId) matchedVariantId = resolved.variantId;
+          this.logger.log(
+            `[WEBHOOK] Auto-matched product "${product.name}" via ${resolved.matchedOn}: ${searchSku}`,
+          );
+          if (connectedProduct?.id) {
+            await this.prisma.connectedProduct.update({
+              where: { id: connectedProduct.id },
+              data: {
+                dcvProductId: product.id,
+                ...(resolved.denominationId ? { dcvDenominationId: resolved.denominationId } : {}),
+                ...(resolved.variantId ? { dcvVariantId: resolved.variantId } : {}),
+              },
+            }).catch((err) => {
+              this.logger.warn(`[WEBHOOK] Failed to persist SKU auto-match: ${(err as Error).message}`);
             });
           }
         }
@@ -1350,7 +1437,7 @@ export class WebhookService implements OnModuleDestroy {
               actorId: 'webhook-processor',
               inventorySource,
               denominationId: fulfillmentDenominationId || undefined,
-              variantId: cpMapping?.dcvVariantId || undefined,
+              variantId: cpMapping?.dcvVariantId || matchedVariantId || undefined,
             });
             break;
           } catch (err: any) {
@@ -1421,6 +1508,7 @@ export class WebhookService implements OnModuleDestroy {
             // Match product for this line item
             let liProduct = null;
             let liExactDenominationId: string | null = null;
+              let liVariantId: string | null = null;
 
             // Strategy 1: ConnectedProduct mapping by SKU
             let liCpMapping: any = null;
@@ -1447,6 +1535,19 @@ export class WebhookService implements OnModuleDestroy {
             if (!liProduct && liSku) {
               liProduct = await this.prisma.product.findFirst({ where: { sku: liSku, status: 'ACTIVE' } });
               if (liProduct) this.logger.log(`[WEBHOOK] Line item ${liIndex + 1}: Strategy 2 matched product by exact SKU: ${liSku}`);
+            }
+
+            // Strategy 2a: Stored SKU on a code value or a pack.
+            if (!liProduct && liSku) {
+              const resolved = await this.resolveSku(liSku);
+              if (resolved) {
+                liProduct = resolved.product;
+                if (resolved.denominationId) liExactDenominationId = resolved.denominationId;
+                if (resolved.variantId) liVariantId = resolved.variantId;
+                this.logger.log(
+                  `[WEBHOOK] Line item ${liIndex + 1}: matched by ${resolved.matchedOn}: ${liSku}`,
+                );
+              }
             }
 
             // Strategy 2b: Denomination SKU match (e.g. PSN-USA-100 → product PSN-USA, denom $100)
@@ -1541,7 +1642,7 @@ export class WebhookService implements OnModuleDestroy {
                   actorId: 'webhook-processor',
                   inventorySource: liInventorySource,
                   denominationId: liFulfillmentDenominationId || undefined,
-                  variantId: liCpMapping?.dcvVariantId || undefined,
+                  variantId: liCpMapping?.dcvVariantId || liVariantId || undefined,
                 });
                 break;
               } catch (err: any) {
