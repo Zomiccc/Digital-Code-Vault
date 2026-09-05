@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo, useEffect } from 'react';
-import { Plus, Trash2, Search, AlertTriangle, CheckCircle2, Package } from 'lucide-react';
+import { Plus, Trash2, Search, AlertTriangle, CheckCircle2, Package, Pencil } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Input, Badge, Modal } from '@/components/ui';
 import { formatPrice } from '@/lib/utils';
@@ -107,7 +107,15 @@ export function FulfillmentPresetsPage() {
 
       <div className="space-y-3">
         {items.map((item) => (
-          <ItemRow key={item.variant.id} item={item} onEdit={() => setEditing(item)} />
+          <ItemRow
+            key={item.variant.id}
+            item={item}
+            onEdit={() => setEditing(item)}
+            onPriceSaved={() => {
+              queryClient.invalidateQueries({ queryKey: ['catalog-hierarchy'] });
+              queryClient.invalidateQueries({ queryKey: ['all-combinations'] });
+            }}
+          />
         ))}
         {!loading && items.length === 0 && (
           <Card className="py-12 text-center text-muted-foreground">
@@ -132,7 +140,7 @@ export function FulfillmentPresetsPage() {
 }
 
 /** One sellable item and, in plain words, what it delivers. */
-function ItemRow({ item, onEdit }: { item: any; onEdit: () => void }) {
+function ItemRow({ item, onEdit, onPriceSaved }: { item: any; onEdit: () => void; onPriceSaved: () => void }) {
   const active = item.rules.filter((rule: any) => rule.active);
   const main = active[0];
   const deliverable = !!main;
@@ -146,9 +154,7 @@ function ItemRow({ item, onEdit }: { item: any; onEdit: () => void }) {
             <Badge className="bg-muted text-muted-foreground">
               {item.product.name} · {item.region?.code || item.product.region}
             </Badge>
-            <span className="text-sm text-muted-foreground">
-              {formatPrice(item.variant.customerPrice, item.variant.currency)}
-            </span>
+            <PriceEditor item={item} onSaved={onPriceSaved} />
           </div>
 
           {deliverable ? (
@@ -370,4 +376,91 @@ function describeLines(chosen: { denomination: any; quantity: number }[]): strin
       return quantity > 1 ? `$${value} × ${quantity}` : `$${value}`;
     })
     .join(' + ');
+}
+
+/**
+ * The price of one item, editable in place.
+ *
+ * The seed gave every region the same US dollar price, so a Saudi item read
+ * "$9.99" when it should be priced in riyals. The currency defaults to the
+ * region's own, and both the amount and the currency are editable, because only
+ * the operator knows what an item actually sells for locally.
+ *
+ * A rule's codes must add up to this price, so changing it can leave an existing
+ * rule mismatched — that shows up as a warning in the rule editor rather than
+ * being silently corrected, since which side is wrong is the operator's call.
+ */
+function PriceEditor({ item, onSaved }: { item: any; onSaved: () => void }) {
+  const regionCurrency = item.region?.currency || item.variant.currency || 'USD';
+  const [open, setOpen] = useState(false);
+  const [price, setPrice] = useState(String(Number(item.variant.customerPrice)));
+  const [currency, setCurrency] = useState(item.variant.currency || regionCurrency);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setPrice(String(Number(item.variant.customerPrice)));
+    setCurrency(item.variant.currency || regionCurrency);
+  }, [item.variant.id, item.variant.customerPrice, item.variant.currency, regionCurrency]);
+
+  const amount = Number(price);
+  const valid = Number.isFinite(amount) && amount > 0 && /^[A-Za-z]{3}$/.test(currency.trim());
+
+  const save = useMutation({
+    mutationFn: () => api.updateVariant(item.variant.id, {
+      customerPrice: amount,
+      currency: currency.trim().toUpperCase(),
+    }),
+    onSuccess: () => { setError(''); setOpen(false); onSaved(); },
+    onError: (err: any) => setError(err.message),
+  });
+
+  const mismatched = (item.variant.currency || 'USD') !== regionCurrency;
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title="Edit this price"
+        className="group/price inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+      >
+        {formatPrice(item.variant.customerPrice, item.variant.currency)}
+        {mismatched && (
+          <span className="text-xs text-amber-500" title={`This region prices in ${regionCurrency}`}>
+            (not {regionCurrency})
+          </span>
+        )}
+        <Pencil className="h-3 w-3 opacity-0 transition-opacity group-hover/price:opacity-100" />
+      </button>
+    );
+  }
+
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      <input
+        type="number" min="0" step="0.01" value={price}
+        aria-label={`Price for ${item.variant.name}`}
+        onChange={(e) => setPrice(e.target.value)}
+        className="w-24 rounded border border-input bg-background px-2 py-1 text-sm"
+      />
+      <input
+        value={currency}
+        aria-label={`Currency for ${item.variant.name}`}
+        onChange={(e) => setCurrency(e.target.value.toUpperCase().slice(0, 3))}
+        className="w-16 rounded border border-input bg-background px-2 py-1 font-mono text-xs"
+      />
+      {currency !== regionCurrency && (
+        <button
+          type="button"
+          className="rounded border border-input px-2 py-1 text-xs hover:bg-muted"
+          onClick={() => setCurrency(regionCurrency)}
+        >
+          Use {regionCurrency}
+        </button>
+      )}
+      <Button size="sm" disabled={!valid || save.isPending} onClick={() => save.mutate()}>Save</Button>
+      <Button size="sm" variant="ghost" onClick={() => { setOpen(false); setError(''); }}>Cancel</Button>
+      {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
+    </span>
+  );
 }

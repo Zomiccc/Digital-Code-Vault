@@ -19,6 +19,7 @@ const FinancePage = lazy(() => import('@/pages/FinancePage').then(module => ({ d
 const MerchantWalletPage = lazy(() => import('@/pages/MerchantWalletPage').then(module => ({ default: module.MerchantWalletPage })));
 const AuditLogsPage = lazy(() => import('@/pages/AuditLogsPage').then(module => ({ default: module.AuditLogsPage })));
 const EmailLogsPage = lazy(() => import('@/pages/EmailLogsPage').then(module => ({ default: module.EmailLogsPage })));
+const CurrencyPage = lazy(() => import('@/pages/CurrencyPage').then(module => ({ default: module.CurrencyPage })));
 const EmergencyPage = lazy(() => import('@/pages/EmergencyPage').then(module => ({ default: module.EmergencyPage })));
 const StaffPage = lazy(() => import('@/pages/StaffPage').then(module => ({ default: module.StaffPage })));
 const MerchantApplicationsPage = lazy(() => import('@/pages/MerchantApplicationsPage').then(module => ({ default: module.MerchantApplicationsPage })));
@@ -83,6 +84,7 @@ function ProtectedRoutes() {
               <Route path="/admin/audit" element={<AuditLogsPage />} />
               <Route path="/admin/email-logs" element={<EmailLogsPage />} />
               <Route path="/admin/staff" element={<StaffPage />} />
+              <Route path="/admin/currency" element={<CurrencyPage />} />
               <Route path="/admin/emergency" element={<EmergencyPage />} />
               <Route path="/" element={<Navigate to="/admin/dashboard" replace />} />
             </>
