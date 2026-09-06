@@ -246,16 +246,17 @@ class DCV_Webhook_Hooks {
         $items = $order->get_items();
         $first_item = ! empty( $items ) ? reset( $items ) : null;
 
-        // Build line_items array with ALL items in the order.
+        // Build a line_items array with ALL products in the order, not just the first.
         $line_items = array();
         foreach ( $items as $item ) {
             $product = $item->get_product();
             $line_items[] = array(
-                'product_id'    => strval( $item->get_product_id() ),
-                'name'          => $item->get_name(),
-                'sku'           => $product ? $product->get_sku() : null,
-                'quantity'      => $item->get_quantity(),
-                'variation_id'  => strval( $item->get_variation_id() ),
+                'product_id'   => strval( $item->get_product_id() ),
+                'name'         => $item->get_name(),
+                'sku'          => $product ? $product->get_sku() : null,
+                'quantity'     => $item->get_quantity(),
+                'variation_id' => strval( $item->get_variation_id() ),
+                'total'        => floatval( $item->get_total() ),
             );
         }
 
@@ -265,13 +266,13 @@ class DCV_Webhook_Hooks {
             'product_id'     => $first_item ? strval( $first_item->get_product_id() ) : null,
             'product_name'   => $first_item ? $first_item->get_name() : null,
             'product_sku'    => $first_item && $first_item->get_product() ? $first_item->get_product()->get_sku() : null,
+            'line_items'     => $line_items,
             'customer_name'  => trim( $order->get_billing_first_name() . ' ' . $order->get_billing_last_name() ),
             'customer_email' => $order->get_billing_email(),
             'amount'         => floatval( $order->get_total() ),
             'currency'       => $order->get_currency(),
             'payment_status' => $status,
             'order_status'   => $order->get_status(),
-            'line_items'     => $line_items,
         );
 
         // Store reference ID on the order for later matching (platform → WooCommerce).

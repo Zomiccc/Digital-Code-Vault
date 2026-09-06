@@ -72,6 +72,29 @@ cd ../..
 
 cd apps/api
 
+# Step 3c: Package the WordPress plugin next to the code that serves it.
+# The download resolved the ZIP through paths that depended on where the process
+# was started, and in production none of them existed — merchants got "not
+# available" while the plugin sat in the repository. Writing it beside the
+# compiled service makes the first candidate hold regardless of layout. The
+# source is copied too, so the on-demand archive fallback also works.
+echo "--- Packaging WordPress plugin ---"
+PLUGIN_SRC="$(cd ../.. && pwd)/connectors/wp-dcv-webhook"
+PLUGIN_DEST_DIR="dist/merchants"
+if [ -d "$PLUGIN_SRC" ]; then
+  mkdir -p "$PLUGIN_DEST_DIR/connectors"
+  cp -r "$PLUGIN_SRC" "$PLUGIN_DEST_DIR/connectors/"
+  if command -v zip >/dev/null 2>&1; then
+    ( cd "$(dirname "$PLUGIN_SRC")" && zip -qr - wp-dcv-webhook ) > "$PLUGIN_DEST_DIR/dcv-webhook-plugin.zip"
+    echo "OK: plugin ZIP written to $PLUGIN_DEST_DIR/dcv-webhook-plugin.zip"
+  else
+    # No zip binary: the copied source above lets the API build the archive itself.
+    echo "NOTE: zip not available; the API will archive the plugin on demand"
+  fi
+else
+  echo "WARNING: plugin source not found at $PLUGIN_SRC"
+fi
+
 # Step 4a: Reconcile the schema directly.
 # The recorded migration history cannot be trusted here: it lists migrations as
 # applied whose DDL never ran, so `migrate deploy` succeeds while changing

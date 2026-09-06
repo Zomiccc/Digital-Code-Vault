@@ -13,34 +13,50 @@ export class PluginDownloadService {
   private readonly sourceCandidates: string[];
 
   constructor() {
-    const parentDir = path.resolve(__dirname, '..');
-    const grandParentDir = path.resolve(parentDir, '..');
+    const distDir = path.resolve(__dirname, '..');       // apps/api/dist
+    const apiDir = path.resolve(distDir, '..');          // apps/api
+    const repoRoot = path.resolve(apiDir, '..', '..');   // repo root
 
+    // Ordered by how much they can be relied on. The first two are relative to
+    // this file, so they hold wherever the process is started from; the rest
+    // depend on the surrounding layout and are only a convenience for local runs.
+    //
+    // Every candidate used to be layout-dependent, and in production none of
+    // them existed — which is why the download answered "not available" while
+    // the ZIP sat happily in the repository. deploy-build.sh now writes the ZIP
+    // next to this file, so candidate 1 is the one that actually serves it.
     this.zipCandidates = [
-      // 1. Copied into apps/api/dist/ by deploy-build.sh (most reliable on Hostinger)
       path.resolve(__dirname, 'dcv-webhook-plugin.zip'),
-      // 2. Hostinger create-launcher layout: dist/public/merchant/
-      path.resolve(__dirname, 'public', 'merchant', 'dcv-webhook-plugin.zip'),
-      // 3. apps/merchant/public/ relative to apps/api/dist/.. = apps/api/../merchant = wrong
-      //    relative to apps/api/dist/../.. = apps/merchant — correct for standard layout
-      path.resolve(grandParentDir, 'merchant', 'public', 'dcv-webhook-plugin.zip'),
-      // 4. Relative to process.cwd() (Hostinger cwd = repo root or nodejs/)
+      path.resolve(distDir, 'dcv-webhook-plugin.zip'),
+      path.resolve(distDir, 'public', 'merchant', 'dcv-webhook-plugin.zip'),
+      path.resolve(repoRoot, 'apps', 'merchant', 'public', 'dcv-webhook-plugin.zip'),
+      path.resolve(repoRoot, 'dist', 'public', 'merchant', 'dcv-webhook-plugin.zip'),
       path.resolve(process.cwd(), 'apps', 'merchant', 'public', 'dcv-webhook-plugin.zip'),
-      // 5. Relative to process.cwd() without apps/ prefix
-      path.resolve(process.cwd(), 'merchant', 'public', 'dcv-webhook-plugin.zip'),
+      path.resolve(process.cwd(), 'dist', 'public', 'merchant', 'dcv-webhook-plugin.zip'),
     ];
 
+    // Building the archive from source is the backstop, so a missing ZIP can
+    // never make the download unavailable. The previous repo-root path was off
+    // by a directory, so this never fired either.
     this.sourceCandidates = [
-      // Local dev: project root / connectors / wp-dcv-webhook
-      path.resolve(parentDir, '..', '..', 'connectors', 'wp-dcv-webhook'),
-      // Hostinger fallback: dist/connectors/wp-dcv-webhook
       path.resolve(__dirname, 'connectors', 'wp-dcv-webhook'),
+      path.resolve(distDir, 'connectors', 'wp-dcv-webhook'),
+      path.resolve(repoRoot, 'connectors', 'wp-dcv-webhook'),
+      path.resolve(process.cwd(), 'connectors', 'wp-dcv-webhook'),
     ];
 
-    const zipFound = this.zipCandidates.find((p) => fs.existsSync(p));
-    const srcFound = this.sourceCandidates.find((p) => fs.existsSync(p));
-    if (!zipFound && !srcFound) {
-      this.logger.warn('WordPress plugin ZIP and source directory not found in any candidate path.');
+    const zipFound = this.zipCandidates.find((candidate) => fs.existsSync(candidate));
+    const srcFound = this.sourceCandidates.find((candidate) => fs.existsSync(candidate));
+    if (zipFound) {
+      this.logger.log(`WordPress plugin ZIP available at ${zipFound}`);
+    } else if (srcFound) {
+      this.logger.log(`WordPress plugin will be archived on demand from ${srcFound}`);
+    } else {
+      // Loud, because the merchant-facing symptom is a download that just fails.
+      this.logger.error(
+        'WordPress plugin not found as a ZIP or as source. Checked ZIPs: ' +
+        `${this.zipCandidates.join(', ')} | sources: ${this.sourceCandidates.join(', ')}`,
+      );
     }
   }
 
@@ -84,7 +100,10 @@ export class PluginDownloadService {
     }
 
     // 3. Nothing found.
-    this.logger.error('Plugin ZIP not found in any location.');
+    this.logger.error(
+      'Plugin ZIP not found in any location. Checked: ' +
+      `${this.zipCandidates.join(', ')} | sources: ${this.sourceCandidates.join(', ')}`,
+    );
     res.status(404).json({
       error: 'PLUGIN_NOT_FOUND',
       message: 'WordPress plugin is not available on this server.',

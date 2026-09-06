@@ -106,4 +106,8 @@ if ( ! defined( 'ABSPATH' ) ) {
     <p class="description">
         <?php echo esc_html__( 'All webhook operations (registration, forwarding, delivery verification) are logged to the WordPress error log with the prefix [DCV-Webhook]. Check your server error log for troubleshooting.', 'dcv-webhook' ); ?>
     </p>
+
+    <p class="description" style="margin-top:20px;">
+        <?php printf( esc_html__( 'DCV Webhook Connector v%s', 'dcv-webhook' ), esc_html( DCV_WEBHOOK_VERSION ) ); ?>
+    </p>
 </div>
