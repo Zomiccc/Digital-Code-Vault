@@ -503,6 +503,23 @@ export class AdminController {
     return this.emergencyService.setMerchantFrozen(id, body.frozen, user.id, req.ip);
   }
 
+  @Get('emergency/merchants/:id/deletion-preview')
+  @Roles('SUPER_ADMIN')
+  async previewMerchantDeletion(@Param('id') id: string) {
+    return this.emergencyService.previewMerchantDeletion(id);
+  }
+
+  @Delete('emergency/merchants/:id')
+  @Roles('SUPER_ADMIN')
+  async deleteMerchant(
+    @Param('id') id: string,
+    @Body() body: { confirm_name: string },
+    @CurrentUser() user: any,
+    @Req() req: any,
+  ) {
+    return this.emergencyService.deleteMerchant(id, body?.confirm_name, user.id, req.ip);
+  }
+
   @Post('emergency/merchants-all')
   @Roles('SUPER_ADMIN')
   async freezeAllMerchants(

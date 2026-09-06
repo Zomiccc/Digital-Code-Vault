@@ -201,6 +201,13 @@ export const api = {
   listEmergencyTargets: () => apiFetch('/admin/emergency/targets'),
   freezeMerchant: (id: string, frozen: boolean) =>
     apiFetch(`/admin/emergency/merchants/${id}`, { method: 'POST', body: JSON.stringify({ frozen }) }),
+  previewMerchantDeletion: (id: string) =>
+    apiFetch(`/admin/emergency/merchants/${id}/deletion-preview`),
+  deleteMerchantAccount: (id: string, confirmName: string) =>
+    apiFetch(`/admin/emergency/merchants/${id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ confirm_name: confirmName }),
+    }),
   freezeAllMerchants: (frozen: boolean) =>
     apiFetch('/admin/emergency/merchants-all', { method: 'POST', body: JSON.stringify({ frozen }) }),
   freezeProduct: (id: string, frozen: boolean) =>

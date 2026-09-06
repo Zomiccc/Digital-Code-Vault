@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo } from 'react';
-import { ShieldAlert, Search, Lock, Unlock } from 'lucide-react';
+import { ShieldAlert, Search, Lock, Unlock, Trash2, AlertTriangle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Badge, Modal, Table, Th, Td } from '@/components/ui';
 import { formatDate } from '@/lib/utils';
@@ -18,6 +18,7 @@ export function EmergencyPage() {
   const [search, setSearch] = useState('');
   const [confirm, setConfirm] = useState<null | { title: string; body: string; run: () => Promise<any> }>(null);
   const [error, setError] = useState('');
+  const [deleting, setDeleting] = useState<any>(null);
 
   const { data: status } = useQuery({ queryKey: ['emergency-status'], queryFn: api.getEmergencyStop });
   const { data: targets, isLoading } = useQuery({ queryKey: ['emergency-targets'], queryFn: api.listEmergencyTargets });
@@ -192,6 +193,7 @@ export function EmergencyPage() {
                     : 'This merchant will be able to order again immediately.',
                   run: () => api.freezeMerchant(merchant.id, frozen),
                 })}
+                onDelete={() => setDeleting(merchant)}
               />
             ))}
             {tab === 'products' && filtered.products.map((product: any) => (
@@ -238,6 +240,14 @@ export function EmergencyPage() {
         </Table>
       </Card>
 
+      {deleting && (
+        <DeleteMerchantModal
+          merchant={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => { setDeleting(null); setError(''); refresh(); }}
+        />
+      )}
+
       <Modal open={!!confirm} onClose={() => setConfirm(null)} title={confirm?.title || ''}>
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">{confirm?.body}</p>
@@ -271,10 +281,11 @@ function Count({ label, frozen, total }: { label: string; frozen?: number; total
 }
 
 function Row({
-  name, secondary, frozen, status, pending, onToggle, mono,
+  name, secondary, frozen, status, pending, onToggle, onDelete, mono,
 }: {
   name: string; secondary: string; frozen: boolean; status: string;
-  pending: boolean; onToggle: (frozen: boolean) => void; mono?: boolean;
+  pending: boolean; onToggle: (frozen: boolean) => void;
+  onDelete?: () => void; mono?: boolean;
 }) {
   return (
     <tr className="hover:bg-muted/30">
@@ -286,15 +297,139 @@ function Row({
         </Badge>
       </Td>
       <Td className="text-right">
-        <Button
-          size="sm"
-          variant={frozen ? 'secondary' : 'outline'}
-          disabled={pending}
-          onClick={() => onToggle(!frozen)}
-        >
-          {frozen ? 'Release' : 'Freeze'}
-        </Button>
+        <div className="flex justify-end gap-2">
+          <Button
+            size="sm"
+            variant={frozen ? 'secondary' : 'outline'}
+            disabled={pending}
+            onClick={() => onToggle(!frozen)}
+          >
+            {frozen ? 'Release' : 'Freeze'}
+          </Button>
+          {onDelete && (
+            <Button
+              size="sm"
+              variant="ghost"
+              title="Delete this account permanently"
+              onClick={onDelete}
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          )}
+        </div>
       </Td>
     </tr>
+  );
+}
+
+/**
+ * Deleting a merchant cannot be undone, so this shows exactly what goes before
+ * asking, and requires the name to be typed back.
+ *
+ * Their codes are not destroyed: the schema cascades CodeItem from Merchant, so
+ * a plain delete would take real encrypted stock with it. The server detaches
+ * those to the platform first, and the counts below say so.
+ */
+function DeleteMerchantModal({
+  merchant, onClose, onDeleted,
+}: { merchant: any; onClose: () => void; onDeleted: () => void }) {
+  const [typed, setTyped] = useState('');
+  const [error, setError] = useState('');
+
+  const { data: preview, isLoading } = useQuery({
+    queryKey: ['merchant-deletion-preview', merchant.id],
+    queryFn: () => api.previewMerchantDeletion(merchant.id),
+  });
+
+  const remove = useMutation({
+    mutationFn: () => api.deleteMerchantAccount(merchant.id, typed.trim()),
+    onSuccess: onDeleted,
+    onError: (err: any) => setError(err.message),
+  });
+
+  const nameMatches = typed.trim() === merchant.name.trim();
+  const blocked = (preview?.blockers?.length ?? 0) > 0;
+
+  return (
+    <Modal open onClose={onClose} title={`Delete ${merchant.name}?`} size="lg">
+      <div className="space-y-5">
+        <div className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+          <p className="text-sm text-muted-foreground">
+            This cannot be undone. Freezing the account blocks all ordering and keeps everything —
+            prefer that unless you are removing a test account or a mistake.
+          </p>
+        </div>
+
+        {isLoading && <p role="status" className="text-sm text-muted-foreground">Checking what this would remove...</p>}
+
+        {preview && (
+          <>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-destructive">
+                Permanently deleted
+              </p>
+              <ul className="space-y-1 text-sm">
+                {Object.entries(preview.will_delete).map(([label, count]) => (
+                  <li key={label} className="flex justify-between">
+                    <span className="text-muted-foreground">{label.replace(/_/g, ' ')}</span>
+                    <span className="font-medium tabular-nums">{String(count)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-emerald-500">Kept</p>
+              <ul className="space-y-1 text-sm">
+                {Object.entries(preview.will_keep).map(([label, count]) => (
+                  <li key={label} className="flex justify-between">
+                    <span className="text-muted-foreground">{label.replace(/_/g, ' ')}</span>
+                    <span className="font-medium tabular-nums">{String(count)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {blocked && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+                {preview.blockers.map((blocker: string) => (
+                  <p key={blocker} className="text-sm text-amber-500">{blocker}</p>
+                ))}
+              </div>
+            )}
+
+            {!blocked && (
+              <div className="space-y-2">
+                <label className="text-sm text-muted-foreground" htmlFor="confirm-merchant-name">
+                  Type <span className="font-semibold text-foreground">{merchant.name}</span> to confirm
+                </label>
+                <input
+                  id="confirm-merchant-name"
+                  value={typed}
+                  onChange={(e) => setTyped(e.target.value)}
+                  autoComplete="off"
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm"
+                />
+              </div>
+            )}
+          </>
+        )}
+
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancel</Button>
+          <Button
+            variant="destructive"
+            className="flex-1"
+            disabled={!preview || blocked || !nameMatches || remove.isPending}
+            onClick={() => remove.mutate()}
+          >
+            {remove.isPending ? 'Deleting...' : 'Delete permanently'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
