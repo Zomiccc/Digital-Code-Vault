@@ -195,7 +195,7 @@ export const api = {
     apiFetch(`/admin/codes/batches/${batchId}/priority`, { method: 'PATCH', body: JSON.stringify({ priority }) }),
   prioritiseBatchFirst: (batchId: string) =>
     apiFetch(`/admin/codes/batches/${batchId}/use-first`, { method: 'POST' }),
-  createManualOrder: (data: { productId: string; amount: number; discountAmount?: number; currency?: string; variantId?: string; customerEmail?: string; customerName?: string }) =>
+  createManualOrder: (data: any) =>
     apiFetch('/admin/orders/create', { method: 'POST', body: JSON.stringify(data) }),
   getEmergencyStop: () => apiFetch('/admin/system/emergency'),
   listEmergencyTargets: () => apiFetch('/admin/emergency/targets'),

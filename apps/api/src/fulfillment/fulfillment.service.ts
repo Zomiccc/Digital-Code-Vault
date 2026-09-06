@@ -58,6 +58,9 @@ export class FulfillmentService {
     denominationId?: string; // exact denomination to use (from SKU mapping)
     variantId?: string; // variant to use for FulfillmentCombination lookup
     chargeAmount?: number; // ADMIN only; reduces recorded revenue, never allocation
+    // ADMIN only; the currency that charge is stated in, so a manual sale made
+    // in rupees is recorded as rupees rather than assumed to be dollars.
+    chargeCurrency?: string;
   }) {
     const { merchantId, productId, amount, currency, referenceId, idempotencyKey, sandbox, customerEmail, customerName, customerAddress, actorId, actorType, ip } = params;
     if (params.chargeAmount !== undefined && actorType !== 'ADMIN') {
@@ -757,6 +760,12 @@ export class FulfillmentService {
               referenceId,
               status: 'PENDING',
               discountAmount: pricing?.discount_amount ?? 0,
+              ...(pricing && params.chargeCurrency
+                ? {
+                    chargedCurrency: normaliseCurrency(params.chargeCurrency),
+                    chargedAmount: pricing.charge_amount,
+                  }
+                : {}),
               sandbox: sandbox || false,
               customerEmail: customerEmail || null,
               customerName: customerName || null,

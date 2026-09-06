@@ -28,6 +28,7 @@ export const REQUIRED_SCHEMA: { table: string; column: string }[] = [
   { table: 'Denomination', column: 'sku' },
   { table: 'Variant', column: 'sku' },
   { table: 'MerchantWallet', column: 'balance' },
+  { table: 'SellingPrice', column: 'amount' },
 ];
 
 /**
@@ -65,6 +66,31 @@ export const REPAIR_STATEMENTS: string[] = [
      CONSTRAINT "MerchantWallet_pkey" PRIMARY KEY ("id")
    )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "MerchantWallet_merchantId_currency_key" ON "MerchantWallet" ("merchantId", "currency")`,
+  `CREATE TABLE IF NOT EXISTS "SellingPrice" (
+     "id" TEXT NOT NULL,
+     "itemType" TEXT NOT NULL,
+     "itemId" TEXT NOT NULL,
+     "currency" TEXT NOT NULL,
+     "amount" DECIMAL(65,30) NOT NULL,
+     "updatedBy" TEXT,
+     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     CONSTRAINT "SellingPrice_pkey" PRIMARY KEY ("id")
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "SellingPrice_itemType_itemId_currency_key" ON "SellingPrice" ("itemType", "itemId", "currency")`,
+  `CREATE INDEX IF NOT EXISTS "SellingPrice_itemId_idx" ON "SellingPrice" ("itemId")`,
+  // Seed each item's existing price as its price in the currency it is already
+  // stated in, so nothing changes value and only the other currency is left to set.
+  `INSERT INTO "SellingPrice" ("id", "itemType", "itemId", "currency", "amount", "createdAt", "updatedAt")
+   SELECT gen_random_uuid()::text, 'DENOMINATION', d."id", UPPER(COALESCE(d."currency", 'USD')),
+          d."faceValue", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+   FROM "Denomination" d
+   ON CONFLICT ("itemType", "itemId", "currency") DO NOTHING`,
+  `INSERT INTO "SellingPrice" ("id", "itemType", "itemId", "currency", "amount", "createdAt", "updatedAt")
+   SELECT gen_random_uuid()::text, 'VARIANT', v."id", UPPER(COALESCE(v."currency", 'USD')),
+          v."customerPrice", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+   FROM "Variant" v
+   ON CONFLICT ("itemType", "itemId", "currency") DO NOTHING`,
   `CREATE INDEX IF NOT EXISTS "MerchantWallet_merchantId_spendOrder_idx" ON "MerchantWallet" ("merchantId", "spendOrder")`,
   // Carry each existing balance into a wallet of the currency it is already
   // held in. Nothing is converted, so no balance changes value.

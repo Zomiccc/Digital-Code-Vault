@@ -12,13 +12,19 @@ export function FulfillmentPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [orderResult, setOrderResult] = useState<any>(null);
   const [copied, setCopied] = useState(false);
-  const [orderForm, setOrderForm] = useState({ productId: '', variantId: '', amount: '', discountAmount: '', customerEmail: '', customerName: '' });
+  const [orderForm, setOrderForm] = useState({
+    productId: '', variantId: '', amount: '', chargeAmount: '',
+    chargeCurrency: 'USD', customerEmail: '', customerName: '',
+  });
   const amount = Number(orderForm.amount);
-  const discount = Number(orderForm.discountAmount);
+  // What to charge is entered; the discount is worked out from it, so the two
+  // can never disagree and the admin types the number they actually care about.
+  const charge = orderForm.chargeAmount === '' ? amount : Number(orderForm.chargeAmount);
   const validMoney = (value: number) => Number.isFinite(value) && Number.isSafeInteger(Math.round(value * 100)) && Math.abs(value * 100 - Math.round(value * 100)) < 1e-7;
   const validAmount = validMoney(amount) && amount > 0;
-  const validDiscount = validMoney(discount) && discount >= 0 && discount <= amount;
-  const netAmount = (Math.round(amount * 100) - Math.round(discount * 100)) / 100;
+  const validCharge = validMoney(charge) && charge >= 0 && charge <= amount;
+  const discount = validCharge ? (Math.round(amount * 100) - Math.round(charge * 100)) / 100 : 0;
+  const netAmount = validCharge ? charge : amount;
 
   const { data: hierarchyForOrder } = useQuery({ queryKey: ['catalog-hierarchy'], queryFn: api.getCatalogHierarchy, enabled: showCreate });
   const orderProducts = (hierarchyForOrder || []).flatMap((c: any) => c.products);
@@ -35,7 +41,8 @@ export function FulfillmentPage() {
     mutationFn: () => api.createManualOrder({
       productId: orderForm.productId,
       amount: parseFloat(orderForm.amount),
-      discountAmount: orderForm.discountAmount === '' ? undefined : discount,
+      chargeAmount: orderForm.chargeAmount === '' ? undefined : charge,
+      chargeCurrency: orderForm.chargeCurrency,
       variantId: orderForm.variantId || undefined,
       customerEmail: orderForm.customerEmail || undefined,
       customerName: orderForm.customerName || undefined,
@@ -43,7 +50,10 @@ export function FulfillmentPage() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['fulfillment'] });
       setOrderResult(data);
-      setOrderForm({ productId: '', variantId: '', amount: '', discountAmount: '', customerEmail: '', customerName: '' });
+      setOrderForm({
+        productId: '', variantId: '', amount: '', chargeAmount: '',
+        chargeCurrency: 'USD', customerEmail: '', customerName: '',
+      });
     },
   });
 
@@ -90,8 +100,10 @@ export function FulfillmentPage() {
               <div><span className="text-muted-foreground">Status:</span> <span className="font-medium">{orderResult.status}</span></div>
               <div><span className="text-muted-foreground">Allocation:</span> {orderResult.allocation?.join(', ')}</div>
               <div>Original value: {formatPrice(orderResult.original_amount, orderResult.currency)}</div>
+              <div className="font-semibold">
+                Charged: {formatPrice(orderResult.charge_amount ?? orderResult.net_amount, orderResult.currency)}
+              </div>
               <div>Discount: {formatPrice(orderResult.discount_amount, orderResult.currency)}</div>
-              <div className="font-semibold">Net price: {formatPrice(orderResult.net_amount, orderResult.currency)}</div>
               {orderResult.delivery_link && (
                 <div className="pt-2">
                   <div className="text-muted-foreground mb-1">Delivery Link:</div>
@@ -117,7 +129,7 @@ export function FulfillmentPage() {
           <Select
             label="Product"
             value={orderForm.productId}
-            onChange={(e) => setOrderForm({ ...orderForm, productId: e.target.value, variantId: '', amount: '', discountAmount: '' })}
+            onChange={(e) => setOrderForm({ ...orderForm, productId: e.target.value, variantId: '', amount: '', chargeAmount: '' })}
             options={[
               { value: '', label: '— Select product —' },
               ...orderProducts.map((p: any) => ({ value: p.id, label: `${p.name} (${p.region})` })),
@@ -181,14 +193,51 @@ export function FulfillmentPage() {
                 : 'Matches a value in stock.'}
             </p>
           )}
-          <Input label="Discount (USD, optional)" type="number" min="0" max={validAmount ? amount : undefined} step="0.01" value={orderForm.discountAmount} onChange={(e) => setOrderForm({ ...orderForm, discountAmount: e.target.value })} placeholder="0.00" />
-          {!validDiscount && <p role="alert" className="text-sm text-destructive">Discount must be between zero and the original value, with at most two decimal places.</p>}
-          {validAmount && validDiscount && (
+          <div className="space-y-2">
+            <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Charge in
+            </label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {(['USD', 'PKR'] as const).map((code) => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => setOrderForm({ ...orderForm, chargeCurrency: code })}
+                  className={`rounded-lg border px-3 py-2 text-sm font-medium transition-all ${
+                    orderForm.chargeCurrency === code
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:border-primary/50'
+                  }`}
+                >
+                  {code === 'USD' ? '$ USD' : '\u20a8 PKR'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Input
+            label={`Amount to charge (${orderForm.chargeCurrency}, optional)`}
+            type="number" min="0" max={validAmount ? amount : undefined} step="0.01"
+            value={orderForm.chargeAmount}
+            onChange={(e) => setOrderForm({ ...orderForm, chargeAmount: e.target.value })}
+            placeholder={validAmount ? String(amount) : '0.00'}
+          />
+          {!validCharge && (
+            <p role="alert" className="text-sm text-destructive">
+              The amount to charge must be between zero and the order value, with at most two
+              decimal places.
+            </p>
+          )}
+          {validAmount && validCharge && (
             <div className="rounded-lg bg-secondary p-3 text-sm">
-              <div>Original value: {formatPrice(amount, 'USD')}</div>
+              <div>Order value: {formatPrice(amount, 'USD')}</div>
+              <div className="font-semibold">
+                Charging: {formatPrice(netAmount, orderForm.chargeCurrency)}
+              </div>
               <div>Discount: {formatPrice(discount, 'USD')}</div>
-              <div className="font-semibold">Net price: {formatPrice(netAmount, 'USD')}</div>
-              <p className="mt-1 text-xs text-muted-foreground">The discount does not change which codes are allocated. No wallet is charged.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Leave the charge blank to charge the full order value. What you charge does not
+                change which codes are allocated, and no merchant wallet is charged.
+              </p>
             </div>
           )}
           <Input label="Customer email (sends delivery link)" type="email" value={orderForm.customerEmail} onChange={(e) => setOrderForm({ ...orderForm, customerEmail: e.target.value })} placeholder="customer@example.com" />
@@ -199,7 +248,7 @@ export function FulfillmentPage() {
           {createOrderMutation.isSuccess && !showCreate ? null : null}
           <Button
             className="w-full"
-            disabled={!orderForm.productId || !validAmount || !validDiscount || createOrderMutation.isPending}
+            disabled={!orderForm.productId || !validAmount || !validCharge || createOrderMutation.isPending}
             onClick={() => createOrderMutation.mutate()}
           >
             {createOrderMutation.isPending ? 'Creating...' : 'Create & Deliver'}

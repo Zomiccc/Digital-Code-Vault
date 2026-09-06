@@ -470,7 +470,7 @@ export class AdminController {
   async createManualOrder(@Body() body: {
     merchantId?: string; productId: string; amount: number; currency?: string;
     variantId?: string; customerEmail?: string; customerName?: string;
-    chargeAmount?: number; discountAmount?: number;
+    chargeAmount?: number; chargeCurrency?: string; discountAmount?: number;
   }, @CurrentUser() user: any, @Req() req: any) {
     if (!body.productId || !body.amount) {
       throw new BadRequestException('productId and amount are required');
@@ -506,6 +506,7 @@ export class AdminController {
       productId: body.productId,
       amount: Number(body.amount),
       chargeAmount,
+      chargeCurrency: body.chargeCurrency,
       currency: body.currency || 'USD',
       referenceId: `admin-${user.id.slice(0, 8)}-${Date.now()}`,
       idempotencyKey: `admin-manual-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,

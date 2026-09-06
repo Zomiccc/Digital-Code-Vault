@@ -30,7 +30,6 @@ export function MerchantWalletPage() {
   // Which balance this deposit lands in. Chosen per deposit now, rather than
   // following one account-wide currency.
   const [depositCurrency, setDepositCurrency] = useState<'USD' | 'PKR'>('USD');
-  const curSymbol = merchantCurrency === 'PKR' ? '\u20A8' : '$';
 
   const resetWizard = () => {
     setShowAddFunds(false);
@@ -264,7 +263,7 @@ export function MerchantWalletPage() {
               required
             />
             <div className="flex flex-wrap gap-2">
-              {(merchantCurrency === 'PKR' ? [5000, 10000, 50000, 100000] : [50, 100, 250, 500]).map((v) => (
+              {(depositCurrency === 'PKR' ? [5000, 10000, 50000, 100000] : [50, 100, 250, 500]).map((v) => (
                 <button
                   key={v}
                   onClick={() => setAmount(String(v))}
@@ -272,7 +271,7 @@ export function MerchantWalletPage() {
                     amount === String(v) ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:border-primary/50'
                   }`}
                 >
-                  {curSymbol}{v.toLocaleString()}
+                  {formatCurrency(v, depositCurrency)}
                 </button>
               ))}
             </div>
@@ -285,7 +284,7 @@ export function MerchantWalletPage() {
         {step === 2 && (
           <div className="space-y-4">
             <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-sm">
-              Send exactly <strong className="text-primary">{curSymbol}{parseFloat(amount || '0').toLocaleString()} {merchantCurrency}</strong> to any account below.
+              Send exactly <strong className="text-primary">{formatCurrency(parseFloat(amount || '0'), depositCurrency)} {depositCurrency}</strong> to any account below.
             </div>
 
             {(paymentDetails?.accounts || []).map((acc: any) => (
@@ -386,7 +385,7 @@ export function MerchantWalletPage() {
             <div>
               <p className="text-lg font-semibold">Request submitted!</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Admin has been notified with your proof of {curSymbol}{parseFloat(amount).toLocaleString()} {merchantCurrency}.
+                Admin has been notified with your proof of {formatCurrency(parseFloat(amount || '0'), depositCurrency)} {depositCurrency}.
                 Your wallet will be credited once approved - track it under Funding Requests below or in the Help chat.
               </p>
             </div>
