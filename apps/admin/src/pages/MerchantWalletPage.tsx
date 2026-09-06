@@ -11,7 +11,6 @@ import { formatCurrency, formatDate, statusColor } from '@/lib/utils';
 export function MerchantWalletPage() {
   const queryClient = useQueryClient();
   const [showAddFunds, setShowAddFunds] = useState(false);
-  const [showCurrencyPrompt, setShowCurrencyPrompt] = useState(false);
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
@@ -28,16 +27,10 @@ export function MerchantWalletPage() {
   });
 
   const merchantCurrency = wallet?.currency || 'USD';
+  // Which balance this deposit lands in. Chosen per deposit now, rather than
+  // following one account-wide currency.
+  const [depositCurrency, setDepositCurrency] = useState<'USD' | 'PKR'>('USD');
   const curSymbol = merchantCurrency === 'PKR' ? '\u20A8' : '$';
-
-  const currencyMutation = useMutation({
-    mutationFn: (currency: string) => api.updateMyCurrency(currency),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['wallet'] });
-      queryClient.invalidateQueries({ queryKey: ['my-funding-requests'] });
-      setShowCurrencyPrompt(false);
-    },
-  });
 
   const resetWizard = () => {
     setShowAddFunds(false);
@@ -54,7 +47,7 @@ export function MerchantWalletPage() {
         amount: parseFloat(amount),
         note: note || undefined,
         screenshot: screenshot!,
-        currency: merchantCurrency,
+        currency: depositCurrency,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['my-funding-requests'] });
@@ -112,23 +105,11 @@ export function MerchantWalletPage() {
         </Button>
       </div>
 
-      {/* Balance cards */}
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            <Wallet className="h-3.5 w-3.5" /> Current Balance
-          </div>
-          <p className="mt-2 text-3xl font-semibold text-primary">{fmt(wallet?.balance || 0)}</p>
-          <div className="mt-2 flex items-center gap-2">
-            <Badge className="bg-primary/10 text-primary">{merchantCurrency}</Badge>
-            <button
-              onClick={() => setShowCurrencyPrompt(true)}
-              className="text-xs text-muted-foreground hover:text-foreground underline"
-            >
-              Change currency
-            </button>
-          </div>
-        </Card>
+      {/* One card per balance. There is no longer a single currency to switch:
+          each balance is funded and spent in its own currency. */}
+      <WalletBalances />
+
+      <div className="grid gap-4 sm:grid-cols-2">
         <Card>
           <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
             <TrendingUp className="h-3.5 w-3.5" /> Total Deposited
@@ -225,54 +206,7 @@ export function MerchantWalletPage() {
       </Card>
 
       {/* Currency Selection Modal */}
-      <Modal open={showCurrencyPrompt} onClose={() => setShowCurrencyPrompt(false)} title="Choose Your Account Currency" size="sm">
-        <div className="space-y-4">
-          <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-3 text-sm text-amber-600">
-            <strong>Important:</strong> Your currency determines how all balances, funding requests, and transactions are displayed.
-            Please choose carefully - you can change it later, but all existing records remain in their original currency.
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <button
-              onClick={() => currencyMutation.mutate('USD')}
-              disabled={currencyMutation.isPending}
-              className={`rounded-lg border p-4 text-left transition-all ${
-                merchantCurrency === 'USD' ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-2xl font-bold">$</span>
-                <div>
-                  <p className="font-semibold">USD</p>
-                  <p className="text-xs text-muted-foreground">US Dollar</p>
-                </div>
-              </div>
-            </button>
-            <button
-              onClick={() => currencyMutation.mutate('PKR')}
-              disabled={currencyMutation.isPending}
-              className={`rounded-lg border p-4 text-left transition-all ${
-                merchantCurrency === 'PKR' ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-2xl font-bold">PKR</span>
-                <div>
-                  <p className="font-semibold">PKR</p>
-                  <p className="text-xs text-muted-foreground">Pakistani Rupee</p>
-                </div>
-              </div>
-            </button>
-          </div>
-          {currencyMutation.isPending && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Updating...
-            </div>
-          )}
-          {currencyMutation.isError && (
-            <p className="text-sm text-destructive">{(currencyMutation.error as Error).message}</p>
-          )}
-        </div>
-      </Modal>
+
 
       {/* Add Funds wizard */}
       <Modal open={showAddFunds} onClose={resetWizard} title="Add Funds to Wallet">
@@ -295,13 +229,34 @@ export function MerchantWalletPage() {
 
         {step === 1 && (
           <div className="space-y-4">
-            <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 text-sm">
-              Your account currency is <strong className="text-primary">{merchantCurrency}</strong>.
-              All funding requests and balances are in {merchantCurrency}.
+            <p className="text-sm text-muted-foreground">
+              Which balance are you topping up, and by how much? The funds land in the currency you
+              pick and are not converted.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {(['USD', 'PKR'] as const).map((code) => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => setDepositCurrency(code)}
+                  className={`rounded-lg border p-4 text-left transition-all ${
+                    depositCurrency === code ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl font-bold">{code === 'USD' ? '$' : '₨'}</span>
+                    <div>
+                      <p className="font-semibold">{code}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {code === 'USD' ? 'US Dollar' : 'Pakistani Rupee'}
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              ))}
             </div>
-            <p className="text-sm text-muted-foreground">How much do you want to add to your wallet?</p>
             <Input
-              label={`Amount (${merchantCurrency})`}
+              label={`Amount (${depositCurrency})`}
               type="number"
               value={amount}
               onChange={(e: any) => setAmount(e.target.value)}
@@ -439,6 +394,73 @@ export function MerchantWalletPage() {
           </div>
         )}
       </Modal>
+    </div>
+  );
+}
+
+/**
+ * Every balance the merchant holds, and which one is spent first.
+ *
+ * This replaces the old "change currency" control. Balances are no longer one
+ * switchable pot: rupees and dollars sit side by side, each funded in its own
+ * currency, and an order is paid entirely from whichever is tried first and can
+ * cover it.
+ */
+function WalletBalances() {
+  const queryClient = useQueryClient();
+  const { data: wallets, isLoading } = useQuery({
+    queryKey: ['my-wallets'],
+    queryFn: api.listMyWallets,
+  });
+  const [error, setError] = useState('');
+
+  const prefer = useMutation({
+    mutationFn: (currency: string) => api.setMySpendOrder([currency]),
+    onSuccess: () => {
+      setError('');
+      queryClient.invalidateQueries({ queryKey: ['my-wallets'] });
+    },
+    onError: (err: any) => setError(err.message),
+  });
+
+  if (isLoading) {
+    return <p role="status" className="text-sm text-muted-foreground">Loading balances...</p>;
+  }
+
+  const rows = wallets || [];
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {rows.map((wallet: any, index: number) => (
+          <Card key={wallet.currency} className={index === 0 ? 'border-primary/40' : ''}>
+            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              <Wallet className="h-3.5 w-3.5" /> {wallet.currency} balance
+            </div>
+            <p className="mt-2 text-3xl font-semibold text-primary">
+              {formatCurrency(wallet.balance, wallet.currency)}
+            </p>
+            <div className="mt-2 flex items-center gap-2">
+              {index === 0 ? (
+                <Badge className="bg-primary/10 text-primary">Spent first</Badge>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={prefer.isPending}
+                  onClick={() => prefer.mutate(wallet.currency)}
+                >
+                  Spend this first
+                </Button>
+              )}
+            </div>
+          </Card>
+        ))}
+      </div>
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      <p className="text-xs text-muted-foreground">
+        An order is paid entirely from one balance — the one spent first, or the next that can cover
+        it in full. Orders are never split across balances.
+      </p>
     </div>
   );
 }

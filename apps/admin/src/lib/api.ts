@@ -262,8 +262,21 @@ export const api = {
 
   // Merchant endpoints
   getWallet: () => apiFetch('/merchant/dashboard/wallet'),
-  updateMyCurrency: (currency: string) =>
-    apiFetch('/merchant/dashboard/currency', { method: 'PATCH', body: JSON.stringify({ currency }) }),
+  listMyWallets: () => apiFetch('/merchant/dashboard/wallets'),
+  setMySpendOrder: (order: string[]) =>
+    apiFetch('/merchant/dashboard/wallets/spend-order', {
+      method: 'PATCH',
+      body: JSON.stringify({ order }),
+    }),
+  listSellingPrices: (itemType: 'DENOMINATION' | 'VARIANT', itemId: string) =>
+    apiFetch(`/admin/prices/${itemType}/${itemId}`),
+  setSellingPrice: (itemType: 'DENOMINATION' | 'VARIANT', itemId: string, currency: string, amount: number) =>
+    apiFetch(`/admin/prices/${itemType}/${itemId}/${currency}`, {
+      method: 'PUT',
+      body: JSON.stringify({ amount }),
+    }),
+  removeSellingPrice: (itemType: 'DENOMINATION' | 'VARIANT', itemId: string, currency: string) =>
+    apiFetch(`/admin/prices/${itemType}/${itemId}/${currency}`, { method: 'DELETE' }),
   listMyFundingRequests: () => apiFetch('/merchant/dashboard/funding-requests'),
   createFundingRequest: (data: { amount: number; note?: string; screenshot: string; currency?: string }) =>
     apiFetch('/merchant/dashboard/funding-requests', { method: 'POST', body: JSON.stringify(data) }),

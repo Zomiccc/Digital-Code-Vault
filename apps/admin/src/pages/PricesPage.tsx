@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect, ReactNode } from 'react';
 import { Search, ChevronRight, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Badge } from '@/components/ui';
-import { formatPrice, isKnownCurrency } from '@/lib/utils';
+import { formatPrice } from '@/lib/utils';
 import { familyOf } from '@/lib/product-family';
 
 /**
@@ -167,13 +167,13 @@ function ProductPrices({ product, onBack }: { product: any; onBack: () => void }
       onBack={onBack}
       backLabel="All regions"
     >
-      <Card className="border-amber-500/30 bg-amber-500/5">
+      <Card className="border-primary/30 bg-primary/5">
         <div className="flex items-start gap-3">
-          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <p className="text-sm text-muted-foreground">
-            Changing a code value changes what codes already uploaded against it are worth, and a
-            delivery rule that added up to the old value will no longer match. Both are shown to you
-            rather than corrected silently.
+            These are selling prices, set per currency. What a batch cost you is separate and stays
+            on the batch in its own currency. A merchant paying from a rupee balance is charged the
+            rupee price set here; a currency left blank is converted from the other at your rate.
           </p>
         </div>
       </Card>
@@ -188,12 +188,12 @@ function ProductPrices({ product, onBack }: { product: any; onBack: () => void }
         {product.denominations.map((denomination: any) => (
           <PriceRow
             key={denomination.id}
+            itemType="DENOMINATION"
+            itemId={denomination.id}
             label={formatPrice(denomination.face_value, denomination.currency)}
             sku={denomination.sku}
             value={denomination.face_value}
             currency={denomination.currency}
-            onSave={(amount, currency) =>
-              api.updateDenomination(denomination.id, amount, currency)}
             onSaved={refresh}
           />
         ))}
@@ -205,13 +205,13 @@ function ProductPrices({ product, onBack }: { product: any; onBack: () => void }
           {product.variants.map((variant: any) => (
             <PriceRow
               key={variant.id}
+              itemType="VARIANT"
+              itemId={variant.id}
               label={variant.name}
               secondary={formatPrice(variant.price, variant.currency)}
               sku={variant.sku}
               value={variant.price}
               currency={variant.currency}
-              onSave={(amount, currency) =>
-                api.updateVariant(variant.id, { customerPrice: amount, currency })}
               onSaved={refresh}
             />
           ))}
@@ -221,36 +221,89 @@ function ProductPrices({ product, onBack }: { product: any; onBack: () => void }
   );
 }
 
-/** One editable price with its currency. */
+/** The currencies every item can be priced in. */
+const SELLING_CURRENCIES = ['USD', 'PKR'] as const;
+
+/**
+ * The selling price for one item, in every currency the platform sells in.
+ *
+ * Cost lives on the batch, in whatever currency that batch was bought in. This
+ * is the other side: what the item sells for, set independently per currency. A
+ * $100 code can sell for $101 and for 27,500 rupees, and 27,500 is not 101 times
+ * a rate — so each field is entered rather than derived. A currency left blank
+ * falls back to converting the item's own price, shown as the placeholder.
+ */
 function PriceRow({
-  label, secondary, sku, value, currency, onSave, onSaved,
+  itemType, itemId, label, secondary, sku, value, currency, onSaved,
 }: {
+  itemType: 'DENOMINATION' | 'VARIANT';
+  itemId: string;
   label: string; secondary?: string; sku?: string | null;
   value: number; currency: string;
-  onSave: (amount: number, currency: string) => Promise<any>;
   onSaved: () => void;
 }) {
-  const [amount, setAmount] = useState(String(Number(value)));
-  const [code, setCode] = useState(currency);
+  const { data: prices, refetch } = useQuery({
+    queryKey: ['selling-prices', itemType, itemId],
+    queryFn: () => api.listSellingPrices(itemType, itemId),
+  });
+
+  const save = (currencyCode: string) => async (amount: number | null) => {
+    if (amount === null) await api.removeSellingPrice(itemType, itemId, currencyCode);
+    else await api.setSellingPrice(itemType, itemId, currencyCode, amount);
+    await refetch();
+    onSaved();
+  };
+
+  const priceFor = (code: string) =>
+    (prices || []).find((row: any) => row.currency === code)?.amount ?? null;
+
+  return (
+    <Card className="space-y-3">
+      <div>
+        <p className="font-medium">{label}</p>
+        <p className="text-xs text-muted-foreground">
+          {secondary && <span className="mr-2">{secondary}</span>}
+          {sku ? <span className="font-mono">{sku}</span> : <span className="italic">no SKU</span>}
+        </p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {SELLING_CURRENCIES.map((code) => (
+          <CurrencyPriceField
+            key={code}
+            currency={code}
+            amount={priceFor(code)}
+            fallback={code === currency ? value : null}
+            onSave={save(code)}
+          />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function CurrencyPriceField({
+  currency, amount, fallback, onSave,
+}: {
+  currency: string;
+  amount: number | null;
+  fallback: number | null;
+  onSave: (amount: number | null) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState(amount === null ? '' : String(amount));
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    setAmount(String(Number(value)));
-    setCode(currency);
-  }, [value, currency]);
+  useEffect(() => { setDraft(amount === null ? '' : String(amount)); }, [amount]);
 
-  const parsed = Number(amount);
-  const valid = Number.isFinite(parsed) && parsed > 0 && /^[A-Za-z]{3}$/.test(code.trim());
-  const dirty = parsed !== Number(value) || code.toUpperCase() !== currency.toUpperCase();
-  const unrecognised = /^[A-Za-z]{3}$/.test(code.trim()) && !isKnownCurrency(code);
+  const parsed = Number(draft);
+  const valid = draft.trim() !== '' && Number.isFinite(parsed) && parsed > 0;
+  const dirty = draft.trim() !== (amount === null ? '' : String(amount));
 
-  const save = async () => {
+  const commit = async (next: number | null) => {
     setSaving(true);
     try {
-      await onSave(parsed, code.trim().toUpperCase());
+      await onSave(next);
       setError('');
-      onSaved();
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -259,38 +312,30 @@ function PriceRow({
   };
 
   return (
-    <Card className="flex flex-wrap items-center justify-between gap-4">
-      <div className="min-w-0">
-        <p className="font-medium">{label}</p>
-        <p className="text-xs text-muted-foreground">
-          {secondary && <span className="mr-2">{secondary}</span>}
-          {sku ? <span className="font-mono">{sku}</span> : <span className="italic">no SKU</span>}
-        </p>
-      </div>
-      <div className="flex flex-col items-end gap-1">
-        <div className="flex items-center gap-2">
-          <input
-            type="number" min="0" step="0.01" value={amount}
-            aria-label={`Price for ${label}`}
-            onChange={(e) => setAmount(e.target.value)}
-            className="w-28 rounded border border-input bg-background px-2 py-1 text-sm"
-          />
-          <input
-            value={code}
-            aria-label={`Currency for ${label}`}
-            onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 3))}
-            className="w-16 rounded border border-input bg-background px-2 py-1 font-mono text-xs"
-          />
-          <Button size="sm" disabled={!valid || !dirty || saving} onClick={save}>Save</Button>
-        </div>
-        {unrecognised && (
-          <span className="text-xs text-amber-500">
-            {code.toUpperCase()} is not a currency code we recognise.
-          </span>
+    <div className="space-y-1">
+      <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        {currency} price
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          type="number" min="0" step="0.01" value={draft}
+          aria-label={`${currency} selling price`}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={fallback !== null ? String(fallback) : 'not set'}
+          className="w-32 rounded border border-input bg-background px-2 py-1 text-sm"
+        />
+        {dirty && (
+          <Button size="sm" disabled={!valid || saving} onClick={() => commit(parsed)}>Save</Button>
         )}
-        {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
+        {!dirty && amount !== null && (
+          <Button size="sm" variant="ghost" disabled={saving} onClick={() => commit(null)}>Clear</Button>
+        )}
       </div>
-    </Card>
+      {amount === null && (
+        <p className="text-xs text-muted-foreground">Not set — converted at your rate.</p>
+      )}
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+    </div>
   );
 }
 
