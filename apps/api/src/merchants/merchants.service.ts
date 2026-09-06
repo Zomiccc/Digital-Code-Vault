@@ -173,41 +173,43 @@ export class MerchantsService {
     const balanceBefore = Number(merchant.walletBalance);
     const newBalance = convert(balanceBefore);
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.merchant.update({
-        where: { id },
-        data: { currency: to, walletBalance: newBalance },
-      });
+    let restated = 0;
+    await this.prisma.$transaction(
+      async (tx) => {
+        await tx.merchant.update({
+          where: { id },
+          data: { currency: to, walletBalance: newBalance },
+        });
 
-      // Restate history in the new currency so deposited/spent totals stay
-      // comparable instead of silently mixing two currencies in one sum.
-      const rows = await tx.walletTransaction.findMany({
-        where: { merchantId: id },
-        select: { id: true, amount: true, balanceAfter: true, currency: true },
-      });
-      for (const row of rows) {
-        if ((row.currency || 'USD').toUpperCase() !== from) continue;
-        await tx.walletTransaction.update({
-          where: { id: row.id },
+        // Restate history in the new currency so deposited/spent totals stay
+        // comparable instead of silently mixing two currencies in one sum.
+        //
+        // One statement, not a row at a time: a merchant with a long history
+        // meant hundreds of sequential updates inside an interactive
+        // transaction, which blew through Prisma's default budget and returned
+        // a 500 with the currency unchanged.
+        restated = await tx.$executeRaw`
+          UPDATE "WalletTransaction"
+          SET "amount" = ROUND("amount" * ${factor}::numeric, 2),
+              "balanceAfter" = ROUND("balanceAfter" * ${factor}::numeric, 2),
+              "currency" = ${to}
+          WHERE "merchantId" = ${id}
+            AND UPPER(COALESCE("currency", 'USD')) = ${from}
+        `;
+
+        await tx.walletTransaction.create({
           data: {
-            amount: convert(row.amount),
-            balanceAfter: convert(row.balanceAfter),
+            merchantId: id,
+            type: 'CONVERSION',
+            amount: 0,
             currency: to,
+            balanceAfter: newBalance,
+            referenceId: `fx-${from}-${to}`,
           },
         });
-      }
-
-      await tx.walletTransaction.create({
-        data: {
-          merchantId: id,
-          type: 'CONVERSION',
-          amount: 0,
-          currency: to,
-          balanceAfter: newBalance,
-          referenceId: `fx-${from}-${to}`,
-        },
-      });
-    });
+      },
+      { timeout: 60_000, maxWait: 15_000 },
+    );
 
     await this.auditService.log({
       actorType: 'ADMIN',
@@ -219,6 +221,7 @@ export class MerchantsService {
         from, to, factor,
         balance_before: balanceBefore,
         balance_after: newBalance,
+        transactions_restated: restated,
       },
       ip,
     });
@@ -228,6 +231,7 @@ export class MerchantsService {
       from, to, rate: factor,
       balance_before: balanceBefore,
       balance_after: newBalance,
+      transactions_restated: restated,
     };
   }
 

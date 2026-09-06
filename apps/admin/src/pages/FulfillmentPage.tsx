@@ -25,6 +25,11 @@ export function FulfillmentPage() {
   const selectedProductData = orderProducts.find((p: any) => p.id === orderForm.productId);
   const selectedProductVariants = selectedProductData?.productRegions?.flatMap((pr: any) => pr.variants) || [];
   const selectedProductDenominations = selectedProductData?.denominations || [];
+  // True when the typed value is not one of the stocked values, so the order
+  // will be made up from a combination rather than a single matching code.
+  const isCustomAmount = !selectedProductDenominations.some(
+    (d: any) => Number(d.faceValue) === amount,
+  );
 
   const createOrderMutation = useMutation({
     mutationFn: () => api.createManualOrder({
@@ -134,7 +139,9 @@ export function FulfillmentPage() {
           )}
           {selectedProductDenominations.length > 0 && !orderForm.variantId && (
             <div className="space-y-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Available Denominations</label>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Quick pick
+              </label>
               <div className="flex flex-wrap gap-2">
                 {selectedProductDenominations.map((d: any) => (
                   <button
@@ -151,9 +158,29 @@ export function FulfillmentPage() {
                   </button>
                 ))}
               </div>
+              <p className="text-xs text-muted-foreground">
+                Shortcuts for the values in stock — or type any amount below and it will be made up
+                from whatever codes are available.
+              </p>
             </div>
           )}
-          <Input label="Original code value (USD)" type="number" min="0.01" step="0.01" value={orderForm.amount} onChange={(e) => setOrderForm({ ...orderForm, amount: e.target.value })} placeholder="30.00" />
+          {/* Any amount is allowed, not only the values above: allocation adds up
+              available codes to reach it. Only the chips were obvious before, so
+              a one-off order for an unlisted amount looked impossible. */}
+          <Input
+            label="Order value — any amount (USD)"
+            type="number" min="0.01" step="0.01"
+            value={orderForm.amount}
+            onChange={(e) => setOrderForm({ ...orderForm, amount: e.target.value })}
+            placeholder="e.g. 37.50"
+          />
+          {validAmount && !orderForm.variantId && selectedProductDenominations.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {isCustomAmount
+                ? `Custom amount — will be made up from codes in stock that add up to ${formatPrice(amount, 'USD')}.`
+                : 'Matches a value in stock.'}
+            </p>
+          )}
           <Input label="Discount (USD, optional)" type="number" min="0" max={validAmount ? amount : undefined} step="0.01" value={orderForm.discountAmount} onChange={(e) => setOrderForm({ ...orderForm, discountAmount: e.target.value })} placeholder="0.00" />
           {!validDiscount && <p role="alert" className="text-sm text-destructive">Discount must be between zero and the original value, with at most two decimal places.</p>}
           {validAmount && validDiscount && (

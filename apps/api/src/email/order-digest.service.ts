@@ -104,21 +104,35 @@ export class OrderDigestService implements OnModuleDestroy {
       this.buckets.delete(key);
       clearTimeout(bucket.timer);
 
+      // Each item is its own full-width row: the product and its button stack on
+      // a narrow screen instead of being squeezed into two columns.
       const rows = bucket.items.map((item) => `
         <tr>
-          <td style="padding:18px 24px;border-top:1px solid #eef2f7;">
-            <div style="color:#0f172a;font-size:16px;font-weight:600;line-height:1.35;">${this.esc(item.productName)}</div>
-            <div style="color:#64748b;font-size:13px;padding-top:4px;">
-              ${item.codesDelivered} code${item.codesDelivered === 1 ? '' : 's'}
-              &nbsp;·&nbsp; ${money(item.amount, item.currency)}
-            </div>
-            <div style="color:#94a3b8;font-size:11px;padding-top:2px;">Order ${this.esc(item.fulfillmentId.slice(0, 8))}</div>
-          </td>
-          <td style="padding:18px 24px;border-top:1px solid #eef2f7;text-align:right;vertical-align:middle;white-space:nowrap;">
-            <a href="${this.esc(item.deliveryLink)}"
-               style="background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;font-size:14px;display:inline-block;">
-              View code${item.codesDelivered === 1 ? '' : 's'}
-            </a>
+          <td style="padding:22px 28px;border-top:1px solid #e8eef5;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="color:#0f172a;font-size:17px;font-weight:600;line-height:1.35;padding-bottom:6px;">
+                  ${this.esc(item.productName)}
+                </td>
+              </tr>
+              <tr>
+                <td style="padding-bottom:14px;">
+                  <span style="display:inline-block;background:#eef4ff;color:#2151b9;font-size:12px;font-weight:600;padding:3px 9px;border-radius:20px;">
+                    ${item.codesDelivered} code${item.codesDelivered === 1 ? '' : 's'}
+                  </span>
+                  <span style="color:#475569;font-size:13px;padding-left:8px;">${money(item.amount, item.currency)}</span>
+                  <span style="color:#a3b1c2;font-size:11px;padding-left:8px;">#${this.esc(item.fulfillmentId.slice(0, 8))}</span>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <a href="${this.esc(item.deliveryLink)}"
+                     style="background:#2563eb;color:#ffffff;text-decoration:none;padding:13px 26px;border-radius:9px;font-weight:600;font-size:15px;display:inline-block;">
+                    Reveal ${item.codesDelivered === 1 ? 'code' : 'codes'}
+                  </a>
+                </td>
+              </tr>
+            </table>
           </td>
         </tr>`).join('');
 
@@ -132,8 +146,10 @@ export class OrderDigestService implements OnModuleDestroy {
       const totalRows = [...totalsByCurrency.entries()]
         .map(([code, sum]) => `
         <tr>
-          <td style="padding:4px 24px;color:#475569;font-size:14px;">Total</td>
-          <td style="padding:4px 24px;text-align:right;color:#0f172a;font-size:18px;font-weight:700;">${money(sum, code)}</td>
+          <td style="padding:16px 0 0;color:#5b6b80;font-size:13px;font-weight:600;letter-spacing:0.3px;text-transform:uppercase;">
+            Total${totalsByCurrency.size > 1 ? ` (${code})` : ''}
+          </td>
+          <td style="padding:16px 0 0;text-align:right;color:#0f172a;font-size:22px;font-weight:700;">${money(sum, code)}</td>
         </tr>`).join('');
       const subject = bucket.items.length === 1
         ? 'Your Digital Code is Ready'
@@ -142,28 +158,62 @@ export class OrderDigestService implements OnModuleDestroy {
       const html = `
 <!DOCTYPE html>
 <html>
-<body style="margin:0;padding:24px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-  <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;">
-    <div style="background:#0f172a;padding:30px 24px;">
-      <h1 style="margin:0;color:#ffffff;font-size:22px;line-height:1.3;">Hi ${this.esc(bucket.customerName)}, your codes are ready</h1>
-      <p style="margin:10px 0 0;color:#94a3b8;font-size:14px;line-height:1.6;">
-        ${bucket.items.length === 1 ? 'Your order is below.' : `All ${bucket.items.length} items are below.`}
-        Tap to reveal each code — the link keeps working, so you can come back to it.
-      </p>
-    </div>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-      ${rows}
-    </table>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f8fafc;border-top:1px solid #eef2f7;padding:8px 0;">
-      <tr><td style="height:12px;"></td></tr>
-      ${totalRows}
-      <tr><td style="height:12px;"></td></tr>
-    </table>
-    <div style="padding:22px 24px 26px;color:#94a3b8;font-size:12px;line-height:1.7;border-top:1px solid #eef2f7;">
-      Your links never expire — come back to this email any time to see your codes again.<br/>
-      Need help? Just reply to this message.
-    </div>
+<head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head>
+<body style="margin:0;padding:0;background:#eef2f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <!-- Preheader: what inboxes show next to the subject line. -->
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
+    ${bucket.items.length === 1 ? 'Your code is ready to reveal.' : `All ${bucket.items.length} of your codes are ready to reveal.`}
   </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef2f7;">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 1px 3px rgba(15,23,42,0.08);">
+
+          <tr>
+            <td style="background:#0f172a;padding:32px 28px;">
+              <div style="color:#7dd3a8;font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;">Digital Code Vault</div>
+              <h1 style="margin:12px 0 0;color:#ffffff;font-size:23px;line-height:1.3;font-weight:600;">
+                ${this.esc(bucket.customerName)}, your ${bucket.items.length === 1 ? 'code is' : 'codes are'} ready
+              </h1>
+              <p style="margin:10px 0 0;color:#9fb0c6;font-size:14px;line-height:1.6;">
+                Tap to reveal. Your link never expires, so you can come back to this email whenever
+                you need ${bucket.items.length === 1 ? 'it' : 'them'} again.
+              </p>
+            </td>
+          </tr>
+
+          ${rows}
+
+          <tr>
+            <td style="padding:0 28px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:2px solid #0f172a;">
+                ${totalRows}
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:24px 28px 28px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f9fc;border-radius:10px;">
+                <tr>
+                  <td style="padding:16px 18px;color:#5b6b80;font-size:12px;line-height:1.7;">
+                    <strong style="color:#334155;">Redeeming</strong><br/>
+                    Open your provider's app or website and enter the code there. Use each code with
+                    the product and region it was bought for.
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:18px 0 0;color:#94a3b8;font-size:12px;line-height:1.7;">
+                Need help? Just reply to this message and we will pick it up.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+        <p style="margin:18px 0 0;color:#9aa8ba;font-size:11px;">This email was sent because you completed a purchase.</p>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>`;
 

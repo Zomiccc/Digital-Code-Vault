@@ -16,15 +16,30 @@ function fixture(options: { currency: string; balance: number; rows?: any[] }) {
       update: async ({ data }: any) => Object.assign(merchant, data),
     },
     walletTransaction: {
-      findMany: async () => rows,
-      update: async ({ where, data }: any) => {
-        const row = rows.find((r) => r.id === where.id);
-        Object.assign(row, data);
-        return row;
-      },
       create: async ({ data }: any) => { created.push(data); return data; },
     },
-    $transaction: async (callback: any) => callback(prisma),
+    // History is restated in one statement. The mock applies the same
+    // arithmetic the SQL does, so the assertions stay about resulting values
+    // rather than about the text of a query.
+    $executeRaw: async (_strings: TemplateStringsArray, ...values: unknown[]) => {
+      // The statement interpolates factor twice (amount and balanceAfter),
+      // then the target currency, the merchant id, and the source currency.
+      const [factor, , to, , from] = values as [number, number, string, string, string];
+      let touched = 0;
+      for (const row of rows) {
+        if ((row.currency || 'USD').toUpperCase() !== from) continue;
+        row.amount = Math.round(Number(row.amount) * factor * 100) / 100;
+        row.balanceAfter = Math.round(Number(row.balanceAfter) * factor * 100) / 100;
+        row.currency = to;
+        touched++;
+      }
+      return touched;
+    },
+    $transaction: async (callback: any, options?: any) => {
+      // A long wallet history must not be run on Prisma's default budget.
+      assert.ok((options?.timeout ?? 0) >= 30_000, 'the switch needs an explicit timeout');
+      return callback(prisma);
+    },
   };
   const rates: Record<string, number> = { USD: 1, PKR: 300, TRY: 34.2 };
   const currency: any = {
@@ -66,6 +81,20 @@ test('past deposits and spend are restated so the totals still add up', async ()
     f.rows.map((row) => [row.amount, row.balanceAfter, row.currency]),
     [[75000, 75000, 'PKR'], [45000, 30000, 'PKR']],
   );
+});
+
+test('the number of restated rows is reported back', async () => {
+  const f = fixture({
+    currency: 'USD',
+    balance: 100,
+    rows: [
+      { id: 't1', type: 'CREDIT', amount: 250, balanceAfter: 250, currency: 'USD' },
+      { id: 't2', type: 'DEBIT', amount: 150, balanceAfter: 100, currency: 'USD' },
+      { id: 't3', type: 'CREDIT', amount: 5, balanceAfter: 5, currency: 'PKR' },
+    ],
+  });
+  const result = await f.sut.updateMerchantCurrency('m1', 'PKR', 'admin-1');
+  assert.equal(result.transactions_restated, 2, 'only the USD rows are restated');
 });
 
 test('the switch is recorded as a conversion row for traceability', async () => {
