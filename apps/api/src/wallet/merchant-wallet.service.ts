@@ -2,16 +2,14 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CurrencyService } from '../currency/currency.service';
-import { convertFromUsd, normaliseCurrency, roundMoney, BASE_CURRENCY } from '../currency/money';
+import { normaliseCurrency, roundMoney, BASE_CURRENCY } from '../currency/money';
 
 /** A wallet chosen to pay for an order, with the charge worked out. */
 export type ChosenWallet = {
   walletId: string;
   currency: string;
-  /** The order cost expressed in this wallet's currency. */
+  /** What the order costs in this wallet's currency. */
   amount: number;
-  /** Units of this currency per USD, at the moment of choosing. */
-  rate: number;
   balance: number;
 };
 
@@ -20,6 +18,7 @@ export type WalletShortfall = {
   currency: string;
   balance: number;
   required: number;
+  /** `no_rate` covers any currency the order could not be priced in. */
   reason: 'insufficient' | 'no_rate';
 };
 
@@ -96,36 +95,43 @@ export class MerchantWalletService {
   }
 
   /**
-   * Which wallet pays for an order costing `amountUsd`, and how much it pays.
+   * Which wallet pays for an order, and how much it pays.
    *
-   * Walks the wallets in spend order and returns the first that can cover the
-   * whole cost. A currency with no configured rate is skipped rather than
-   * guessed at, because charging at an invented rate takes the wrong amount.
+   * The cost is asked for **per candidate currency** rather than converted from
+   * one figure, because a selling price is set per currency: a $100 code priced
+   * at $101 and at ₨27,500 costs exactly those amounts, and ₨27,500 is not
+   * $101 times a rate. `costInCurrency` returns null for a currency it cannot
+   * price, which is treated the same as a missing rate — skipped, never guessed.
+   *
+   * Walks the wallets in the merchant's spend order and returns the first that
+   * can cover the whole cost.
    */
   async chooseWalletForCharge(
     merchantId: string,
-    amountUsd: number,
+    costInCurrency: (currency: string) => Promise<number | null>,
   ): Promise<{ chosen: ChosenWallet | null; shortfalls: WalletShortfall[] }> {
     const wallets = await this.listWallets(merchantId);
     const shortfalls: WalletShortfall[] = [];
 
     for (const wallet of wallets) {
-      let rate: number;
+      let required: number | null;
       try {
-        rate = await this.currencyService.getRate(wallet.currency);
+        required = await costInCurrency(wallet.currency);
       } catch {
+        required = null;
+      }
+      if (required === null) {
         shortfalls.push({
           currency: wallet.currency, balance: wallet.balance, required: 0, reason: 'no_rate',
         });
         continue;
       }
 
-      const required = convertFromUsd(amountUsd, rate);
       if (wallet.balance >= required) {
         return {
           chosen: {
             walletId: wallet.id, currency: wallet.currency,
-            amount: required, rate, balance: wallet.balance,
+            amount: required, balance: wallet.balance,
           },
           shortfalls,
         };
@@ -143,7 +149,7 @@ export class MerchantWalletService {
     if (!shortfalls.length) return 'No wallet is available to charge.';
     const parts = shortfalls.map((entry) =>
       entry.reason === 'no_rate'
-        ? `${entry.currency} has no exchange rate configured`
+        ? `${entry.currency} has no price or exchange rate configured`
         : `${entry.currency} holds ${entry.balance} of ${entry.required} needed`,
     );
     return `Insufficient wallet balance. ${parts.join('; ')}.`;

@@ -5,6 +5,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MerchantWalletService } from './merchant-wallet.service';
 
+/** Prices per currency, standing in for what the admin set on the Prices tab. */
+function priced(prices: Record<string, number | null>) {
+  return async (currency: string) => {
+    const value = prices[currency];
+    return value === undefined ? null : value;
+  };
+}
+
 function service(options: {
   wallets: { currency: string; balance: number; spendOrder: number }[];
   rates?: Record<string, number>;
@@ -74,17 +82,42 @@ test("an existing PKR merchant keeps spending PKR first", async () => {
   assert.equal(wallets[0].currency, 'PKR', 'their own currency leads');
 });
 
-test('the preferred wallet pays when it can cover the order', async () => {
+test('the preferred wallet pays the price set in its own currency', async () => {
+  // A $100 code sold for $101 and for ₨27,500 costs exactly those amounts.
+  // ₨27,500 is deliberately not 101 times a rate.
   const f = service({
     wallets: [
       { currency: 'PKR', balance: 67000, spendOrder: 0 },
       { currency: 'USD', balance: 500, spendOrder: 1 },
     ],
   });
-  const { chosen } = await f.sut.chooseWalletForCharge('m1', 100);
+  const { chosen } = await f.sut.chooseWalletForCharge('m1', priced({ USD: 101, PKR: 27500 }));
   assert.equal(chosen!.currency, 'PKR');
-  assert.equal(chosen!.amount, 30000, '$100 at 300');
-  assert.equal(chosen!.rate, 300);
+  assert.equal(chosen!.amount, 27500, 'the rupee price as entered');
+});
+
+test('falling back charges the other currency its own price, not a conversion', async () => {
+  const f = service({
+    wallets: [
+      { currency: 'PKR', balance: 1000, spendOrder: 0 },
+      { currency: 'USD', balance: 500, spendOrder: 1 },
+    ],
+  });
+  const { chosen } = await f.sut.chooseWalletForCharge('m1', priced({ USD: 101, PKR: 27500 }));
+  assert.equal(chosen!.currency, 'USD');
+  assert.equal(chosen!.amount, 101);
+});
+
+test('a currency the order cannot be priced in is skipped', async () => {
+  const f = service({
+    wallets: [
+      { currency: 'TRY', balance: 999999, spendOrder: 0 },
+      { currency: 'USD', balance: 500, spendOrder: 1 },
+    ],
+  });
+  const { chosen, shortfalls } = await f.sut.chooseWalletForCharge('m1', priced({ USD: 101 }));
+  assert.equal(chosen!.currency, 'USD', 'skipped the unpriceable wallet despite its balance');
+  assert.equal(shortfalls[0].reason, 'no_rate');
 });
 
 test('a preferred wallet that cannot cover the order falls back to the other', async () => {
@@ -95,7 +128,7 @@ test('a preferred wallet that cannot cover the order falls back to the other', a
       { currency: 'USD', balance: 500, spendOrder: 1 },
     ],
   });
-  const { chosen, shortfalls } = await f.sut.chooseWalletForCharge('m1', 100);
+  const { chosen, shortfalls } = await f.sut.chooseWalletForCharge('m1', priced({ USD: 100, PKR: 30000 }));
   assert.equal(chosen!.currency, 'USD');
   assert.equal(chosen!.amount, 100, 'paid in full from USD, not split');
   assert.deepEqual(shortfalls.map((s) => [s.currency, s.required]), [['PKR', 30000]]);
@@ -110,7 +143,7 @@ test('an order is never split across two wallets', async () => {
       { currency: 'USD', balance: 40, spendOrder: 1 },
     ],
   });
-  const { chosen } = await f.sut.chooseWalletForCharge('m1', 100);
+  const { chosen } = await f.sut.chooseWalletForCharge('m1', priced({ USD: 100, PKR: 30000 }));
   assert.equal(chosen, null);
 });
 
@@ -121,23 +154,10 @@ test('the shortfall message names what each wallet holds against what is needed'
       { currency: 'USD', balance: 40, spendOrder: 1 },
     ],
   });
-  const { shortfalls } = await f.sut.chooseWalletForCharge('m1', 100);
+  const { shortfalls } = await f.sut.chooseWalletForCharge('m1', priced({ USD: 100, PKR: 30000 }));
   const message = f.sut.describeShortfall(shortfalls);
   assert.match(message, /PKR holds 20000 of 30000 needed/);
   assert.match(message, /USD holds 40 of 100 needed/);
-});
-
-test('a currency with no rate is skipped, not charged at a guess', async () => {
-  const f = service({
-    wallets: [
-      { currency: 'TRY', balance: 999999, spendOrder: 0 },
-      { currency: 'USD', balance: 500, spendOrder: 1 },
-    ],
-    rates: { USD: 1 },
-  });
-  const { chosen, shortfalls } = await f.sut.chooseWalletForCharge('m1', 100);
-  assert.equal(chosen!.currency, 'USD', 'skipped the unpriced wallet despite its balance');
-  assert.equal(shortfalls[0].reason, 'no_rate');
 });
 
 test('a deposit lands in the currency it was made in', async () => {
