@@ -66,7 +66,24 @@ export class FulfillmentService {
     if (params.chargeAmount !== undefined && actorType !== 'ADMIN') {
       throw new BadRequestException('Setting the amount to charge is only available to admins');
     }
-    const pricing = actorType === 'ADMIN' ? manualOrderPricing(amount, params.chargeAmount) : undefined;
+    // A manual sale can be priced in a different currency from the order value.
+    // Charging 2,800 rupees against a $10 order is not "more than the order" —
+    // the two are only comparable once the order value is expressed in the same
+    // currency, so that is what the charge is validated against.
+    const orderCurrency = normaliseCurrency(currency || 'USD');
+    const chargeCurrency = normaliseCurrency(params.chargeCurrency || orderCurrency);
+    let chargeBase = amount;
+    if (actorType === 'ADMIN' && chargeCurrency !== orderCurrency) {
+      chargeBase = (await this.currencyService.fromUsd(amount, chargeCurrency)).amount;
+    }
+    const pricing = actorType === 'ADMIN' ? manualOrderPricing(chargeBase, params.chargeAmount) : undefined;
+    // The platform's books are in USD, so a rupee sale is converted back for the
+    // revenue entry while the sale itself stays recorded in rupees.
+    const chargeUsd = pricing
+      ? chargeCurrency === 'USD'
+        ? pricing.charge_amount
+        : await this.currencyService.toUsd(pricing.charge_amount, chargeCurrency)
+      : 0;
 
     // ─── Emergency stop: pause ALL code delivery platform-wide ───
     if (actorType !== 'ADMIN') {
@@ -760,11 +777,8 @@ export class FulfillmentService {
               referenceId,
               status: 'PENDING',
               discountAmount: pricing?.discount_amount ?? 0,
-              ...(pricing && params.chargeCurrency
-                ? {
-                    chargedCurrency: normaliseCurrency(params.chargeCurrency),
-                    chargedAmount: pricing.charge_amount,
-                  }
+              ...(pricing
+                ? { chargedCurrency: chargeCurrency, chargedAmount: pricing.charge_amount }
                 : {}),
               sandbox: sandbox || false,
               customerEmail: customerEmail || null,
@@ -858,17 +872,20 @@ export class FulfillmentService {
             const adminWalletId = revenueWalletId!;
             const updatedAdminWallet = await tx.adminWallet.update({
               where: { id: adminWalletId },
-              data: { balance: { increment: pricing.net_amount } },
+              data: { balance: { increment: chargeUsd } },
             });
             await tx.adminWalletTransaction.create({
               data: {
                 adminWalletId,
                 type: 'CREDIT',
-                amount: pricing.net_amount,
+                amount: chargeUsd,
                 balanceAfter: updatedAdminWallet.balance,
                 referenceId: fulfillmentReq.id,
                 source: 'FULFILLMENT',
-                description: `Manual order: original ${amount}, discount ${pricing.discount_amount}, net ${pricing.net_amount} ${currency}`,
+                description:
+                  `Manual order: order value ${amount} ${orderCurrency}, ` +
+                  `charged ${pricing.charge_amount} ${chargeCurrency}` +
+                  (chargeCurrency === 'USD' ? '' : ` (${chargeUsd} USD)`),
               },
             });
           }

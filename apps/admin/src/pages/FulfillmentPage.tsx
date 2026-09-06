@@ -7,6 +7,8 @@ import { Card, Button, Table, Th, Td, Badge, Modal, AddressWithMapsLink } from '
 import { formatCurrency, formatDate, statusColor, formatPrice } from '@/lib/utils';
 
 export function FulfillmentPage() {
+  // Needed to express the order value in the charge currency.
+  const { data: rates } = useQuery({ queryKey: ['exchange-rates'], queryFn: api.listExchangeRates });
   const queryClient = useQueryClient();
   const [reverseItem, setReverseItem] = useState<any>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -19,12 +21,24 @@ export function FulfillmentPage() {
   const amount = Number(orderForm.amount);
   // What to charge is entered; the discount is worked out from it, so the two
   // can never disagree and the admin types the number they actually care about.
-  const charge = orderForm.chargeAmount === '' ? amount : Number(orderForm.chargeAmount);
+  // The order value expressed in whatever currency the charge is in. Without
+  // this the form compared rupees against dollars and refused every rupee
+  // charge as being over the order value.
+  const usdToCharge = orderForm.chargeCurrency === 'USD'
+    ? 1
+    : Number((rates || []).find((r: any) => r.currency === orderForm.chargeCurrency)?.units_per_usd) || 0;
+  const orderValueInCharge = orderForm.chargeCurrency === 'USD'
+    ? amount
+    : Math.round(amount * usdToCharge * 100) / 100;
+  const charge = orderForm.chargeAmount === '' ? orderValueInCharge : Number(orderForm.chargeAmount);
   const validMoney = (value: number) => Number.isFinite(value) && Number.isSafeInteger(Math.round(value * 100)) && Math.abs(value * 100 - Math.round(value * 100)) < 1e-7;
   const validAmount = validMoney(amount) && amount > 0;
-  const validCharge = validMoney(charge) && charge >= 0 && charge <= amount;
-  const discount = validCharge ? (Math.round(amount * 100) - Math.round(charge * 100)) / 100 : 0;
-  const netAmount = validCharge ? charge : amount;
+  const rateMissing = orderForm.chargeCurrency !== 'USD' && usdToCharge <= 0;
+  const validCharge = validMoney(charge) && charge >= 0 && charge <= orderValueInCharge && !rateMissing;
+  const discount = validCharge
+    ? (Math.round(orderValueInCharge * 100) - Math.round(charge * 100)) / 100
+    : 0;
+  const netAmount = validCharge ? charge : orderValueInCharge;
 
   const { data: hierarchyForOrder } = useQuery({ queryKey: ['catalog-hierarchy'], queryFn: api.getCatalogHierarchy, enabled: showCreate });
   const orderProducts = (hierarchyForOrder || []).flatMap((c: any) => c.products);
@@ -216,24 +230,38 @@ export function FulfillmentPage() {
           </div>
           <Input
             label={`Amount to charge (${orderForm.chargeCurrency}, optional)`}
-            type="number" min="0" max={validAmount ? amount : undefined} step="0.01"
+            type="number" min="0" max={validAmount ? orderValueInCharge : undefined} step="0.01"
             value={orderForm.chargeAmount}
             onChange={(e) => setOrderForm({ ...orderForm, chargeAmount: e.target.value })}
-            placeholder={validAmount ? String(amount) : '0.00'}
+            placeholder={validAmount ? String(orderValueInCharge) : '0.00'}
           />
-          {!validCharge && (
+          {rateMissing && (
             <p role="alert" className="text-sm text-destructive">
-              The amount to charge must be between zero and the order value, with at most two
-              decimal places.
+              No {orderForm.chargeCurrency} rate is set, so the order value cannot be expressed in
+              it. Set one under Currency &amp; Rates.
+            </p>
+          )}
+          {!validCharge && !rateMissing && (
+            <p role="alert" className="text-sm text-destructive">
+              The amount to charge must be between zero and{' '}
+              {formatPrice(orderValueInCharge, orderForm.chargeCurrency)}, with at most two decimal
+              places.
             </p>
           )}
           {validAmount && validCharge && (
             <div className="rounded-lg bg-secondary p-3 text-sm">
-              <div>Order value: {formatPrice(amount, 'USD')}</div>
+              <div>
+                Order value: {formatPrice(amount, 'USD')}
+                {orderForm.chargeCurrency !== 'USD' && (
+                  <span className="text-muted-foreground">
+                    {' '}= {formatPrice(orderValueInCharge, orderForm.chargeCurrency)}
+                  </span>
+                )}
+              </div>
               <div className="font-semibold">
                 Charging: {formatPrice(netAmount, orderForm.chargeCurrency)}
               </div>
-              <div>Discount: {formatPrice(discount, 'USD')}</div>
+              <div>Discount: {formatPrice(discount, orderForm.chargeCurrency)}</div>
               <p className="mt-1 text-xs text-muted-foreground">
                 Leave the charge blank to charge the full order value. What you charge does not
                 change which codes are allocated, and no merchant wallet is charged.

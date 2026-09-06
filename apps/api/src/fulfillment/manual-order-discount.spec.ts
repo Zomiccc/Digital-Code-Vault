@@ -288,3 +288,18 @@ test('controller validates before creating a platform merchant and forwards orig
   context.prisma.merchant.findUnique = async () => { throw new Error('Unexpected database access'); };
   await assert.rejects(AdminController.prototype.createManualOrder.call(context, { productId: 'product', amount: 50, chargeAmount: -1 }, { id: 'admin-id' }, {}), /chargeAmount/);
 });
+
+test('a rupee charge is judged against the order value in rupees, not in dollars', () => {
+  // Charging 2,800 rupees against a $10 order was refused as "more than the
+  // order value" because 2800 was compared with 10. At 300 to the dollar the
+  // order is 3,000 rupees, so 2,800 is a 200-rupee discount.
+  const orderValueInRupees = 10 * 300;
+  assert.deepEqual(manualOrderPricing(orderValueInRupees, 2800), {
+    original_amount: 3000, charge_amount: 2800, discount_amount: 200, net_amount: 2800,
+  });
+});
+
+test('a charge above the order value is still refused, in either currency', () => {
+  assert.throws(() => manualOrderPricing(3000, 3001));
+  assert.throws(() => manualOrderPricing(10, 10.01));
+});
