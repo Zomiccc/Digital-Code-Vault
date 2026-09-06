@@ -11,6 +11,7 @@ import { EssentialsService } from '../essentials/essentials.service';
 import { AuthService } from '../auth/auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrencyService } from '../currency/currency.service';
+import { SellingPriceService } from '../currency/selling-price.service';
 import { SkuService } from '../products/sku.service';
 import { EmergencyService } from './emergency.service';
 import { WebhookService } from '../webhooks/webhook.service';
@@ -47,6 +48,7 @@ export class AdminController {
     private supportService: SupportService,
     private fulfillmentService: FulfillmentService,
     private currencyService: CurrencyService,
+    private sellingPriceService: SellingPriceService,
     private skuService: SkuService,
     private emergencyService: EmergencyService,
     @Inject(forwardRef(() => WebhookService)) private webhookService: WebhookService,
@@ -82,11 +84,8 @@ export class AdminController {
     return this.merchantsService.addWalletCredit(id, body.amount, user.id, req.ip);
   }
 
-  @Patch('merchants/:id/currency')
-  @Roles('SUPER_ADMIN', 'FINANCE')
-  async updateMerchantCurrency(@Param('id') id: string, @Body() body: { currency: string }) {
-    return this.merchantsService.updateMerchantCurrency(id, body.currency);
-  }
+  // Switching a merchant's currency is gone: they hold one balance per currency,
+  // so a credit names the currency it lands in instead.
 
   // ─── Admin Wallet / Finance ───
 
@@ -110,6 +109,57 @@ export class AdminController {
   // ─── Exchange rates ───
   // USD is the base for every stored price; these are the rates the platform
   // converts with, for merchant wallets and for regional display prices alike.
+
+  // ─── Selling prices, per currency ───
+  // Cost lives on the batch in its own currency; these are what the item sells
+  // for, set independently in USD and PKR.
+
+  @Get('prices/:itemType/:itemId')
+  @Roles('SUPER_ADMIN', 'FINANCE', 'INVENTORY_MANAGER', 'SUPPORT')
+  async listSellingPrices(
+    @Param('itemType') itemType: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.sellingPriceService.listPrices(this.assertPricedItem(itemType), itemId);
+  }
+
+  @Put('prices/:itemType/:itemId/:currency')
+  @Roles('SUPER_ADMIN', 'FINANCE', 'INVENTORY_MANAGER')
+  async setSellingPrice(
+    @Param('itemType') itemType: string,
+    @Param('itemId') itemId: string,
+    @Param('currency') currency: string,
+    @Body() body: { amount: number },
+    @CurrentUser() user: any,
+    @Req() req: any,
+  ) {
+    return this.sellingPriceService.setPrice(
+      this.assertPricedItem(itemType), itemId, currency, Number(body?.amount), user.id, req.ip,
+    );
+  }
+
+  @Delete('prices/:itemType/:itemId/:currency')
+  @Roles('SUPER_ADMIN', 'FINANCE', 'INVENTORY_MANAGER')
+  async removeSellingPrice(
+    @Param('itemType') itemType: string,
+    @Param('itemId') itemId: string,
+    @Param('currency') currency: string,
+    @CurrentUser() user: any,
+    @Req() req: any,
+  ) {
+    return this.sellingPriceService.removePrice(
+      this.assertPricedItem(itemType), itemId, currency, user.id, req.ip,
+    );
+  }
+
+  /** Only these two kinds of thing carry a selling price. */
+  private assertPricedItem(itemType: string): 'DENOMINATION' | 'VARIANT' {
+    const upper = (itemType || '').toUpperCase();
+    if (upper !== 'DENOMINATION' && upper !== 'VARIANT') {
+      throw new BadRequestException('itemType must be DENOMINATION or VARIANT');
+    }
+    return upper;
+  }
 
   @Get('currency/rates')
   @Roles('SUPER_ADMIN', 'FINANCE', 'SUPPORT', 'INVENTORY_MANAGER')

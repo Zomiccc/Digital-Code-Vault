@@ -184,13 +184,12 @@ export class WalletService {
     const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
     if (!merchant) throw new NotFoundException('Merchant not found');
 
-    // Enforce currency consistency: funding request must match merchant's currency
+    // A merchant holds one balance per currency, so they may fund either. The
+    // deposit lands in the currency it was made in; it is not converted, and it
+    // no longer has to match a single account-wide currency.
     const requestCurrency = (currency || merchant.currency || 'USD').toUpperCase();
-    if (merchant.currency && requestCurrency !== merchant.currency.toUpperCase()) {
-      throw new BadRequestException(
-        `Currency mismatch: your account is set to ${merchant.currency} but you requested ${requestCurrency}. ` +
-        `Please switch your account currency to ${requestCurrency} first, or request funding in ${merchant.currency}.`
-      );
+    if (!/^[A-Z]{3}$/.test(requestCurrency)) {
+      throw new BadRequestException('Currency must be a three-letter code');
     }
 
     const request = await this.prisma.fundingRequest.create({
@@ -268,11 +267,18 @@ export class WalletService {
 
     // Atomic: credit merchant wallet + create transaction + update funding request
     const result = await this.prisma.$transaction(async (tx) => {
-      // 1. Credit merchant wallet
-      const updatedMerchant = await tx.merchant.update({
-        where: { id: request.merchantId },
-        data: { walletBalance: { increment: finalAmount } },
+      // 1. Credit the balance for the currency actually deposited. Nothing is
+      //    converted: 67,000 rupees in means 67,000 rupees on the PKR balance.
+      const depositCurrency = (request.currency || 'USD').toUpperCase();
+      const wallet = await tx.merchantWallet.upsert({
+        where: { merchantId_currency: { merchantId: request.merchantId, currency: depositCurrency } },
+        create: {
+          merchantId: request.merchantId, currency: depositCurrency,
+          balance: finalAmount, spendOrder: 50,
+        },
+        update: { balance: { increment: finalAmount } },
       });
+      const updatedMerchant = { id: request.merchantId, walletBalance: wallet.balance };
 
       // 2. Create merchant wallet transaction
       await tx.walletTransaction.create({
@@ -280,9 +286,8 @@ export class WalletService {
           merchantId: request.merchantId,
           type: 'CREDIT',
           amount: finalAmount,
-          // createFundingRequest already forces this to equal the wallet currency.
-          currency: request.currency || 'USD',
-          balanceAfter: updatedMerchant.walletBalance,
+          currency: depositCurrency,
+          balanceAfter: wallet.balance,
           referenceId: requestId,
         },
       });

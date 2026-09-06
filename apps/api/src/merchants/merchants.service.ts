@@ -140,100 +140,10 @@ export class MerchantsService {
     return { success: true };
   }
 
-  /**
-   * Switch a merchant's wallet currency and convert what it holds.
-   *
-   * Changing the label alone would turn a $100 balance into "100 PKR", so the
-   * balance and the wallet history are converted at the current rate: deposit
-   * USD 100 with PKR at 300 and the wallet reads PKR 30,000, with past deposits
-   * and spend restated to match so the totals still add up.
-   *
-   * The whole switch is one transaction, and a CONVERSION row records the rate
-   * used so the change is traceable afterwards.
-   */
-  async updateMerchantCurrency(id: string, currency: string, actorId?: string, ip?: string) {
-    const merchant = await this.prisma.merchant.findUnique({ where: { id } });
-    if (!merchant) throw new NotFoundException('Merchant not found');
-
-    const from = (merchant.currency || 'USD').toUpperCase();
-    // getRate rejects a currency with no configured rate, which is what should
-    // happen: converting at a guessed rate would misstate the balance.
-    const to = currency.toUpperCase();
-    const [fromRate, toRate] = await Promise.all([
-      this.currencyService.getRate(from),
-      this.currencyService.getRate(to),
-    ]);
-    if (from === to) return { id: merchant.id, currency: to, converted: false };
-
-    // Via USD, so any pair works without needing a direct rate between them.
-    const factor = toRate / fromRate;
-    const convert = (value: unknown) => roundMoney(Number(value) * factor);
-    // Captured before the write, so what is reported cannot depend on whether
-    // the update mutated the record we read.
-    const balanceBefore = Number(merchant.walletBalance);
-    const newBalance = convert(balanceBefore);
-
-    let restated = 0;
-    await this.prisma.$transaction(
-      async (tx) => {
-        await tx.merchant.update({
-          where: { id },
-          data: { currency: to, walletBalance: newBalance },
-        });
-
-        // Restate history in the new currency so deposited/spent totals stay
-        // comparable instead of silently mixing two currencies in one sum.
-        //
-        // One statement, not a row at a time: a merchant with a long history
-        // meant hundreds of sequential updates inside an interactive
-        // transaction, which blew through Prisma's default budget and returned
-        // a 500 with the currency unchanged.
-        restated = await tx.$executeRaw`
-          UPDATE "WalletTransaction"
-          SET "amount" = ROUND("amount" * ${factor}::numeric, 2),
-              "balanceAfter" = ROUND("balanceAfter" * ${factor}::numeric, 2),
-              "currency" = ${to}
-          WHERE "merchantId" = ${id}
-            AND UPPER(COALESCE("currency", 'USD')) = ${from}
-        `;
-
-        await tx.walletTransaction.create({
-          data: {
-            merchantId: id,
-            type: 'CONVERSION',
-            amount: 0,
-            currency: to,
-            balanceAfter: newBalance,
-            referenceId: `fx-${from}-${to}`,
-          },
-        });
-      },
-      { timeout: 60_000, maxWait: 15_000 },
-    );
-
-    await this.auditService.log({
-      actorType: 'ADMIN',
-      actorId: actorId || id,
-      action: 'merchant.currency_change',
-      entity: 'Merchant',
-      entityId: id,
-      metadata: {
-        from, to, factor,
-        balance_before: balanceBefore,
-        balance_after: newBalance,
-        transactions_restated: restated,
-      },
-      ip,
-    });
-
-    return {
-      id, currency: to, converted: true,
-      from, to, rate: factor,
-      balance_before: balanceBefore,
-      balance_after: newBalance,
-      transactions_restated: restated,
-    };
-  }
+  // updateMerchantCurrency is gone. A merchant holds one balance per currency,
+  // so there is nothing to switch, and converting a whole balance restated their
+  // wallet history — two mechanisms mutating the same money is where
+  // reconciliation bugs come from. Deposits choose their own currency instead.
 
   async getWebhookSecret(merchantId: string) {
     const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });

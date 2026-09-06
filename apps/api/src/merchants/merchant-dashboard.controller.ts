@@ -4,6 +4,7 @@ import { MerchantsService } from './merchants.service';
 import { SupportService } from './support.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MerchantAuthGuard } from '../auth/guards/merchant-auth.guard';
+import { MerchantWalletService } from '../wallet/merchant-wallet.service';
 import { PluginDownloadService } from './plugin-download.service';
 import { WebhookService } from '../webhooks/webhook.service';
 import { FulfillmentService } from '../fulfillment/fulfillment.service';
@@ -26,6 +27,7 @@ export class MerchantDashboardController {
     private walletService: WalletService,
     private pluginDownloadService: PluginDownloadService,
     private emergencyService: EmergencyService,
+    private merchantWalletService: MerchantWalletService,
   ) {}
 
   /**
@@ -45,10 +47,25 @@ export class MerchantDashboardController {
     return this.merchantsService.getWallet(req.user.merchantId);
   }
 
-  @Patch('dashboard/currency')
+  /**
+   * The merchant's balances, one per currency.
+   *
+   * Replaces the old "change currency" control. A merchant holds PKR and USD
+   * side by side now, so there is nothing to switch — only an order to spend
+   * them in.
+   */
+  @Get('dashboard/wallets')
   @UseGuards(JwtAuthGuard, MerchantAuthGuard)
-  async updateMyCurrency(@Body() body: { currency: string }, @Req() req: any) {
-    return this.merchantsService.updateMerchantCurrency(req.user.merchantId, body.currency);
+  async listMyWallets(@Req() req: any) {
+    return this.merchantWalletService.listWallets(req.user.merchantId);
+  }
+
+  @Patch('dashboard/wallets/spend-order')
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
+  async setMySpendOrder(@Body() body: { order: string[] }, @Req() req: any) {
+    return this.merchantWalletService.setSpendOrder(
+      req.user.merchantId, body?.order || [], req.user.merchantId, req.ip,
+    );
   }
 
   @Get('dashboard/funding-requests')

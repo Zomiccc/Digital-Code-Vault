@@ -12,7 +12,7 @@ function fixture(options: {
   const merchant = options.merchant === undefined
     ? { id: 'm1', name: 'Test Shop', email: 'shop@example.com', status: 'ACTIVE', walletBalance: 0, currency: 'USD' }
     : options.merchant;
-  const counts = { codes: 0, delivered: 0, ...(options.counts ?? {}) };
+  const counts: Record<string, number> = { codes: 0, delivered: 0, ...(options.counts ?? {}) };
 
   const detached: any[] = [];
   const deleted: string[] = [];
