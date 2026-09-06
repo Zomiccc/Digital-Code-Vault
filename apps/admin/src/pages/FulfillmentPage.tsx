@@ -32,6 +32,8 @@ export function FulfillmentPage() {
   const selectedProductData = orderProducts.find((p: any) => p.id === orderForm.productId);
   const selectedProductVariants = selectedProductData?.productRegions?.flatMap((pr: any) => pr.variants) || [];
   const selectedProductDenominations = selectedProductData?.denominations || [];
+  // Denominations of one product share a currency, so the first one names it.
+  const orderValueCurrency = selectedProductDenominations[0]?.currency || 'USD';
   // True when the typed value is not one of the stocked values, so the order
   // will be made up from a combination rather than a single matching code.
   const isCustomAmount = !selectedProductDenominations.some(
@@ -181,7 +183,7 @@ export function FulfillmentPage() {
               available codes to reach it. Only the chips were obvious before, so
               a one-off order for an unlisted amount looked impossible. */}
           <Input
-            label="Order value — any amount (USD)"
+            label={`Order value — any amount (${orderValueCurrency})`}
             type="number" min="0.01" step="0.01"
             value={orderForm.amount}
             onChange={(e) => setOrderForm({ ...orderForm, amount: e.target.value })}
@@ -190,7 +192,7 @@ export function FulfillmentPage() {
           {validAmount && !orderForm.variantId && selectedProductDenominations.length > 0 && (
             <p className="text-xs text-muted-foreground">
               {isCustomAmount
-                ? `Custom amount — will be made up from codes in stock that add up to ${formatPrice(amount, 'USD')}.`
+                ? `Custom amount — will be made up from codes in stock that add up to ${formatPrice(amount, orderValueCurrency)}.`
                 : 'Matches a value in stock.'}
             </p>
           )}
