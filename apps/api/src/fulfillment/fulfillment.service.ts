@@ -18,7 +18,9 @@ import { EmailService } from '../email/email.service';
 import { OrderDigestService } from '../email/order-digest.service';
 import { WalletService } from '../wallet/wallet.service';
 import { CurrencyService } from '../currency/currency.service';
-import { convertFromUsd, normaliseCurrency } from '../currency/money';
+import { SellingPriceService } from '../currency/selling-price.service';
+import { MerchantWalletService, ChosenWallet, WalletShortfall } from '../wallet/merchant-wallet.service';
+import { normaliseCurrency, roundMoney } from '../currency/money';
 @Injectable()
 export class FulfillmentService {
   private readonly logger = new Logger(FulfillmentService.name);
@@ -34,6 +36,8 @@ export class FulfillmentService {
     private orderDigestService: OrderDigestService,
     private walletService: WalletService,
     private currencyService: CurrencyService,
+    private sellingPriceService: SellingPriceService,
+    private merchantWalletService: MerchantWalletService,
   ) {}
 
   async createFulfillment(params: {
@@ -521,17 +525,74 @@ export class FulfillmentService {
     // checked or charged; stock is fulfilled straight from the vault.
     const skipWallet = sandbox || useMerchantPool || actorType === 'ADMIN';
 
-    // Prices are held in USD; a wallet is charged in its own currency. Resolve the
-    // rate once, before the transaction, so every check and write below agrees on
-    // it and a mid-order rate change cannot split the charge across two rates.
-    const walletCurrency = normaliseCurrency(merchant.currency || 'USD');
-    const fxRate = skipWallet ? 1 : await this.currencyService.getRate(walletCurrency);
-    const chargeFor = (costUsd: number) => convertFromUsd(costUsd, fxRate);
-    let chargedAmount = chargeFor(totalCost);
+    // What this order costs in a given currency.
+    //
+    // A selling price is set per currency, so the rupee cost is the rupee price
+    // that was entered — not the dollar price times a rate. A pack is priced as
+    // a pack; anything else is the sum of the code values being handed over.
+    // Returns null for a currency the order cannot be priced in, so the caller
+    // skips that wallet rather than charging a guess.
+    // Loaded on first use: an order that charges no wallet — admin, sandbox, or
+    // merchant-owned stock — never needs to price anything.
+    let denominationById: Map<string, { faceValue: any; currency: string }> | null = null;
+    const loadDenominations = async () => {
+      if (denominationById) return denominationById;
+      const rows = combination.length
+        ? await this.prisma.denomination.findMany({
+            where: { id: { in: combination.map((item) => item.denominationId) } },
+            select: { id: true, faceValue: true, currency: true },
+          })
+        : [];
+      denominationById = new Map(rows.map((row) => [row.id, row]));
+      return denominationById;
+    };
+
+    const costInCurrency = async (walletCurrency: string): Promise<number | null> => {
+      try {
+        if (usedVariantPreset && variantId) {
+          const variant = await this.prisma.variant.findUnique({ where: { id: variantId } });
+          if (!variant) return null;
+          const price = await this.sellingPriceService.priceIn(
+            'VARIANT', variantId, walletCurrency,
+            { amount: Number(variant.customerPrice), currency: variant.currency },
+          );
+          return price.amount;
+        }
+        const rows = await loadDenominations();
+        let sum = 0;
+        for (const item of combination) {
+          const row = rows.get(item.denominationId);
+          const price = await this.sellingPriceService.priceIn(
+            'DENOMINATION', item.denominationId, walletCurrency,
+            { amount: row ? Number(row.faceValue) : item.faceValue, currency: row?.currency || 'USD' },
+          );
+          sum += price.amount * item.count;
+        }
+        return roundMoney(sum);
+      } catch {
+        return null;
+      }
+    };
+
+    // Pick the wallet before the transaction so every check and write below
+    // agrees on both the wallet and the amount.
+    let chosenWallet: ChosenWallet | null = null;
+    let shortfalls: WalletShortfall[] = [];
+    if (!skipWallet) {
+      const selection = await this.merchantWalletService.chooseWalletForCharge(merchantId, costInCurrency);
+      chosenWallet = selection.chosen;
+      shortfalls = selection.shortfalls;
+    }
+    const walletCurrency = chosenWallet?.currency ?? normaliseCurrency(merchant.currency || 'USD');
+    let chargedAmount = chosenWallet?.amount ?? 0;
+    // Kept for reconciliation: what the merchant paid over what the platform
+    // booked in USD. With a per-currency price this is an effective rate rather
+    // than a configured one.
+    const fxRate = totalCost > 0 && chargedAmount > 0 ? roundMoney(chargedAmount / totalCost) : 1;
 
     if (!skipWallet) {
-      // Check wallet balance, in the wallet's own currency
-      if (Number(merchant.walletBalance) < chargedAmount) {
+      // No wallet could cover the whole order.
+      if (!chosenWallet) {
         const failedReq = await this.prisma.fulfillmentRequest.create({
           data: {
             merchantId,
@@ -552,10 +613,7 @@ export class FulfillmentService {
           action: 'fulfillment.failed',
           entity: 'FulfillmentRequest',
           entityId: failedReq.id,
-          metadata: {
-            reason: 'INSUFFICIENT_WALLET', balance: merchant.walletBalance,
-            required: chargedAmount, currency: walletCurrency, amountUsd: totalCost, fxRate,
-          },
+          metadata: { reason: 'INSUFFICIENT_WALLET', amountUsd: totalCost, wallets: shortfalls },
           ip,
         });
 
@@ -568,7 +626,9 @@ export class FulfillmentService {
         throw new BadRequestException({
           error: 'INSUFFICIENT_WALLET',
           code: 'INSUFFICIENT_WALLET',
-          message: `Insufficient wallet balance. Required: ${chargedAmount} ${walletCurrency}, Available: ${merchant.walletBalance} ${walletCurrency}`,
+          // Names every wallet and what it holds, so the merchant knows which to
+          // top up rather than only that "the wallet" was short.
+          message: this.merchantWalletService.describeShortfall(shortfalls),
         });
       }
     }
@@ -669,8 +729,19 @@ export class FulfillmentService {
                 message: `Combination total ${totalCost} does not match requested amount ${amount} after retry`,
               });
             }
-            // Keep the wallet charge in step with the re-picked combination.
-            chargedAmount = chargeFor(totalCost);
+            // Keep the wallet charge in step with the re-picked combination,
+            // re-priced in the wallet already chosen to pay.
+            if (chosenWallet) {
+              const repriced = await costInCurrency(chosenWallet.currency);
+              if (repriced === null) {
+                throw new BadRequestException({
+                  error: 'INSUFFICIENT_INVENTORY',
+                  code: 'PRICE_UNAVAILABLE',
+                  message: `Could not price the replacement codes in ${chosenWallet.currency}`,
+                });
+              }
+              chargedAmount = repriced;
+            }
           }
         }
 
@@ -717,15 +788,16 @@ export class FulfillmentService {
           if (skipWallet) {
             updatedMerchant = await tx.merchant.findUnique({ where: { id: merchantId } });
           } else {
-            updatedMerchant = await tx.merchant.update({
-              where: { id: merchantId },
-              data: {
-                walletBalance: { decrement: chargedAmount },
-              },
+            const debited = await tx.merchantWallet.update({
+              where: { id: chosenWallet!.walletId },
+              data: { balance: { decrement: chargedAmount } },
             });
+            // Later code reads walletBalance off `updatedMerchant`; present the
+            // charged wallet's balance under that name.
+            updatedMerchant = { ...merchant, walletBalance: debited.balance };
 
             // Guard against negative balance (second safety net)
-            if (Number(updatedMerchant.walletBalance) < 0) {
+            if (Number(debited.balance) < 0) {
               throw new BadRequestException({
                 error: 'INSUFFICIENT_WALLET',
                 code: 'NEGATIVE_BALANCE_GUARD',
@@ -1107,11 +1179,19 @@ export class FulfillmentService {
         return tx.fulfillmentRequest.update({ where: { id: fulfillmentId }, data: { status: 'REVERSED' } });
       }
 
-      // Credit wallet back
-      const updatedMerchant = await tx.merchant.update({
-        where: { id: req.merchantId },
-        data: { walletBalance: { increment: refundAmount } },
+      // Credit the money back to the wallet it came from. The wallet row
+      // records its currency, and a merchant holds one wallet per currency, so
+      // the currency identifies where the refund belongs.
+      const refundCurrency = normaliseCurrency(req.walletTxn.currency || 'USD');
+      const refundedWallet = await tx.merchantWallet.upsert({
+        where: { merchantId_currency: { merchantId: req.merchantId, currency: refundCurrency } },
+        create: {
+          merchantId: req.merchantId, currency: refundCurrency,
+          balance: refundAmount, spendOrder: 99,
+        },
+        update: { balance: { increment: refundAmount } },
       });
+      const updatedMerchant = { id: req.merchantId, walletBalance: refundedWallet.balance };
 
       // Create refund wallet transaction, in the wallet's own currency
       await tx.walletTransaction.create({

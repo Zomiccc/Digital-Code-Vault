@@ -5,7 +5,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { FulfillmentService } from './fulfillment.service';
 
-function fixture(options: { walletCurrency: string; balance: number; rate?: number }) {
+function fixture(options: {
+  walletCurrency: string;
+  balance: number;
+  rate?: number;
+  /** Selling price per currency; falls back to the USD amount when absent. */
+  prices?: Record<string, number>;
+}) {
   let saved: any;
   let preset: any = null;
   let stock: any[] = [{ denominationId: 'denom100', faceValue: 100, availableCount: 4 }];
@@ -30,6 +36,23 @@ function fixture(options: { walletCurrency: string; balance: number; rate?: numb
       },
     },
     walletTransaction: { create: async ({ data }: any) => { walletRows.push(data); return data; } },
+    merchantWallet: {
+      update: async ({ data }: any) => {
+        merchantUpdates.push({ walletBalance: data.balance });
+        merchant.walletBalance = Number(merchant.walletBalance) - Number(data.balance.decrement ?? 0);
+        return { balance: merchant.walletBalance, currency: options.walletCurrency };
+      },
+      upsert: async ({ update }: any) => {
+        merchant.walletBalance = Number(merchant.walletBalance) + Number(update.balance.increment ?? 0);
+        return { balance: merchant.walletBalance, currency: options.walletCurrency };
+      },
+    },
+    denomination: {
+      findMany: async ({ where }: any) => where.id.in.map((id: string) => ({
+        id, faceValue: id === 'd10' ? 10 : id === 'd20' ? 20 : 100, currency: 'USD',
+      })),
+    },
+    variant: { findUnique: async () => ({ id: 'v-ess-1m', customerPrice: 9.99, currency: 'USD' }) },
     product: { findUnique: async () => ({ id: 'product', name: 'Code', status: 'ACTIVE', productType: 'NORMAL' }) },
     fulfillmentRequest: {
       findUnique: async () => saved,
@@ -82,6 +105,38 @@ function fixture(options: { walletCurrency: string; balance: number; rate?: numb
       if (options.rate === undefined) throw new Error(`No exchange rate is set for ${currency}`);
       return options.rate;
     } } as any,
+    // Prices: an explicit figure when set for that currency, otherwise the USD
+    // amount converted at the rate — the same fallback the real service uses.
+    {
+      priceIn: async (_type: any, _id: any, currency: string, base: any) => {
+        const explicit = options.prices?.[currency];
+        if (explicit !== undefined) return { currency, amount: explicit, explicit: true };
+        if (currency === 'USD') return { currency, amount: base.amount, explicit: false };
+        rateLookups++;
+        if (options.rate === undefined) throw new Error(`No exchange rate is set for ${currency}`);
+        return { currency, amount: base.amount * options.rate, explicit: false };
+      },
+    } as any,
+    {
+      chooseWalletForCharge: async (_merchantId: string, costInCurrency: any) => {
+        const required = await costInCurrency(options.walletCurrency).catch(() => null);
+        if (required === null) {
+          return { chosen: null, shortfalls: [{ currency: options.walletCurrency, balance: options.balance, required: 0, reason: 'no_rate' }] };
+        }
+        if (Number(merchant.walletBalance) < required) {
+          return { chosen: null, shortfalls: [{ currency: options.walletCurrency, balance: Number(merchant.walletBalance), required, reason: 'insufficient' }] };
+        }
+        return {
+          chosen: { walletId: 'w1', currency: options.walletCurrency, amount: required, balance: Number(merchant.walletBalance) },
+          shortfalls: [],
+        };
+      },
+      describeShortfall: (shortfalls: any[]) =>
+        `Insufficient wallet balance. ${shortfalls.map((entry: any) =>
+          entry.reason === 'no_rate'
+            ? `${entry.currency} has no price or exchange rate configured`
+            : `${entry.currency} holds ${entry.balance} of ${entry.required} needed`).join('; ')}.`,
+    } as any,
   );
   return {
     service, walletRows, revenueRecords, merchantUpdates, merchant,
@@ -143,8 +198,10 @@ test('the balance check uses the converted amount, so PKR 20,000 cannot buy a $1
   await assert.rejects(
     () => f.service.createFulfillment({ ...order }),
     (error: any) => {
-      assert.match(error.response?.message ?? error.message, /Insufficient wallet balance/);
-      assert.match(error.response?.message ?? error.message, /30000 PKR/);
+      const message = error.response?.message ?? error.message;
+      assert.match(message, /Insufficient wallet balance/);
+      // Names the wallet and both figures, so the merchant knows what to top up.
+      assert.match(message, /PKR holds 20000 of 30000 needed/);
       return true;
     },
   );
@@ -153,11 +210,11 @@ test('the balance check uses the converted amount, so PKR 20,000 cannot buy a $1
   assert.equal(f.platformBalance, 0);
 });
 
-test('a wallet currency with no configured rate refuses the order rather than guessing', async () => {
+test('a wallet the order cannot be priced in refuses rather than guessing', async () => {
   const f = fixture({ walletCurrency: 'TRY', balance: 100000, rate: undefined });
   await assert.rejects(
     () => f.service.createFulfillment({ ...order }),
-    /No exchange rate is set for TRY/,
+    /TRY has no price or exchange rate configured/,
   );
   assert.deepEqual(f.merchantUpdates, []);
   assert.equal(f.walletRows.length, 0);
@@ -245,4 +302,36 @@ test('without a preset, a price that matches no combination is still refused', a
     },
   );
   assert.deepEqual(f.merchantUpdates, [], 'no debit for an unfulfillable amount');
+});
+
+test('a wallet is charged the price set for its currency, not a conversion', async () => {
+  // A $100 code sold for PKR 27,500. The rate would make it 30,000; the price
+  // set is what must be charged.
+  const f = fixture({ walletCurrency: 'PKR', balance: 67000, rate: 300, prices: { PKR: 27500 } });
+  await f.service.createFulfillment({ ...order });
+
+  assert.deepEqual(f.merchantUpdates, [{ walletBalance: { decrement: 27500 } }]);
+  assert.equal(f.saved.chargedAmount, 27500);
+  assert.equal(f.saved.chargedCurrency, 'PKR');
+  const debit = f.walletRows.find((row: any) => row.type === 'DEBIT');
+  assert.equal(debit.amount, 27500);
+});
+
+test('the platform still books USD when the wallet pays a set rupee price', async () => {
+  const f = fixture({ walletCurrency: 'PKR', balance: 67000, rate: 300, prices: { PKR: 27500 } });
+  await f.service.createFulfillment({ ...order });
+  assert.equal(f.revenueRecords.find((r: any) => r.type === 'CREDIT').amount, 100);
+});
+
+test('a set price is enforced on the balance check too', async () => {
+  // Holds more than the converted figure would need, but less than the price set.
+  const f = fixture({ walletCurrency: 'PKR', balance: 27000, rate: 300, prices: { PKR: 27500 } });
+  await assert.rejects(
+    () => f.service.createFulfillment({ ...order }),
+    (error: any) => {
+      assert.match(error.response?.message ?? error.message, /PKR holds 27000 of 27500 needed/);
+      return true;
+    },
+  );
+  assert.deepEqual(f.merchantUpdates, [], 'no debit may be attempted');
 });
