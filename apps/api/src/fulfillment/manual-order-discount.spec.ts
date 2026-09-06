@@ -105,7 +105,7 @@ const params = { merchantId: 'platform', productId: 'product', amount: 50, curre
 
 test('concurrent reversals with the same stale status debit revenue only once', async () => {
   const f = fixture();
-  await f.service.createFulfillment({ ...params, discountAmount: 10 });
+  await f.service.createFulfillment({ ...params, chargeAmount: 40 });
   const snapshot = f.saved;
   let reads = 0;
   let release!: () => void;
@@ -130,7 +130,7 @@ test('concurrent reversals with the same stale status debit revenue only once', 
 
 test('delivery status changed after precheck prevents reversal side effects', async () => {
   const f = fixture();
-  await f.service.createFulfillment({ ...params, discountAmount: 10 });
+  await f.service.createFulfillment({ ...params, chargeAmount: 40 });
   const snapshot = f.saved;
   f.prisma.fulfillmentRequest.findUnique = async () => {
     await f.prisma.fulfillmentRequest.update({ data: { status: 'DELIVERED' } });
@@ -145,7 +145,7 @@ test('delivery status changed after precheck prevents reversal side effects', as
 
 test('ledger failure rolls back reversal claim and balance so retry can succeed', async () => {
   const f = fixture();
-  await f.service.createFulfillment({ ...params, discountAmount: 10 });
+  await f.service.createFulfillment({ ...params, chargeAmount: 40 });
   const createRecord = f.prisma.adminWalletTransaction.create;
   f.prisma.adminWalletTransaction.create = async () => { throw new Error('ledger unavailable'); };
   await assert.rejects(f.service.reverseFulfillment('order', 'admin'), /ledger unavailable/);
@@ -162,49 +162,59 @@ test('ledger failure rolls back reversal claim and balance so retry can succeed'
 
 test('manual revenue resolves root wallet connection before transaction entry', async () => {
   const f = fixture();
-  await f.service.createFulfillment({ ...params, discountAmount: 10 });
+  await f.service.createFulfillment({ ...params, chargeAmount: 40 });
   assert.equal(f.walletLookups, 1);
   await f.service.reverseFulfillment('order', 'admin');
   assert.equal(f.walletLookups, 1, 'manual reversal uses the original credit wallet');
 });
 
-test('money validation: omitted, zero, fractional and full discounts', () => {
-  assert.deepEqual(manualOrderPricing(50), { original_amount: 50, discount_amount: 0, net_amount: 50 });
-  assert.equal(manualOrderPricing(50, 0).net_amount, 50);
-  assert.equal(manualOrderPricing(0.3, 0.1).net_amount, 0.2);
-  assert.equal(manualOrderPricing(50, 50).net_amount, 0);
+test('an omitted charge means charge in full; a charge implies its discount', () => {
+  assert.deepEqual(manualOrderPricing(50), {
+    original_amount: 50, charge_amount: 50, discount_amount: 0, net_amount: 50,
+  });
+  // The headline case: an 80 order charged at 77 shows a discount of 3.
+  assert.deepEqual(manualOrderPricing(80, 77), {
+    original_amount: 80, charge_amount: 77, discount_amount: 3, net_amount: 77,
+  });
+  assert.equal(manualOrderPricing(50, 50).discount_amount, 0);
+  assert.equal(manualOrderPricing(0.3, 0.1).discount_amount, 0.2);
+  assert.equal(manualOrderPricing(50, 0).discount_amount, 50, 'charging nothing is a full discount');
 });
 
-test('rejects coercion, non-finite values, negatives, excess precision and excessive discounts', () => {
-  for (const discount of [null, '', '5', true, {}, NaN, Infinity, -1, 50.01, 0.001]) {
-    assert.throws(() => manualOrderPricing(50, discount));
+test('rejects coercion, non-finite values, negatives, excess precision and a charge above the order', () => {
+  for (const charge of [null, '', '5', true, {}, NaN, Infinity, -1, 50.01, 0.001]) {
+    assert.throws(() => manualOrderPricing(50, charge));
   }
   for (const amount of [undefined, null, '', '50', false, NaN, Infinity, 0, -1, 1.001, Number.MAX_SAFE_INTEGER]) {
     assert.throws(() => manualOrderPricing(amount));
   }
 });
 
-for (const discountAmount of [undefined, 0, 7.25, 50]) {
-  test(`admin discount ${discountAmount}: preserves allocation, credits net revenue, skips merchant wallet`, async () => {
+// [what the admin charges, the discount that implies on a 50 order]
+for (const [chargeAmount, discountAmount] of [
+  [undefined, 0], [50, 0], [42.75, 7.25], [0, 50],
+] as [number | undefined, number][]) {
+  test(`admin charging ${chargeAmount}: shows a ${discountAmount} discount, preserves allocation, skips merchant wallet`, async () => {
     const f = fixture();
-    const result = await f.service.createFulfillment({ ...params, discountAmount });
+    const result = await f.service.createFulfillment({ ...params, chargeAmount });
     assert.equal(f.saved.amount, 50);
-    assert.equal(f.saved.discountAmount, discountAmount ?? 0);
+    assert.equal(f.saved.discountAmount, discountAmount, 'the discount is derived from the charge');
     assert.equal(f.saved.walletCharged, false);
     assert.deepEqual(f.reserved, [{ denominationId: 'denom50', faceValue: 50, count: 1 }]);
-    assert.equal(result.net_amount, 50 - (discountAmount ?? 0));
+    assert.equal(result.net_amount, chargeAmount ?? 50);
+    assert.equal(result.charge_amount, chargeAmount ?? 50);
     assert.equal(f.platformBalance, result.net_amount);
     assert.equal(f.revenueRecords[0].amount, result.net_amount);
     assert.equal(f.revenueRecords[0].source, 'FULFILLMENT');
-    assert.equal(f.audits[0].metadata.pricing.discount_amount, discountAmount ?? 0);
-    assert.deepEqual(await f.service.createFulfillment({ ...params, discountAmount }), result);
+    assert.equal(f.audits[0].metadata.pricing.discount_amount, discountAmount);
+    assert.deepEqual(await f.service.createFulfillment({ ...params, chargeAmount }), result);
     assert.equal(f.reservations, 1);
     f.clearCache();
-    const replay = await f.service.createFulfillment({ ...params, discountAmount });
+    const replay = await f.service.createFulfillment({ ...params, chargeAmount });
     assert.equal(replay.net_amount, result.net_amount);
     assert.equal(f.reservations, 1);
     const list = await AdminService.prototype.listAllFulfillmentRequests.call({ prisma: f.prisma } as any);
-    assert.equal(list.items[0].discountAmount, discountAmount ?? 0);
+    assert.equal(list.items[0].discountAmount, discountAmount);
     assert.equal(list.items[0].netAmount, result.net_amount);
     assert.equal(f.revenueRecords.length, 1);
     await f.service.reverseFulfillment('order', 'admin');
@@ -217,7 +227,7 @@ for (const discountAmount of [undefined, 0, 7.25, 50]) {
 
 test('discount does not reduce a multi-code allocation', async () => {
   const f = fixture();
-  const result = await f.service.createFulfillment({ ...params, amount: 100, discountAmount: 50 });
+  const result = await f.service.createFulfillment({ ...params, amount: 100, chargeAmount: 50 });
   assert.deepEqual(f.reserved, [{ denominationId: 'denom50', faceValue: 50, count: 2 }]);
   assert.equal(result.net_amount, 50);
   assert.equal(f.saved.amount, 100);
@@ -225,7 +235,7 @@ test('discount does not reduce a multi-code allocation', async () => {
 
 test('sandbox manual order records no platform revenue', async () => {
   const f = fixture();
-  await f.service.createFulfillment({ ...params, sandbox: true, discountAmount: 10 });
+  await f.service.createFulfillment({ ...params, sandbox: true, chargeAmount: 40 });
   assert.equal(f.revenueRecords.length, 0);
   await f.service.reverseFulfillment('order', 'admin');
   assert.equal(f.revenueRecords.length, 0);
@@ -236,7 +246,7 @@ test('variant preset keeps its denomination quantities when discounted', async (
   f.prisma.fulfillmentCombination = { findMany: async () => [{
     name: 'Two codes', items: [{ denominationId: 'denom50', quantity: 2, denomination: { faceValue: 50 } }],
   }] };
-  const result = await f.service.createFulfillment({ ...params, amount: 100, variantId: 'variant', discountAmount: 25 });
+  const result = await f.service.createFulfillment({ ...params, amount: 100, variantId: 'variant', chargeAmount: 75 });
   assert.equal(result.net_amount, 75);
   assert.deepEqual(f.reserved, [{ denominationId: 'denom50', faceValue: 50, count: 2 }]);
   assert.equal(f.platformBalance, 75);
@@ -245,7 +255,7 @@ test('variant preset keeps its denomination quantities when discounted', async (
 test('unavailable stock creates no revenue or allocation', async () => {
   const f = fixture();
   f.engine.getAvailableStock = async () => [];
-  await assert.rejects(f.service.createFulfillment({ ...params, discountAmount: 10 }), /No available stock/);
+  await assert.rejects(f.service.createFulfillment({ ...params, chargeAmount: 40 }), /No available stock/);
   assert.equal(f.reservations, 0);
   assert.equal(f.revenueRecords.length, 0);
   assert.equal(f.platformBalance, 0);
@@ -254,8 +264,8 @@ test('unavailable stock creates no revenue or allocation', async () => {
 test('rejects non-admin discounts and invalid admin discounts before database access', async () => {
   const f = fixture();
   f.prisma.merchant.findUnique = async () => { throw new Error('Unexpected database access'); };
-  await assert.rejects(f.service.createFulfillment({ ...params, actorType: 'MERCHANT', discountAmount: 5 }), /only available to admins/);
-  await assert.rejects(f.service.createFulfillment({ ...params, discountAmount: 51 }), /discountAmount/);
+  await assert.rejects(f.service.createFulfillment({ ...params, actorType: 'MERCHANT', chargeAmount: 45 }), /only available to admins/);
+  await assert.rejects(f.service.createFulfillment({ ...params, chargeAmount: 51 }), /chargeAmount/);
   assert.equal(f.reservations, 0);
 });
 
@@ -265,10 +275,10 @@ test('controller validates before creating a platform merchant and forwards orig
     prisma: { merchant: { findUnique: async () => ({ id: 'platform' }) } },
     fulfillmentService: { createFulfillment: async (input: any) => { calls.push(input); return input; } },
   };
-  await AdminController.prototype.createManualOrder.call(context, { productId: 'product', amount: 50, discountAmount: 10 }, { id: 'admin-id' }, { ip: '127.0.0.1' });
+  await AdminController.prototype.createManualOrder.call(context, { productId: 'product', amount: 50, chargeAmount: 40 }, { id: 'admin-id' }, { ip: '127.0.0.1' });
   assert.equal(calls[0].amount, 50);
-  assert.equal(calls[0].discountAmount, 10);
+  assert.equal(calls[0].chargeAmount, 40);
   assert.equal(calls[0].actorType, 'ADMIN');
   context.prisma.merchant.findUnique = async () => { throw new Error('Unexpected database access'); };
-  await assert.rejects(AdminController.prototype.createManualOrder.call(context, { productId: 'product', amount: 50, discountAmount: -1 }, { id: 'admin-id' }, {}), /discountAmount/);
+  await assert.rejects(AdminController.prototype.createManualOrder.call(context, { productId: 'product', amount: 50, chargeAmount: -1 }, { id: 'admin-id' }, {}), /chargeAmount/);
 });

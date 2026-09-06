@@ -53,13 +53,13 @@ export class FulfillmentService {
     inventorySource?: string; // 'DCV' | 'MERCHANT' | 'AUTO' (default: 'DCV')
     denominationId?: string; // exact denomination to use (from SKU mapping)
     variantId?: string; // variant to use for FulfillmentCombination lookup
-    discountAmount?: number; // ADMIN only; reduces recorded revenue, never allocation
+    chargeAmount?: number; // ADMIN only; reduces recorded revenue, never allocation
   }) {
     const { merchantId, productId, amount, currency, referenceId, idempotencyKey, sandbox, customerEmail, customerName, customerAddress, actorId, actorType, ip } = params;
-    if (params.discountAmount !== undefined && actorType !== 'ADMIN') {
-      throw new BadRequestException('Manual-order discounts are only available to admins');
+    if (params.chargeAmount !== undefined && actorType !== 'ADMIN') {
+      throw new BadRequestException('Setting the amount to charge is only available to admins');
     }
-    const pricing = actorType === 'ADMIN' ? manualOrderPricing(amount, params.discountAmount) : undefined;
+    const pricing = actorType === 'ADMIN' ? manualOrderPricing(amount, params.chargeAmount) : undefined;
 
     // ─── Emergency stop: pause ALL code delivery platform-wide ───
     if (actorType !== 'ADMIN') {
@@ -1188,6 +1188,7 @@ export class FulfillmentService {
       created_at: req.createdAt,
       original_amount: Number(req.amount),
       discount_amount: Number(req.discountAmount ?? 0),
+      charge_amount: (Math.round(Number(req.amount) * 100) - Math.round(Number(req.discountAmount ?? 0) * 100)) / 100,
       net_amount: (Math.round(Number(req.amount) * 100) - Math.round(Number(req.discountAmount ?? 0) * 100)) / 100,
       currency: req.currency,
       allocation: req.allocations?.[0]?.codeItemIds

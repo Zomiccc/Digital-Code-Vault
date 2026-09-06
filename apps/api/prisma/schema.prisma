@@ -647,6 +647,30 @@ model PlatformSetting {
   updatedAt DateTime @updatedAt
 }
 
+/// A selling price set explicitly in one currency.
+///
+/// Inventory cost is per batch, in that batch's own currency. The selling price
+/// is separate and needs to exist in every currency the platform sells in — USD
+/// and PKR both — because a merchant paying from a rupee balance is charged the
+/// rupee price, not a dollar price run through a rate.
+///
+/// A currency with no row here falls back to converting the item's own price, so
+/// adding this never leaves anything unpriced.
+model SellingPrice {
+  id        String   @id @default(uuid())
+  /// DENOMINATION | VARIANT
+  itemType  String
+  itemId    String
+  currency  String
+  amount    Decimal
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([itemType, itemId, currency])
+  @@index([itemId])
+}
+
 /// One balance per currency a merchant holds. A merchant can hold PKR and USD
 /// side by side; deposits land in the chosen one and nothing is converted until
 /// an order is paid. `spendOrder` decides which is drawn from first.
