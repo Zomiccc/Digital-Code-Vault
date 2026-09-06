@@ -3,6 +3,7 @@ import { Response } from 'express';
 import { MerchantsService } from './merchants.service';
 import { SupportService } from './support.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { MerchantAuthGuard } from '../auth/guards/merchant-auth.guard';
 import { PluginDownloadService } from './plugin-download.service';
 import { WebhookService } from '../webhooks/webhook.service';
 import { FulfillmentService } from '../fulfillment/fulfillment.service';
@@ -33,31 +34,31 @@ export class MerchantDashboardController {
    * of only surfacing as a failed order.
    */
   @Get('dashboard/platform-status')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async getPlatformStatus(@Req() req: any) {
     return this.emergencyService.getStatusForMerchant(req.user.merchantId);
   }
 
   @Get('dashboard/wallet')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async getWallet(@Req() req: any) {
     return this.merchantsService.getWallet(req.user.merchantId);
   }
 
   @Patch('dashboard/currency')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async updateMyCurrency(@Body() body: { currency: string }, @Req() req: any) {
     return this.merchantsService.updateMerchantCurrency(req.user.merchantId, body.currency);
   }
 
   @Get('dashboard/funding-requests')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async listMyFundingRequests(@Req() req: any) {
     return this.walletService.listFundingRequests(req.user.merchantId);
   }
 
   @Post('dashboard/funding-requests')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async createFundingRequest(@Body() body: CreateFundingRequestDto, @Req() req: any) {
     const request = await this.walletService.createFundingRequest(
       req.user.merchantId, body.amount, body.note, body.screenshot, body.currency,
@@ -79,7 +80,7 @@ export class MerchantDashboardController {
   }
 
   @Get('dashboard/payment-details')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async getPaymentDetails(@Req() req: any) {
     return this.merchantsService.getAdminPaymentDetails();
   }
@@ -87,13 +88,13 @@ export class MerchantDashboardController {
   // ─── Support chat (merchant side) ───
 
   @Get('support/messages')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async getSupportThread(@Req() req: any) {
     return this.supportService.getMerchantThread(req.user.merchantId);
   }
 
   @Post('support/messages')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async sendSupportMessage(@Body() body: CreateSupportMessageDto, @Req() req: any) {
     if (!body.body && !body.image) {
       throw new BadRequestException('Message text or an image is required');
@@ -110,7 +111,7 @@ export class MerchantDashboardController {
   }
 
   @Get('dashboard/orders')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async listOrders(@Req() req: any, @Query('limit') limit?: string, @Query('offset') offset?: string) {
     return this.merchantsService.listFulfillmentRequests(
       req.user.merchantId,
@@ -120,19 +121,19 @@ export class MerchantDashboardController {
   }
 
   @Get('dashboard/api-keys')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async listApiKeys(@Req() req: any) {
     return this.merchantsService.listApiKeys(req.user.merchantId);
   }
 
   @Post('dashboard/api-keys')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async createApiKey(@Body() body: CreateApiKeyDto, @Req() req: any) {
     return this.merchantsService.createApiKey(req.user.merchantId, body.scopes);
   }
 
   @Delete('dashboard/api-keys/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async revokeApiKey(@Param('id') id: string, @Req() req: any) {
     return this.merchantsService.revokeApiKey(req.user.merchantId, id);
   }
@@ -140,7 +141,7 @@ export class MerchantDashboardController {
   // ─── Dashboard Fulfillment (JWT-guarded, no HMAC needed) ───
 
   @Post('dashboard/fulfillment')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async createDashboardFulfillment(
     @Body() body: CreateFulfillmentDto,
     @Req() req: any,
@@ -175,13 +176,13 @@ export class MerchantDashboardController {
   // ─── Webhook Management (JWT-guarded for dashboard) ───
 
   @Get('webhooks')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async listWebhooks(@Req() req: any) {
     return this.webhookService.listEndpoints(req.user.merchantId);
   }
 
   @Post('webhooks')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async createWebhook(@Body() body: CreateWebhookDto, @Req() req: any) {
     if (!body.url) {
       throw new BadRequestException({
@@ -194,19 +195,19 @@ export class MerchantDashboardController {
   }
 
   @Delete('webhooks/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async deleteWebhook(@Param('id') id: string, @Req() req: any) {
     return this.webhookService.deleteEndpoint(req.user.merchantId, id);
   }
 
   @Get('webhook-secret')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async getWebhookSecret(@Req() req: any) {
     return this.merchantsService.getWebhookSecret(req.user.merchantId);
   }
 
   @Post('webhook-secret/regenerate')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async regenerateWebhookSecret(@Req() req: any) {
     return this.merchantsService.regenerateWebhookSecret(req.user.merchantId);
   }
@@ -214,7 +215,7 @@ export class MerchantDashboardController {
   // ─── Merchant Inventory Management ───
 
   @Get('dashboard/inventory')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async listInventory(
     @Req() req: any,
     @Query('denominationId') denominationId?: string,
@@ -231,13 +232,13 @@ export class MerchantDashboardController {
   }
 
   @Get('dashboard/inventory/stats')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async getInventoryStats(@Req() req: any) {
     return this.codesService.getMerchantInventoryStats(req.user.merchantId);
   }
 
   @Post('dashboard/inventory/upload')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async uploadCodes(
     @Body() body: { denomination_id: string; codes: string[] },
     @Req() req: any,
@@ -259,13 +260,13 @@ export class MerchantDashboardController {
   }
 
   @Post('dashboard/inventory/:id/void')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async voidCode(@Param('id') id: string, @Req() req: any) {
     return this.codesService.voidMerchantCode(id, req.user.merchantId, req.ip);
   }
 
   @Get('dashboard/products')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, MerchantAuthGuard)
   async listProducts(@Req() req: any) {
     return this.productsService.listProductsForMerchant(req.user.merchantId);
   }
