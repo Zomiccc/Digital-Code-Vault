@@ -23,7 +23,9 @@ export function MerchantDashboardPage() {
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Wallet Balance</p>
-          <p className="mt-2 text-3xl font-semibold text-primary">{formatCurrency(wallet?.balance || 0)}</p>
+          <p className="mt-2 text-3xl font-semibold text-primary">
+            {formatCurrency(wallet?.balance || 0, wallet?.currency)}
+          </p>
           <p className="mt-1 text-xs text-muted-foreground">{wallet?.currency}</p>
           {wallet?.address && (
             <div className="mt-2">
@@ -42,7 +44,7 @@ export function MerchantDashboardPage() {
               <div key={t.id} className="flex justify-between text-xs">
                 <span className="text-muted-foreground">{t.type}</span>
                 <span className={t.type === 'CREDIT' ? 'text-emerald-400' : 'text-red-400'}>
-                  {t.type === 'CREDIT' ? '+' : '-'}{formatCurrency(t.amount)}
+                  {t.type === 'CREDIT' ? '+' : '-'}{formatCurrency(t.amount, t.currency || wallet?.currency)}
                 </span>
               </div>
             ))}
@@ -57,7 +59,7 @@ export function MerchantDashboardPage() {
             {orders?.items?.map((o: any) => (
               <tr key={o.id}>
                 <Td>{o.product}</Td>
-                <Td>{formatCurrency(o.amount, o.currency)}</Td>
+                <Td>{orderCharge(o)}</Td>
                 <Td>
                   <Badge className={statusColor(o.status)}>{o.status}</Badge>
                   {o.status === 'FAILED' && o.failure_reason && (
@@ -91,7 +93,7 @@ export function MerchantOrdersPage() {
             {data?.items?.map((o: any) => (
               <tr key={o.id}>
                 <Td>{o.product}</Td>
-                <Td>{formatCurrency(o.amount, o.currency)}</Td>
+                <Td>{orderCharge(o)}</Td>
                 <Td>
                   <Badge className={statusColor(o.status)}>{o.status}</Badge>
                   {o.status === 'FAILED' && o.failure_reason && (
@@ -258,7 +260,10 @@ export function MerchantCreateOrderPage() {
           <div className="mt-3 space-y-2 text-sm">
             <div><span className="text-muted-foreground">Fulfillment ID:</span> <span className="font-mono">{result.fulfillment_id}</span></div>
             <div><span className="text-muted-foreground">Status:</span> <span className="font-medium">{result.status}</span></div>
-            <div><span className="text-muted-foreground">Wallet Balance After:</span> {formatCurrency(result.wallet_balance_after)}</div>
+            <div>
+              <span className="text-muted-foreground">Wallet Balance After:</span>{' '}
+              {formatCurrency(result.wallet_balance_after, result.charged_currency || result.currency)}
+            </div>
             {customerEmail && (
               <div className="rounded-lg bg-primary/10 px-3 py-2 text-sm text-primary">
                 Delivery link sent to <strong>{customerEmail}</strong>
@@ -941,4 +946,17 @@ export function ConnectedProductsPage() {
       </Modal>
     </div>
   );
+}
+
+/**
+ * What the merchant paid for an order, in the currency it left their wallet in.
+ * Falls back to the order value for rows predating charged-amount tracking, and
+ * for orders where no wallet was charged at all.
+ */
+function orderCharge(order: any): string {
+  const charged = Number(order.charged_amount);
+  if (Number.isFinite(charged) && charged > 0) {
+    return formatCurrency(charged, order.charged_currency || order.currency);
+  }
+  return formatCurrency(order.amount, order.currency);
 }

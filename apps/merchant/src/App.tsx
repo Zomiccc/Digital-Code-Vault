@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
-import { cn, formatCurrency, formatDate, statusColor, getGoogleMapsUrl } from '@/lib/utils';
+import { cn, formatCurrency, formatPrice, setWalletCurrency, formatDate, statusColor, getGoogleMapsUrl } from '@/lib/utils';
 
 // ─── UI Components ───
 function Card({ children, className }: { children: ReactNode; className?: string }) {
@@ -176,6 +176,8 @@ function Layout({ children }: { children: ReactNode }) {
 // ─── Dashboard Page ───
 function DashboardPage() {
   const { data: wallet, isLoading } = useQuery({ queryKey: ['wallet'], queryFn: api.getWallet });
+  // Every figure below is a wallet figure, so the formatter follows the wallet.
+  useEffect(() => { setWalletCurrency(wallet?.currency); }, [wallet?.currency]);
   const { data: orders } = useQuery({ queryKey: ['orders'], queryFn: () => api.listOrders(5, 0) });
 
   if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
@@ -287,7 +289,7 @@ function ProductsPage() {
             {p.denominations?.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-2">
                 {p.denominations.map((d: any) => (
-                  <Badge key={d.id} className="bg-secondary text-secondary-foreground">${d.faceValue}</Badge>
+                  <Badge key={d.id} className="bg-secondary text-secondary-foreground">{formatPrice(d.faceValue, d.currency)}</Badge>
                 ))}
               </div>
             )}
@@ -503,7 +505,7 @@ function CreateOrderPage() {
                       : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
                   )}
                 >
-                  ${d.face_value} ({d.available_stock} in stock)
+                  {formatPrice(d.face_value, d.currency)} ({d.available_stock} in stock)
                 </button>
               ))}
             </div>
@@ -1005,7 +1007,7 @@ function IncomingWebhooksPage() {
                   <Td><Badge className="bg-secondary text-secondary-foreground">{wh.platform}</Badge></Td>
                   <Td className="font-mono text-xs">{wh.orderId || '—'}</Td>
                   <Td>{wh.productName || wh.productSku || '—'}</Td>
-                  <Td>{wh.amount ? `$${wh.amount}` : '—'}</Td>
+                  <Td>{wh.amount ? formatPrice(wh.amount, wh.currency) : '\u2014'}</Td>
                   <Td className="text-xs">{wh.customerEmail || '—'}</Td>
                   <Td>
                     <Badge className={cn(
@@ -1282,7 +1284,7 @@ function InventoryPage() {
                 >
                   <option value="">Select a denomination...</option>
                   {denominations.map((d: any) => (
-                    <option key={d.id} value={d.id}>${d.faceValue} {d.currency || 'USD'}</option>
+                    <option key={d.id} value={d.id}>{formatPrice(d.faceValue, d.currency)}</option>
                   ))}
                 </select>
               </div>
@@ -1344,7 +1346,7 @@ function InventoryPage() {
               {items.map((item: any) => (
                 <tr key={item.id}>
                   <Td>{item.denomination?.product || '—'}</Td>
-                  <Td>${item.denomination?.face_value || '—'}</Td>
+                  <Td>{item.denomination ? formatPrice(item.denomination.face_value, item.denomination.currency) : '\u2014'}</Td>
                   <Td>{statusBadge(item.status)}</Td>
                   <Td><Badge className="bg-secondary text-secondary-foreground">{item.source}</Badge></Td>
                   <Td className="font-mono text-xs text-muted-foreground">{item.batch_id?.slice(0, 12) || '—'}</Td>
@@ -1492,7 +1494,7 @@ function ProductMappingPage() {
                         >
                           <option value="">Auto (by amount)</option>
                           {denominationsByProduct[editForm.dcvProductId]?.map((d: any) => (
-                            <option key={d.id} value={d.id}>${d.faceValue} {d.currency}</option>
+                            <option key={d.id} value={d.id}>{formatPrice(d.faceValue, d.currency)}</option>
                           ))}
                         </select>
                       </Td>

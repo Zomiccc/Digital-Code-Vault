@@ -448,6 +448,12 @@ export class MerchantsService {
         product: r.product.name,
         amount: r.amount,
         currency: r.currency,
+        // What the wallet actually paid, in the wallet's own currency. `amount`
+        // stays the USD value of what was delivered; a merchant holding PKR
+        // wants to see the rupees that left their balance.
+        charged_amount: (r as any).chargedAmount,
+        charged_currency: (r as any).chargedCurrency,
+        fx_rate: (r as any).fxRate,
         status: r.status,
         failure_reason: (r as any).failureReason,
         reference_id: r.referenceId,
