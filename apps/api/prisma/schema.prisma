@@ -49,6 +49,7 @@ model Merchant {
   apiKeys         ApiKey[]
   fulfillmentReqs FulfillmentRequest[]
   walletTxns      WalletTransaction[]
+  wallets         MerchantWallet[]
   webhookEndpoints WebhookEndpoint[]
   products        Product[]
   connectedProducts ConnectedProduct[]
@@ -644,6 +645,25 @@ model PlatformSetting {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
+}
+
+/// One balance per currency a merchant holds. A merchant can hold PKR and USD
+/// side by side; deposits land in the chosen one and nothing is converted until
+/// an order is paid. `spendOrder` decides which is drawn from first.
+model MerchantWallet {
+  id         String   @id @default(uuid())
+  merchantId String
+  currency   String
+  balance    Decimal  @default(0)
+  /// Lower is spent first.
+  spendOrder Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, currency])
+  @@index([merchantId, spendOrder])
 }
 
 /// Admin-managed conversion rates against USD, which is always the base unit.

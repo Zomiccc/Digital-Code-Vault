@@ -27,6 +27,7 @@ export const REQUIRED_SCHEMA: { table: string; column: string }[] = [
   { table: 'ExchangeRate', column: 'unitsPerUsd' },
   { table: 'Denomination', column: 'sku' },
   { table: 'Variant', column: 'sku' },
+  { table: 'MerchantWallet', column: 'balance' },
 ];
 
 /**
@@ -53,6 +54,29 @@ export const REPAIR_STATEMENTS: string[] = [
   `ALTER TABLE "Denomination" ADD COLUMN IF NOT EXISTS "sku" TEXT`,
   `CREATE INDEX IF NOT EXISTS "Denomination_sku_idx" ON "Denomination" ("sku")`,
   `ALTER TABLE "Variant" ADD COLUMN IF NOT EXISTS "sku" TEXT`,
+  `CREATE TABLE IF NOT EXISTS "MerchantWallet" (
+     "id" TEXT NOT NULL,
+     "merchantId" TEXT NOT NULL,
+     "currency" TEXT NOT NULL,
+     "balance" DECIMAL(65,30) NOT NULL DEFAULT 0,
+     "spendOrder" INTEGER NOT NULL DEFAULT 0,
+     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     CONSTRAINT "MerchantWallet_pkey" PRIMARY KEY ("id")
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "MerchantWallet_merchantId_currency_key" ON "MerchantWallet" ("merchantId", "currency")`,
+  `CREATE INDEX IF NOT EXISTS "MerchantWallet_merchantId_spendOrder_idx" ON "MerchantWallet" ("merchantId", "spendOrder")`,
+  // Carry each existing balance into a wallet of the currency it is already
+  // held in. Nothing is converted, so no balance changes value.
+  `INSERT INTO "MerchantWallet" ("id", "merchantId", "currency", "balance", "spendOrder", "createdAt", "updatedAt")
+   SELECT gen_random_uuid()::text, m."id", UPPER(COALESCE(m."currency", 'USD')), m."walletBalance", 0,
+          CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+   FROM "Merchant" m
+   ON CONFLICT ("merchantId", "currency") DO NOTHING`,
+  `INSERT INTO "MerchantWallet" ("id", "merchantId", "currency", "balance", "spendOrder", "createdAt", "updatedAt")
+   SELECT gen_random_uuid()::text, m."id", 'USD', 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+   FROM "Merchant" m
+   ON CONFLICT ("merchantId", "currency") DO NOTHING`,
   `CREATE INDEX IF NOT EXISTS "Variant_sku_idx" ON "Variant" ("sku")`,
   // Carry the pre-table USD->PKR rate across so no configured rate is lost.
   `INSERT INTO "ExchangeRate" ("currency", "unitsPerUsd", "updatedAt")
