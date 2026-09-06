@@ -66,17 +66,12 @@ export class FulfillmentService {
     if (params.chargeAmount !== undefined && actorType !== 'ADMIN') {
       throw new BadRequestException('Setting the amount to charge is only available to admins');
     }
-    // A manual sale can be priced in a different currency from the order value.
-    // Charging 2,800 rupees against a $10 order is not "more than the order" —
-    // the two are only comparable once the order value is expressed in the same
-    // currency, so that is what the charge is validated against.
+    // A manual sale is priced by hand and simply recorded: whatever the admin
+    // charges, in whichever currency, is what goes on the order. There is no cap
+    // and no comparison against the order value.
     const orderCurrency = normaliseCurrency(currency || 'USD');
     const chargeCurrency = normaliseCurrency(params.chargeCurrency || orderCurrency);
-    let chargeBase = amount;
-    if (actorType === 'ADMIN' && chargeCurrency !== orderCurrency) {
-      chargeBase = (await this.currencyService.fromUsd(amount, chargeCurrency)).amount;
-    }
-    const pricing = actorType === 'ADMIN' ? manualOrderPricing(chargeBase, params.chargeAmount) : undefined;
+    const pricing = actorType === 'ADMIN' ? manualOrderPricing(amount, params.chargeAmount) : undefined;
     // The platform's books are in USD, so a rupee sale is converted back for the
     // revenue entry while the sale itself stays recorded in rupees.
     const chargeUsd = pricing

@@ -187,8 +187,9 @@ test('an omitted charge means charge in full; a charge implies its discount', ()
   assert.equal(manualOrderPricing(50, 0).discount_amount, 50, 'charging nothing is a full discount');
 });
 
-test('rejects coercion, non-finite values, negatives, excess precision and a charge above the order', () => {
-  for (const charge of [null, '', '5', true, {}, NaN, Infinity, -1, 50.01, 0.001]) {
+test('rejects coercion, non-finite values, negatives and excess precision', () => {
+  // 50.01 is no longer rejected: charging above the order value is allowed.
+  for (const charge of [null, '', '5', true, {}, NaN, Infinity, -1, 0.001]) {
     assert.throws(() => manualOrderPricing(50, charge));
   }
   for (const amount of [undefined, null, '', '50', false, NaN, Infinity, 0, -1, 1.001, Number.MAX_SAFE_INTEGER]) {
@@ -267,11 +268,13 @@ test('unavailable stock creates no revenue or allocation', async () => {
   assert.equal(f.platformBalance, 0);
 });
 
-test('rejects non-admin discounts and invalid admin discounts before database access', async () => {
+test('rejects a non-admin charge and a malformed one before database access', async () => {
   const f = fixture();
   f.prisma.merchant.findUnique = async () => { throw new Error('Unexpected database access'); };
   await assert.rejects(f.service.createFulfillment({ ...params, actorType: 'MERCHANT', chargeAmount: 45 }), /only available to admins/);
-  await assert.rejects(f.service.createFulfillment({ ...params, chargeAmount: 51 }), /chargeAmount/);
+  // Charging above the order value is allowed now, so the invalid case is a
+  // negative charge rather than a large one.
+  await assert.rejects(f.service.createFulfillment({ ...params, chargeAmount: -1 }), /chargeAmount/);
   assert.equal(f.reservations, 0);
 });
 
@@ -289,17 +292,18 @@ test('controller validates before creating a platform merchant and forwards orig
   await assert.rejects(AdminController.prototype.createManualOrder.call(context, { productId: 'product', amount: 50, chargeAmount: -1 }, { id: 'admin-id' }, {}), /chargeAmount/);
 });
 
-test('a rupee charge is judged against the order value in rupees, not in dollars', () => {
-  // Charging 2,800 rupees against a $10 order was refused as "more than the
-  // order value" because 2800 was compared with 10. At 300 to the dollar the
-  // order is 3,000 rupees, so 2,800 is a 200-rupee discount.
-  const orderValueInRupees = 10 * 300;
-  assert.deepEqual(manualOrderPricing(orderValueInRupees, 2800), {
-    original_amount: 3000, charge_amount: 2800, discount_amount: 200, net_amount: 2800,
-  });
+test('a rupee charge against a dollar order value is recorded as entered', () => {
+  // 2,800 rupees on a $10 order used to be refused for exceeding "10". Nothing
+  // is compared now — the charge is simply what the admin typed.
+  assert.equal(manualOrderPricing(10, 2800).charge_amount, 2800);
+  assert.equal(manualOrderPricing(10, 30000).charge_amount, 30000);
 });
 
-test('a charge above the order value is still refused, in either currency', () => {
-  assert.throws(() => manualOrderPricing(3000, 3001));
-  assert.throws(() => manualOrderPricing(10, 10.01));
+test('charging more than the order value is recorded as a markup, not refused', () => {
+  // A manual sale is priced by hand: the platform records what was charged
+  // rather than policing it.
+  assert.deepEqual(manualOrderPricing(10, 12), {
+    original_amount: 10, charge_amount: 12, discount_amount: -2, net_amount: 12,
+  });
+  assert.equal(manualOrderPricing(3000, 30000).charge_amount, 30000);
 });

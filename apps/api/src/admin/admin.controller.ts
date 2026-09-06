@@ -482,12 +482,10 @@ export class AdminController {
       : body.discountAmount !== undefined
         ? Math.round((body.amount - body.discountAmount) * 100) / 100
         : undefined;
-    // Validate against the order value in the charge's own currency: 2,800
-    // rupees is not "more than" a $10 order until both are the same currency.
-    const chargeBase = body.chargeCurrency && body.chargeCurrency.toUpperCase() !== 'USD'
-      ? (await this.currencyService.fromUsd(body.amount, body.chargeCurrency)).amount
-      : body.amount;
-    manualOrderPricing(chargeBase, chargeAmount);
+    // Only shape is checked. A manual sale is priced by hand, so the charge is
+    // recorded as entered — there is no cap, and no comparison against the order
+    // value that would need the two to share a currency.
+    manualOrderPricing(body.amount, chargeAmount);
 
     // Admin manual orders are the platform's own responsibility — they are attached
     // to an internal platform merchant and NO merchant wallet is charged.

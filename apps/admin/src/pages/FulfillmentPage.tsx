@@ -33,9 +33,10 @@ export function FulfillmentPage() {
   const charge = orderForm.chargeAmount === '' ? orderValueInCharge : Number(orderForm.chargeAmount);
   const validMoney = (value: number) => Number.isFinite(value) && Number.isSafeInteger(Math.round(value * 100)) && Math.abs(value * 100 - Math.round(value * 100)) < 1e-7;
   const validAmount = validMoney(amount) && amount > 0;
-  const rateMissing = orderForm.chargeCurrency !== 'USD' && usdToCharge <= 0;
-  const validCharge = validMoney(charge) && charge >= 0 && charge <= orderValueInCharge && !rateMissing;
-  const discount = validCharge
+  // Any amount may be charged; only the shape is checked. The order value in
+  // the charge currency is still shown, as a reference point rather than a limit.
+  const validCharge = validMoney(charge) && charge >= 0;
+  const difference = validCharge
     ? (Math.round(orderValueInCharge * 100) - Math.round(charge * 100)) / 100
     : 0;
   const netAmount = validCharge ? charge : orderValueInCharge;
@@ -230,38 +231,35 @@ export function FulfillmentPage() {
           </div>
           <Input
             label={`Amount to charge (${orderForm.chargeCurrency}, optional)`}
-            type="number" min="0" max={validAmount ? orderValueInCharge : undefined} step="0.01"
+            type="number" min="0" step="0.01"
             value={orderForm.chargeAmount}
             onChange={(e) => setOrderForm({ ...orderForm, chargeAmount: e.target.value })}
             placeholder={validAmount ? String(orderValueInCharge) : '0.00'}
           />
-          {rateMissing && (
+          {!validCharge && (
             <p role="alert" className="text-sm text-destructive">
-              No {orderForm.chargeCurrency} rate is set, so the order value cannot be expressed in
-              it. Set one under Currency &amp; Rates.
-            </p>
-          )}
-          {!validCharge && !rateMissing && (
-            <p role="alert" className="text-sm text-destructive">
-              The amount to charge must be between zero and{' '}
-              {formatPrice(orderValueInCharge, orderForm.chargeCurrency)}, with at most two decimal
-              places.
+              The amount to charge must be zero or more, with at most two decimal places.
             </p>
           )}
           {validAmount && validCharge && (
             <div className="rounded-lg bg-secondary p-3 text-sm">
               <div>
                 Order value: {formatPrice(amount, 'USD')}
-                {orderForm.chargeCurrency !== 'USD' && (
+                {orderForm.chargeCurrency !== 'USD' && usdToCharge > 0 && (
                   <span className="text-muted-foreground">
-                    {' '}= {formatPrice(orderValueInCharge, orderForm.chargeCurrency)}
+                    {' '}\u2248 {formatPrice(orderValueInCharge, orderForm.chargeCurrency)}
                   </span>
                 )}
               </div>
               <div className="font-semibold">
                 Charging: {formatPrice(netAmount, orderForm.chargeCurrency)}
               </div>
-              <div>Discount: {formatPrice(discount, orderForm.chargeCurrency)}</div>
+              {difference !== 0 && usdToCharge > 0 && (
+                <div className="text-muted-foreground">
+                  {difference > 0 ? 'Discount' : 'Markup'}:{' '}
+                  {formatPrice(Math.abs(difference), orderForm.chargeCurrency)}
+                </div>
+              )}
               <p className="mt-1 text-xs text-muted-foreground">
                 Leave the charge blank to charge the full order value. What you charge does not
                 change which codes are allocated, and no merchant wallet is charged.
