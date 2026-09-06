@@ -76,11 +76,11 @@ export function Layout({ children }: { children: ReactNode }) {
     <div className="flex h-screen overflow-hidden bg-background">
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 w-64 transform border-r border-border bg-card/50 backdrop-blur-xl transition-transform duration-300 lg:relative lg:translate-x-0',
+          'fixed inset-y-0 left-0 z-50 flex h-full w-64 flex-col transform border-r border-border bg-card/50 backdrop-blur-xl transition-transform duration-300 lg:relative lg:translate-x-0',
           sidebarOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        <div className="flex h-16 items-center gap-3 border-b border-border px-6">
+        <div className="flex h-16 shrink-0 items-center gap-3 border-b border-border px-6">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-lg shadow-primary/20">
             <RoleIcon className="h-4 w-4" />
           </div>
@@ -90,7 +90,8 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         </div>
 
-        <nav className="flex-1 space-y-1 p-3">
+        {/* Scrolls on its own so the header and sign-out stay put. */}
+        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
@@ -115,7 +116,7 @@ export function Layout({ children }: { children: ReactNode }) {
           ))}
         </nav>
 
-        <div className="border-t border-border p-4">
+        <div className="shrink-0 border-t border-border p-4">
           <div className="mb-3 rounded-lg bg-muted/50 px-3 py-2">
             <p className="text-sm font-medium">{user?.name}</p>
             <p className="text-xs text-muted-foreground">{user?.role === 'merchant' ? user?.merchantName : user?.role === 'customer' ? user?.email : user?.role}</p>

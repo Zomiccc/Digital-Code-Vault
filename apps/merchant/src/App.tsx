@@ -135,13 +135,14 @@ function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <aside className={cn('fixed inset-y-0 left-0 z-50 w-64 transform border-r border-border bg-card transition-transform lg:relative lg:translate-x-0',
+      <aside className={cn('fixed inset-y-0 left-0 z-50 flex h-full w-64 flex-col transform border-r border-border bg-card transition-transform lg:relative lg:translate-x-0',
         sidebarOpen ? 'translate-x-0' : '-translate-x-full')}>
-        <div className="flex h-16 items-center gap-2 border-b border-border px-6">
+        <div className="flex h-16 shrink-0 items-center gap-2 border-b border-border px-6">
           <Store className="h-6 w-6 text-primary" />
           <span className="font-bold">Merchant</span>
         </div>
-        <nav className="flex-1 space-y-1 p-3">
+        {/* Scrolls on its own so the header and sign-out stay put. */}
+        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
           {navItems.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.to === '/'}
               onClick={() => setSidebarOpen(false)}
@@ -151,7 +152,7 @@ function Layout({ children }: { children: ReactNode }) {
             </NavLink>
           ))}
         </nav>
-        <div className="border-t border-border p-4">
+        <div className="shrink-0 border-t border-border p-4">
           <div className="mb-2 text-xs text-muted-foreground">{user?.name}</div>
           <Button variant="ghost" onClick={() => { logout(); navigate('/login'); }} className="w-full justify-start">
             <LogOut className="mr-2 h-4 w-4" /> Logout
