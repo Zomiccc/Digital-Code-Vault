@@ -20,7 +20,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { CurrencyService } from '../currency/currency.service';
 import { SellingPriceService } from '../currency/selling-price.service';
 import { MerchantWalletService, ChosenWallet, WalletShortfall } from '../wallet/merchant-wallet.service';
-import { normaliseCurrency, roundMoney } from '../currency/money';
+import { normaliseCurrency, roundMoney, formatMoney } from '../currency/money';
 @Injectable()
 export class FulfillmentService {
   private readonly logger = new Logger(FulfillmentService.name);
@@ -995,6 +995,21 @@ export class FulfillmentService {
       );
     }
 
+    // Exactly two emails reach the customer: this confirmation, sent once here,
+    // and the codes email the digest sends with their reveal link.
+    if (customerEmail && product) {
+      this.emailService.sendOrderConfirmationEmail(
+        customerEmail,
+        customerName || customerEmail,
+        referenceId || result.fulfillmentReq.id,
+        product.name,
+        formatMoney(amount, orderCurrency),
+        deliveryLink,
+      ).catch((err) => {
+        this.logger.error(`Failed to send order confirmation: ${(err as Error).message}`);
+      });
+    }
+
     // Send purchase notification email to merchant; fall back to a plain delivery-link
     // email when there is no customer attached to the order. Admin-created orders
     // belong to the internal platform merchant — skip merchant emails for those.
@@ -1027,7 +1042,7 @@ export class FulfillmentService {
     const response = {
       fulfillment_id: result.fulfillmentReq.id,
       status: 'ALLOCATED' as const,
-      allocation: combination.map((c) => `$${c.faceValue}`),
+      allocation: combination.map((c) => formatMoney(c.faceValue, orderCurrency)),
       delivery_link: deliveryLink,
       wallet_balance_after: result.walletBalanceAfter,
       ...(pricing ? { ...pricing, currency } : {}),

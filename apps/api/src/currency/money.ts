@@ -46,3 +46,29 @@ export function convertFromUsd(amountUsd: number, unitsPerUsd: number): number {
 export function convertToUsd(amount: number, unitsPerUsd: number): number {
   return roundMoney(amount / unitsPerUsd);
 }
+
+/** Symbols for the currencies the platform prices or sells in. */
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$', PKR: '₨', SAR: '﷼', TRY: '₺', AED: 'د.إ',
+  GBP: '£', EUR: '€', CAD: 'CA$', AUD: 'A$', INR: '₹',
+  QAR: 'ر.ق', HKD: 'HK$',
+};
+
+/**
+ * Money as a customer should read it, in the currency it is actually in.
+ *
+ * Server-rendered output — the delivery page, delivery emails — printed a dollar
+ * sign in front of every figure, so a Turkish customer was shown "$250" for a
+ * 250 Lira code. An unmapped currency falls back to its own code rather than
+ * borrowing another currency's symbol.
+ */
+export function formatMoney(amount: unknown, currency?: string | null): string {
+  const code = String(currency || BASE_CURRENCY).toUpperCase();
+  const value = Number(amount);
+  const shown = (Number.isFinite(value) ? value : 0).toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+  const symbol = CURRENCY_SYMBOLS[code];
+  return symbol ? `${symbol}${shown}` : `${code} ${shown}`;
+}

@@ -5,6 +5,7 @@ import { AuditService } from '../audit/audit.service';
 import { WebhookService } from '../webhooks/webhook.service';
 import { EmailService } from '../email/email.service';
 import { ConfigService } from '@nestjs/config';
+import { formatMoney } from '../currency/money';
 
 @Injectable()
 export class DeliveryService {
@@ -71,40 +72,11 @@ export class DeliveryService {
 
     // Send delivery ready email asynchronously (does not block the page response)
     // Triggered only by the customer delivery flow — never by webhooks.
-    if (deliveryToken.fulfillment.customerEmail) {
-      const customerEmail = deliveryToken.fulfillment.customerEmail;
-      const customerName = deliveryToken.fulfillment.customerName || customerEmail;
-      const orderId = deliveryToken.fulfillment.referenceId || deliveryToken.fulfillmentId;
-      const productName = deliveryToken.fulfillment.product.name;
-      const amount = deliveryToken.fulfillment.amount
-        ? `${deliveryToken.fulfillment.currency || 'USD'} ${deliveryToken.fulfillment.amount}`
-        : 'N/A';
-      const baseUrl = this.configService.get<string>('APP_URL', 'http://localhost:3000');
-      const deliveryLink = `${baseUrl}/api/v1/reveal/${token}`;
-
-      this.emailService.sendDeliveryReadyEmail(
-        customerEmail,
-        customerName,
-        orderId,
-        productName,
-        amount,
-        deliveryLink,
-      ).then((success) => {
-        if (success) {
-          this.logger.log(
-            `[DELIVERY EMAIL] Sent successfully — customer: ${customerEmail}, order: ${orderId}, token: ${deliveryToken.id.slice(0, 8)}..., time: ${new Date().toISOString()}`
-          );
-        } else {
-          this.logger.warn(
-            `[DELIVERY EMAIL] Send returned false — customer: ${customerEmail}, order: ${orderId}, token: ${deliveryToken.id.slice(0, 8)}...`
-          );
-        }
-      }).catch((err) => {
-        this.logger.error(
-          `[DELIVERY EMAIL] Failed to send — customer: ${customerEmail}, order: ${orderId}, error: ${(err as Error).message}`
-        );
-      });
-    }
+    // No email is sent from here. This method runs on every view of the
+    // delivery page, so sending here mailed the customer again each time they
+    // opened their link — which is why one order produced three or four
+    // near-identical "Your Digital Code is Ready" messages. The confirmation is
+    // sent once when the order is fulfilled instead.
 
     return {
       fulfillment_id: deliveryToken.fulfillmentId,
@@ -192,7 +164,10 @@ export class DeliveryService {
           continue;
         }
         codes.push({
-          denomination: `$${item.denomination?.faceValue ?? '??'}`,
+          // In the code's own currency: a Turkish 250 Lira code read as "$250".
+          denomination: item.denomination
+            ? formatMoney(item.denomination.faceValue, item.denomination.currency)
+            : '—',
           code: plaintext,
         });
       } catch (err) {

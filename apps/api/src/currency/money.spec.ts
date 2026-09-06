@@ -7,6 +7,7 @@ import {
   convertToUsd,
   normaliseCurrency,
   roundMoney,
+  formatMoney,
 } from './money';
 
 test('currency codes are normalised and anything else rejected', () => {
@@ -53,4 +54,25 @@ test('fractional rates and odd amounts stay on cent boundaries', () => {
     const converted = convertFromUsd(usd, rate);
     assert.equal(converted, Math.round(converted * 100) / 100, `${usd} at ${rate} must be whole cents`);
   }
+});
+
+test('money is shown in the currency it is actually in, for every region', () => {
+  // A Turkish 250 Lira code was shown to the customer as "$250".
+  assert.equal(formatMoney(250, 'TRY'), '₺250');
+  assert.equal(formatMoney(250, 'USD'), '$250');
+  assert.equal(formatMoney(30000, 'PKR'), '₨30,000');
+  assert.equal(formatMoney(187.5, 'SAR'), '﷼187.5');
+  assert.equal(formatMoney(100, 'GBP'), '£100');
+});
+
+test('an unmapped currency shows its own code, never another symbol', () => {
+  assert.equal(formatMoney(500, 'JPY'), 'JPY 500');
+  assert.equal(formatMoney(500, 'BRL'), 'BRL 500');
+});
+
+test('a missing or unusable amount still renders', () => {
+  assert.equal(formatMoney(250, null), '$250');
+  assert.equal(formatMoney(250, undefined), '$250');
+  assert.equal(formatMoney(null, 'TRY'), '₺0');
+  assert.equal(formatMoney('not-a-number', 'TRY'), '₺0');
 });

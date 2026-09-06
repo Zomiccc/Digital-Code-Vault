@@ -710,7 +710,7 @@ export class EmailService {
    * Triggered by the delivery flow (GET /reveal/:token), NOT by webhooks.
    * Dark theme, responsive, mobile-friendly.
    */
-  async sendDeliveryReadyEmail(
+  async sendOrderConfirmationEmail(
     to: string,
     customerName: string,
     orderId: string,
@@ -720,9 +720,11 @@ export class EmailService {
   ): Promise<boolean> {
     const html = deliveryEmail({ customerName, productName, reference: orderId, amount, link: deliveryLink });
 
-    const text = `Your Digital Code is Ready\n\nHello ${customerName},\n\nYour order has been processed successfully.\n\nOrder ID: ${orderId}\nProduct: ${productName}\nAmount: ${amount}\n\nClick below to access your secure delivery page:\n${deliveryLink}\n\nThis delivery link is permanent and can be used again if needed.\n\nThank you for your purchase.\nCodeHub — Delivered securely`;
+    const text = `Order confirmed\n\nHello ${customerName},\n\nYour order has been confirmed.\n\nOrder ID: ${orderId}\nProduct: ${productName}\nAmount: ${amount}\n\nClick below to access your secure delivery page:\n${deliveryLink}\n\nThis delivery link is permanent and can be used again if needed.\n\nThank you for your purchase.\nCodeHub — Delivered securely`;
 
-    return this.sendEmail(to, 'Your Digital Code is Ready', html, { text, template: 'delivery_ready' });
+    // A distinct subject from the codes email, which the digest sends. Both said
+    // "Your Digital Code is Ready", so the two were indistinguishable in an inbox.
+    return this.sendEmail(to, `Order confirmed — ${productName}`, html, { text, template: 'order_confirmation' });
   }
 }
 
