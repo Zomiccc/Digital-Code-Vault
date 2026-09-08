@@ -50,6 +50,12 @@ export class HealthController {
     const schema = this.schemaRepair.getStatus();
     checks.schema = schema.state;
     const missing = schema.missing;
+    // Named separately from `missing_schema`, which lists only the columns the
+    // repair knows how to add. These are everything the generated client
+    // expects and the database does not have — the thing that turns an admin
+    // page into a bare 500 with nothing to go on.
+    const driftTables = schema.drift.tables;
+    const driftColumns = schema.drift.columns;
 
     const version = loadVersion();
     const allOk = Object.values(checks).every((v) => v === 'ok');
@@ -57,6 +63,8 @@ export class HealthController {
       status: allOk ? 'healthy' : 'degraded',
       checks,
       ...(missing.length ? { missing_schema: missing } : {}),
+      ...(driftTables.length ? { missing_tables: driftTables } : {}),
+      ...(driftColumns.length ? { missing_columns: driftColumns } : {}),
       version: version.commit,
       builtAt: version.builtAt,
       timestamp: new Date().toISOString(),

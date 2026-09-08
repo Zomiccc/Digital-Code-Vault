@@ -305,18 +305,19 @@ export class FulfillmentService {
 
     // Find codes to deliver based on product type.
     // NORMAL: exact denomination mapping only — one matching code allocated from the pool.
-    // ESSENTIALS: a reusable, admin-configured denomination+quantity delivery RULE
-    //             (e.g. "$10 x1 + $20 x1"). The admin never selects individual codes —
-    //             ANY available code matching each required denomination is selected
-    //             automatically at fulfillment time, exactly like NORMAL products.
+    // Which codes go out is decided in one of two ways: a pack's preset from
+    // the Delivery Rules page, or — for a plain amount — whatever combination of
+    // available codes sums to it. A third mechanism used to sit in between, a
+    // product-level "Essentials" rule, and it silently overrode the amount: an
+    // order for $170 against a product carrying a "$10 + $20" rule delivered $30
+    // of codes and was then rejected for not matching $170, blaming the stock.
     let combination: { denominationId: string; faceValue: number; count: number }[] | null = null;
     // True when the allocation came from an admin-preset variant bundle
     // (FulfillmentCombination). Preset bundles are fixed sets of pre-selected
     // codes — the customer pays the variant price, so no face-value sum math.
     let usedVariantPreset = false;
 
-    const productType = product.productType || 'NORMAL';
-    this.logger.log(`[Fulfillment] Product "${product.name}" type: ${productType}, amount: ${amount}`);
+    this.logger.log(`[Fulfillment] Product "${product.name}", amount: ${amount}`);
 
     // ─── Variant preset bundles (highest priority) ───
     // If the order targets a specific variant (e.g. "PS Essential 1 Month"), use the
@@ -365,49 +366,8 @@ export class FulfillmentService {
       }
     }
 
-    let essentialsConfigured = false;
-    if (!combination && productType === 'ESSENTIALS') {
-      const deliveryItems = await this.prisma.essentialsDeliveryItem.findMany({
-        where: { productId },
-        include: { denomination: true },
-      });
-
-      if (deliveryItems.length === 0) {
-        // No admin-configured bundle for this product — fall through to amount-based
-        // denomination matching below instead of failing outright.
-        this.logger.warn(`[Fulfillment] No Essentials delivery configuration for product ${productId} — falling back to amount-based denomination matching.`);
-      } else {
-        essentialsConfigured = true;
-        // Verify EVERY required denomination has sufficient AVAILABLE stock before
-        // committing to anything — no partial bundle delivery.
-        let allSufficient = true;
-        const items: { denominationId: string; faceValue: number; count: number }[] = [];
-
-        for (const rule of deliveryItems) {
-          const stockEntry = activeStock.find((s) => s.denominationId === rule.denominationId);
-          const availableCount = stockEntry ? stockEntry.availableCount : 0;
-          if (availableCount < rule.quantity) {
-            allSufficient = false;
-            this.logger.warn(`[Fulfillment] Essentials rule for product ${productId} — denomination $${rule.denomination.faceValue} needs ${rule.quantity}, has ${availableCount} available.`);
-            break;
-          }
-          items.push({
-            denominationId: rule.denominationId,
-            faceValue: Number(rule.denomination.faceValue),
-            count: rule.quantity,
-          });
-        }
-
-        if (allSufficient) {
-          combination = items;
-          this.logger.log(`[Fulfillment] Essentials delivery rule ready for product ${productId}: ${items.map((i) => `$${i.faceValue} x${i.count}`).join(' + ')}`);
-        }
-      }
-    }
-
-    // NORMAL / amount-based allocation — also the fallback for products without an
-    // admin-configured Essentials bundle.
-    if (!combination && !essentialsConfigured) {
+    // Amount-based allocation: find codes that add up to exactly what was asked.
+    if (!combination) {
       if (exactDenominationId) {
         // Denomination is explicitly mapped — use it directly, ignore order amount.
         // The amount is (denomination faceValue × quantity) as set by the webhook.
@@ -683,98 +643,52 @@ export class FulfillmentService {
         if (attempt > 1) {
           this.logger.log(`[Fulfillment] Retry attempt ${attempt}/${MAX_RETRIES} for ${idempotencyKey}`);
 
-          if (productType === 'ESSENTIALS') {
-            // ESSENTIALS: re-verify every required denomination in the delivery rule
-            // still has sufficient AVAILABLE stock. No individual codes are pinned —
-            // just re-check the denomination+quantity rule against current stock.
-            const deliveryItems = await this.prisma.essentialsDeliveryItem.findMany({
-              where: { productId },
-              include: { denomination: true },
+          // Re-do the same allocation against current stock. This used to accept
+          // only a single code of exactly the right value on a retry, so an
+          // order that had been made up from several codes failed the moment it
+          // was retried.
+          const retryStock = await this.allocationEngine.getAvailableStock(this.prisma, productId, activePoolMerchantId);
+          const retryDenoms = retryStock.filter((s) => s.availableCount > 0);
+          if (retryDenoms.length === 0) {
+            throw new BadRequestException({
+              error: 'INSUFFICIENT_STOCK',
+              code: 'INSUFFICIENT_STOCK',
+              message: 'No available stock for this product after retry',
             });
-            if (deliveryItems.length === 0) {
-              throw new BadRequestException({
-                error: 'INSUFFICIENT_STOCK',
-                code: 'NO_DELIVERY_CONFIG',
-                message: 'Essentials product has no delivery configuration',
-              });
-            }
-            const retryStock = await this.allocationEngine.getAvailableStock(this.prisma, productId, activePoolMerchantId);
-            const retryItems: { denominationId: string; faceValue: number; count: number }[] = [];
-            for (const rule of deliveryItems) {
-              const stockEntry = retryStock.find((s) => s.denominationId === rule.denominationId);
-              const availableCount = stockEntry ? stockEntry.availableCount : 0;
-              if (availableCount < rule.quantity) {
-                throw new BadRequestException({
-                  error: 'INSUFFICIENT_STOCK',
-                  code: 'INSUFFICIENT_STOCK',
-                  message: `Denomination $${rule.denomination.faceValue} needs ${rule.quantity}, only ${availableCount} available after retry`,
-                });
+          }
+
+          let retryCombo: { denominationId: string; faceValue: number; count: number }[] | null = null;
+          if (exactDenominationId) {
+            const exactDenom = retryDenoms.find((d) => d.denominationId === exactDenominationId);
+            if (exactDenom && exactDenom.availableCount > 0) {
+              const count = Math.round(amount / exactDenom.faceValue);
+              const exact = Math.round(count * exactDenom.faceValue * 100) === Math.round(amount * 100);
+              if (exact && count > 0 && count <= exactDenom.availableCount) {
+                retryCombo = [{ denominationId: exactDenominationId, faceValue: exactDenom.faceValue, count }];
               }
-              retryItems.push({ denominationId: rule.denominationId, faceValue: Number(rule.denomination.faceValue), count: rule.quantity });
             }
-            combination.length = 0;
-            combination.push(...retryItems);
+          } else if (usedVariantPreset) {
+            // A pack's preset is a fixed list; re-verify it rather than re-deriving
+            // one from the amount, which a pack price has no reason to equal.
+            retryCombo = combination.every((item) => {
+              const entry = retryDenoms.find((d) => d.denominationId === item.denominationId);
+              return !!entry && entry.availableCount >= item.count;
+            }) ? combination : null;
           } else {
-            // NORMAL: exact denomination only — no auto-combination
-            const retryStock = await this.allocationEngine.getAvailableStock(this.prisma, productId, activePoolMerchantId);
-            const retryDenoms = retryStock.filter((s) => s.availableCount > 0);
-            if (retryDenoms.length === 0) {
-              throw new BadRequestException({
-                error: 'INSUFFICIENT_STOCK',
-                code: 'INSUFFICIENT_STOCK',
-                message: 'No available stock for this product after retry',
-              });
-            }
+            retryCombo = this.allocationEngine.findBestCombination(retryDenoms, amount);
+          }
 
-            let retryCombo: { denominationId: string; faceValue: number; count: number }[] | null = null;
-            if (exactDenominationId) {
-              const exactDenom = retryDenoms.find((d) => d.denominationId === exactDenominationId);
-              if (exactDenom && exactDenom.availableCount > 0) {
-                const remainder = amount % exactDenom.faceValue;
-                if (remainder === 0) {
-                  const count = amount / exactDenom.faceValue;
-                  if (count <= exactDenom.availableCount) {
-                    retryCombo = [{ denominationId: exactDenominationId, faceValue: exactDenom.faceValue, count }];
-                  }
-                }
-              }
-            } else {
-              const exactMatch = retryDenoms.find((d) => d.faceValue === amount && d.availableCount > 0);
-              if (exactMatch) {
-                retryCombo = [{ denominationId: exactMatch.denominationId, faceValue: exactMatch.faceValue, count: 1 }];
-              }
-            }
-
-            if (!retryCombo) {
-              throw new BadRequestException({
-                error: 'INSUFFICIENT_STOCK',
-                code: 'INSUFFICIENT_STOCK',
-                message: `No denomination combination sums to ${amount} after retry`,
-              });
-            }
-            combination.length = 0;
-            combination.push(...retryCombo);
+          if (!retryCombo) {
+            throw new BadRequestException({
+              error: 'INSUFFICIENT_STOCK',
+              code: 'INSUFFICIENT_STOCK',
+              message: `No combination of available codes sums to ${amount} after retry`,
+            });
+          }
+          combination.length = 0;
+          combination.push(...retryCombo);
+          if (!usedVariantPreset) {
             totalCost = combination.reduce((acc, c) => acc + c.faceValue * c.count, 0);
-            if (totalCost !== amount) {
-              throw new BadRequestException({
-                error: 'INSUFFICIENT_INVENTORY',
-                code: 'AMOUNT_MISMATCH',
-                message: `Combination total ${totalCost} does not match requested amount ${amount} after retry`,
-              });
-            }
-            // Keep the wallet charge in step with the re-picked combination,
-            // re-priced in the wallet already chosen to pay.
-            if (chosenWallet) {
-              const repriced = await costInCurrency(chosenWallet.currency);
-              if (repriced === null) {
-                throw new BadRequestException({
-                  error: 'INSUFFICIENT_INVENTORY',
-                  code: 'PRICE_UNAVAILABLE',
-                  message: `Could not price the replacement codes in ${chosenWallet.currency}`,
-                });
-              }
-              chargedAmount = repriced;
-            }
           }
         }
 
@@ -801,10 +715,9 @@ export class FulfillmentService {
             },
           });
 
-          // 2. Reserve codes with row-level locking.
-          // Both NORMAL and ESSENTIALS use denomination+count combinations — the admin
-          // never pins individual code IDs. ANY available code matching each required
-          // denomination is atomically selected and reserved here.
+          // 2. Reserve codes with row-level locking. Allocation names
+          // denominations and counts, never individual code IDs: any available
+          // code of each value is atomically selected and reserved here.
           let allocationResults: AllocationResult[];
           try {
             allocationResults = await this.allocationEngine.reserveCodes(

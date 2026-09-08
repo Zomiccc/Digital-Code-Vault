@@ -421,16 +421,6 @@ export const api = {
   getCombinationAvailability: (id: string) =>
     apiFetch(`/admin/catalog/combinations/${id}/availability`),
 
-  // Essentials delivery config — reusable denomination + quantity rules
-  getEssentialsDeliveryConfig: (productId: string) =>
-    apiFetch(`/admin/products/${productId}/essentials/delivery-config`),
-  saveEssentialsDeliveryConfig: (productId: string, items: { denominationId: string; quantity: number }[]) =>
-    apiFetch(`/admin/products/${productId}/essentials/delivery-config`, {
-      method: 'POST',
-      body: JSON.stringify({ items }),
-    }),
-  getEssentialsAvailability: (productId: string) =>
-    apiFetch(`/admin/products/${productId}/essentials/availability`),
 
   // SKU Mapping (Connected Products) — ADMIN-WIDE view across ALL merchants' synced
   // storefront products (WooCommerce, etc.), mapping each SKU to an internal

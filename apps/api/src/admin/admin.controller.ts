@@ -7,7 +7,6 @@ import { AdminService } from './admin.service';
 import { MerchantsService } from '../merchants/merchants.service';
 import { ProductsService } from '../products/products.service';
 import { CodesService } from '../codes/codes.service';
-import { EssentialsService } from '../essentials/essentials.service';
 import { AuthService } from '../auth/auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrencyService } from '../currency/currency.service';
@@ -40,7 +39,6 @@ export class AdminController {
     private merchantsService: MerchantsService,
     private productsService: ProductsService,
     private codesService: CodesService,
-    private essentialsService: EssentialsService,
     private authService: AuthService,
     private prisma: PrismaService,
     private walletService: WalletService,
@@ -316,28 +314,6 @@ export class AdminController {
   @Get('products/:id/denominations')
   async getProductDenominations(@Param('id') id: string) {
     return this.productsService.getDenominations(id);
-  }
-
-  // ─── Essentials Delivery Config (reusable denomination + quantity rules) ───
-
-  @Get('products/:id/essentials/delivery-config')
-  async getEssentialsDeliveryConfig(@Param('id') id: string) {
-    return this.essentialsService.getDeliveryConfig(id);
-  }
-
-  @Post('products/:id/essentials/delivery-config')
-  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
-  async saveEssentialsDeliveryConfig(
-    @Param('id') id: string,
-    @Body() body: { items: { denominationId: string; quantity: number }[] },
-    @CurrentUser() user: any,
-  ) {
-    return this.essentialsService.saveDeliveryConfig(id, body.items || [], user?.id);
-  }
-
-  @Get('products/:id/essentials/availability')
-  async getEssentialsAvailability(@Param('id') id: string) {
-    return this.essentialsService.getAvailability(id);
   }
 
   // ─── Suppliers ───

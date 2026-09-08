@@ -9,12 +9,11 @@ import { CodesModule } from '../codes/codes.module';
 import { FulfillmentModule } from '../fulfillment/fulfillment.module';
 import { AuthModule } from '../auth/auth.module';
 import { PassportModule } from '@nestjs/passport';
-import { EssentialsModule } from '../essentials/essentials.module';
 import { DeliveryModule } from '../delivery/delivery.module';
 import { CurrencyModule } from '../currency/currency.module';
 
 @Module({
-  imports: [MerchantsModule, ProductsModule, CodesModule, FulfillmentModule, AuthModule, PassportModule, EssentialsModule, DeliveryModule, CurrencyModule, EmergencyModule, forwardRef(() => WebhooksModule)],
+  imports: [MerchantsModule, ProductsModule, CodesModule, FulfillmentModule, AuthModule, PassportModule, DeliveryModule, CurrencyModule, EmergencyModule, forwardRef(() => WebhooksModule)],
   providers: [AdminService],
   controllers: [AdminController],
 })
