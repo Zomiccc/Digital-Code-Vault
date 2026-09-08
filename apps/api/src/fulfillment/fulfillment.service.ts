@@ -512,7 +512,10 @@ export class FulfillmentService {
     // presets unusable for exactly the subscriptions they exist for.
     //
     // The merchant is still charged totalCost, the value actually handed over.
-    if (totalCost !== amount && !exactDenominationId && !usedVariantPreset) {
+    // Compared in whole cents: two sums that are equal to the penny can differ
+    // as floats, and that difference used to reject an order that added up.
+    const sameMoney = Math.round(totalCost * 100) === Math.round(amount * 100);
+    if (!sameMoney && !exactDenominationId && !usedVariantPreset) {
       this.logger.error(`[Fulfillment] Combination total ${totalCost} does not match requested amount ${amount}`);
       const failedReq = await this.prisma.fulfillmentRequest.create({
         data: {

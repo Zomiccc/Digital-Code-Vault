@@ -21,130 +21,218 @@ export class AllocationEngineService {
   constructor(private prisma: PrismaService) {}
 
   /**
-   * Finds the best combination of denominations to exactly match the target amount.
-   * Strategy:
-   *   1. Exact match (single denomination equals target)
-   *   2. Combination match (subset-sum, preferring fewest codes)
-   *   3. Returns null if no valid combination exists
+   * The cheapest way to hand over exactly `targetAmount` from the codes in stock.
+   *
+   * "Cheapest" means fewest codes: a $150 order takes one $150 code if there is
+   * one, then $100 + $50, and only then fifteen $10s. Every combination that
+   * sums exactly is fair game — this is the whole reason an order for a value
+   * with no code of its own can still be filled.
+   *
+   * Returns null only when no combination of the available codes sums exactly.
    */
   findBestCombination(
     denominations: DenominationStock[],
     targetAmount: number,
   ): { denominationId: string; faceValue: number; count: number }[] | null {
-    if (targetAmount <= 0) {
+    if (!Number.isFinite(targetAmount) || targetAmount <= 0) {
       return null;
     }
 
-    // Sort denominations descending (greedy preference for larger = fewer codes)
-    const sorted = [...denominations]
-      .filter((d) => d.availableCount > 0 && d.faceValue > 0)
+    const stock = denominations
+      .filter((d) => d.availableCount > 0 && d.faceValue > 0 && Number.isFinite(d.faceValue))
       .sort((a, b) => b.faceValue - a.faceValue);
 
-    if (sorted.length === 0) {
+    if (stock.length === 0) {
       return null;
     }
 
-    // 1. Exact single match
-    for (const d of sorted) {
-      if (d.faceValue === targetAmount && d.availableCount >= 1) {
-        return [{ denominationId: d.denominationId, faceValue: d.faceValue, count: 1 }];
+    // All arithmetic below is in whole cents. Face values carry two decimals,
+    // and adding them as floats made sums that are exactly right on paper come
+    // out a fraction off — 1.10 + 2.20 is not 3.30 in binary — so an order that
+    // could be filled was refused for a rounding error.
+    const target = AllocationEngineService.toCents(targetAmount);
+    const values = stock.map((d) => AllocationEngineService.toCents(d.faceValue));
+
+    // A single code of exactly the right value: nothing beats one code.
+    for (let i = 0; i < stock.length; i++) {
+      if (values[i] === target) {
+        return [{ denominationId: stock[i].denominationId, faceValue: stock[i].faceValue, count: 1 }];
       }
     }
 
-    // 2. Combination match using constrained subset-sum search
-    // We use a BFS/DP approach that finds the combination with the fewest items
-    const result = this.subsetSumSearch(sorted, targetAmount);
-    return result;
+    return this.fewestCodesForTarget(stock, values, target);
+  }
+
+  private static toCents(amount: number): number {
+    return Math.round(amount * 100);
+  }
+
+  private static gcd(a: number, b: number): number {
+    let x = Math.abs(a);
+    let y = Math.abs(b);
+    while (y) {
+      const t = x % y;
+      x = y;
+      y = t;
+    }
+    return x;
   }
 
   /**
-   * Constrained subset-sum search.
-   * Finds the combination of denominations (respecting stock limits) that sums
-   * exactly to target, preferring the fewest number of codes.
+   * Bounded coin-change over the codes actually in stock, solved exactly.
    *
-   * Uses iterative deepening: tries 1 code, then 2, then 3, etc.
-   * This guarantees the fewest-codes-first preference.
+   * The previous search gave up after ten codes, so a $150 order against a
+   * shelf of $10 codes was refused as impossible when fifteen of them would
+   * have filled it. There is no such cap here: a combination is refused only
+   * when the stock genuinely cannot reach the amount.
+   *
+   * Everything is first divided by the greatest common divisor of the values
+   * and the target, which shrinks a table of 15,000 cents to one of 15 steps
+   * when every code is a round ten dollars. A target still too large after that
+   * falls back to the depth-limited search rather than allocating a huge table.
    */
-  private subsetSumSearch(
-    denominations: DenominationStock[],
+  private fewestCodesForTarget(
+    stock: DenominationStock[],
+    values: number[],
     target: number,
   ): { denominationId: string; faceValue: number; count: number }[] | null {
-    const maxCodes = 10; // Safety limit — don't try combinations deeper than 10 codes
-    const remaining = denominations.map((d) => d.availableCount);
+    const unit = values.reduce(
+      (acc, value) => AllocationEngineService.gcd(acc, value),
+      target,
+    );
+    // A target that shares no divisor with any code value cannot be met, and
+    // the gcd above always divides the target, so this only guards against 0.
+    if (!unit) return null;
 
-    for (let depth = 2; depth <= maxCodes; depth++) {
-      const result = this.searchAtDepth(denominations, remaining, target, depth, 0, []);
-      if (result) {
-        // Aggregate into denomination+count pairs
-        const counts = new Map<string, { denominationId: string; faceValue: number; count: number }>();
-        for (const item of result) {
-          const existing = counts.get(item.denominationId);
-          if (existing) {
-            existing.count++;
-          } else {
-            counts.set(item.denominationId, {
-              denominationId: item.denominationId,
-              faceValue: item.faceValue,
-              count: 1,
-            });
+    const steps = target / unit;
+    const scaled = values.map((value) => value / unit);
+
+    const BUDGET = 4_000_000;
+    if ((steps + 1) * stock.length > BUDGET) {
+      this.logger.warn(
+        `[Allocation] Target of ${target} cents is too large to solve exactly; using the depth-limited search.`,
+      );
+      return this.depthLimitedSearch(stock, values, target);
+    }
+
+    // codes[sum] — fewest codes that reach `sum`; -1 when unreachable.
+    // usedAt[i][sum] — how many of denomination i that solution took, so the
+    // combination can be read back rather than recomputed.
+    let codes = new Int32Array(steps + 1).fill(-1);
+    codes[0] = 0;
+    const usedAt: Int32Array[] = [];
+
+    for (let i = 0; i < scaled.length; i++) {
+      const next = new Int32Array(steps + 1).fill(-1);
+      const used = new Int32Array(steps + 1).fill(0);
+      const maxUses = Math.min(stock[i].availableCount, Math.floor(steps / scaled[i]));
+
+      for (let sum = 0; sum <= steps; sum++) {
+        if (codes[sum] < 0) continue;
+        for (let k = 0; k <= maxUses; k++) {
+          const reached = sum + k * scaled[i];
+          if (reached > steps) break;
+          const total = codes[sum] + k;
+          if (next[reached] < 0 || total < next[reached]) {
+            next[reached] = total;
+            used[reached] = k;
           }
         }
-        return Array.from(counts.values());
+      }
+
+      codes = next;
+      usedAt.push(used);
+    }
+
+    if (codes[steps] < 0) return null;
+
+    // Walk the choices back to the empty basket.
+    const combination: { denominationId: string; faceValue: number; count: number }[] = [];
+    let sum = steps;
+    for (let i = scaled.length - 1; i >= 0; i--) {
+      const count = usedAt[i][sum];
+      if (count > 0) {
+        combination.push({
+          denominationId: stock[i].denominationId,
+          faceValue: stock[i].faceValue,
+          count,
+        });
+        sum -= count * scaled[i];
+      }
+    }
+
+    return sum === 0 && combination.length > 0 ? combination.reverse() : null;
+  }
+
+  /**
+   * Iterative-deepening fallback, used only for a target too large to tabulate.
+   * Tries two codes, then three, and so on, so the first answer found is also
+   * the one using fewest codes.
+   */
+  private depthLimitedSearch(
+    stock: DenominationStock[],
+    values: number[],
+    target: number,
+  ): { denominationId: string; faceValue: number; count: number }[] | null {
+    const maxCodes = 12;
+    const remaining = stock.map((d) => d.availableCount);
+
+    for (let depth = 2; depth <= maxCodes; depth++) {
+      const picked = this.searchAtDepth(stock, values, remaining, target, depth, 0, []);
+      if (picked) {
+        const counts = new Map<number, number>();
+        for (const index of picked) counts.set(index, (counts.get(index) ?? 0) + 1);
+        return [...counts.entries()].map(([index, count]) => ({
+          denominationId: stock[index].denominationId,
+          faceValue: stock[index].faceValue,
+          count,
+        }));
       }
     }
 
     return null;
   }
 
+  /** Indices of the codes chosen, or null if this depth cannot reach the target. */
   private searchAtDepth(
-    denominations: DenominationStock[],
+    stock: DenominationStock[],
+    values: number[],
     remaining: number[],
     target: number,
     maxDepth: number,
-    currentDepth: number,
-    currentSelection: { denominationId: string; faceValue: number }[],
-  ): { denominationId: string; faceValue: number }[] | null {
-    if (currentDepth === maxDepth) {
-      const sum = currentSelection.reduce((acc, s) => acc + s.faceValue, 0);
-      return sum === target ? [...currentSelection] : null;
+    startIdx: number,
+    chosen: number[],
+  ): number[] | null {
+    const spent = chosen.reduce((acc, index) => acc + values[index], 0);
+    if (chosen.length === maxDepth) {
+      return spent === target ? [...chosen] : null;
     }
 
-    const remainingTarget = target - currentSelection.reduce((acc, s) => acc + s.faceValue, 0);
-    if (remainingTarget <= 0) {
-      return null;
-    }
+    const left = target - spent;
+    if (left <= 0) return null;
 
-    // Pruning: if the largest denomination * remaining slots can't reach target, skip
-    const remainingSlots = maxDepth - currentDepth;
-    const availableDenoms = denominations.filter((_, i) => remaining[i] > 0);
-    if (availableDenoms.length === 0) return null;
-    const maxDenom = Math.max(...availableDenoms.map((d) => d.faceValue));
-    if (maxDenom * remainingSlots < remainingTarget) return null;
-    // Pruning: if the smallest denomination * remaining slots exceeds target, skip
-    const minDenom = Math.min(...availableDenoms.map((d) => d.faceValue));
-    if (minDenom * remainingSlots > remainingTarget) return null;
-
-    // Start from the first denomination to avoid duplicate permutations
-    const startIdx = currentSelection.length > 0
-      ? denominations.findIndex((d) => d.denominationId === currentSelection[currentSelection.length - 1].denominationId)
-      : 0;
-
-    for (let i = startIdx; i < denominations.length; i++) {
+    const slots = maxDepth - chosen.length;
+    let smallest = Infinity;
+    let largest = 0;
+    for (let i = startIdx; i < stock.length; i++) {
       if (remaining[i] <= 0) continue;
-      const d = denominations[i];
-      if (d.faceValue > remainingTarget) continue;
+      smallest = Math.min(smallest, values[i]);
+      largest = Math.max(largest, values[i]);
+    }
+    if (largest === 0) return null;
+    if (largest * slots < left) return null;
+    if (smallest * slots > left) return null;
+
+    for (let i = startIdx; i < stock.length; i++) {
+      if (remaining[i] <= 0) continue;
+      if (values[i] > left) continue;
 
       remaining[i]--;
-      currentSelection.push({ denominationId: d.denominationId, faceValue: d.faceValue });
-
-      const result = this.searchAtDepth(denominations, remaining, target, maxDepth, currentDepth + 1, currentSelection);
-      if (result) {
-        remaining[i]++;
-        return result;
-      }
-
-      currentSelection.pop();
+      chosen.push(i);
+      const result = this.searchAtDepth(stock, values, remaining, target, maxDepth, i, chosen);
+      chosen.pop();
       remaining[i]++;
+      if (result) return result;
     }
 
     return null;
