@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo, useEffect } from 'react';
 import { Plus, Trash2, Search, AlertTriangle, CheckCircle2, Package, Pencil } from 'lucide-react';
 import { api } from '@/lib/api';
-import { Card, Button, Input, Badge, Modal } from '@/components/ui';
+import { Card, Button, Input, Select, Badge, Modal } from '@/components/ui';
 import { formatPrice } from '@/lib/utils';
 
 /**
@@ -18,6 +18,7 @@ export function FulfillmentPresetsPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<any>(null);
+  const [creating, setCreating] = useState(false);
 
   const { data: hierarchy, isLoading: loadingCatalog } = useQuery({
     queryKey: ['catalog-hierarchy'],
@@ -68,12 +69,17 @@ export function FulfillmentPresetsPage() {
 
   return (
     <div className="space-y-6 animate-slide-up">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Delivery rules</h1>
-        <p className="text-sm text-muted-foreground">
-          For each thing you sell, which codes get delivered when someone buys it. An item with no
-          rule cannot be delivered.
-        </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Delivery rules</h1>
+          <p className="text-sm text-muted-foreground">
+            For each thing you sell, which codes get delivered when someone buys it. An item with no
+            rule cannot be delivered.
+          </p>
+        </div>
+        <Button onClick={() => setCreating(true)}>
+          <Plus className="mr-2 h-4 w-4" /> New pack
+        </Button>
       </div>
 
       {missing > 0 && (
@@ -123,6 +129,19 @@ export function FulfillmentPresetsPage() {
           </Card>
         )}
       </div>
+
+      {creating && (
+        <NewPackModal
+          hierarchy={hierarchy || []}
+          onClose={() => setCreating(false)}
+          onCreated={() => {
+            queryClient.invalidateQueries({ queryKey: ['catalog-hierarchy'] });
+            queryClient.invalidateQueries({ queryKey: ['all-combinations'] });
+            queryClient.invalidateQueries({ queryKey: ['skus'] });
+            setCreating(false);
+          }}
+        />
+      )}
 
       {editing && (
         <RuleEditor
@@ -461,5 +480,113 @@ function PriceEditor({ item, onSaved }: { item: any; onSaved: () => void }) {
       <Button size="sm" variant="ghost" onClick={() => { setOpen(false); setError(''); }}>Cancel</Button>
       {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
     </span>
+  );
+}
+
+/**
+ * Create a pack — a variant such as "PS Essential: 1 Month" at $11.
+ *
+ * Rewriting this screen as Delivery Rules dropped the old "Add Variant" button,
+ * which was the only place a pack could be created, so new subscription tiers
+ * could not be added at all. Its price is entered in a chosen currency, and the
+ * codes it delivers are set afterwards as that pack's rule.
+ */
+function NewPackModal({
+  hierarchy, onClose, onCreated,
+}: { hierarchy: any[]; onClose: () => void; onCreated: () => void }) {
+  const [productId, setProductId] = useState('');
+  const [name, setName] = useState('');
+  const [price, setPrice] = useState('');
+  const [currency, setCurrency] = useState('USD');
+  const [error, setError] = useState('');
+
+  // Every product in the catalogue, flattened, so a pack can be added to any of
+  // them without first navigating a tree.
+  const products = useMemo(() => {
+    const flat: { id: string; label: string }[] = [];
+    for (const category of hierarchy) {
+      for (const product of category.products || []) {
+        flat.push({ id: product.id, label: `${product.name} (${product.region})` });
+      }
+    }
+    return flat.sort((a, b) => a.label.localeCompare(b.label));
+  }, [hierarchy]);
+
+  const create = useMutation({
+    mutationFn: () => api.createVariantForProduct(productId, {
+      name: name.trim(),
+      customerPrice: Number(price),
+      currency,
+    }),
+    onSuccess: onCreated,
+    onError: (err: any) => setError(err.message),
+  });
+
+  const amount = Number(price);
+  const valid = !!productId && name.trim().length > 0 && Number.isFinite(amount) && amount > 0;
+
+  return (
+    <Modal open onClose={onClose} title="New pack" size="lg">
+      <div className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          A pack is something you sell at its own price — "PS Essential: 1 Month" at $11 — rather
+          than a code value. Create it here, then set which codes it delivers as its rule.
+        </p>
+
+        <Select
+          label="Product"
+          value={productId}
+          onChange={(e: any) => setProductId(e.target.value)}
+          options={[
+            { value: '', label: products.length ? '— Select —' : 'No products yet' },
+            ...products.map((product) => ({ value: product.id, label: product.label })),
+          ]}
+        />
+
+        <Input
+          label="Pack name"
+          value={name}
+          onChange={(e: any) => setName(e.target.value)}
+          placeholder="PS Essential: 1 Month"
+        />
+
+        <div className="grid gap-3 sm:grid-cols-[1fr_140px]">
+          <Input
+            label="Price"
+            type="number" min="0" step="0.01"
+            value={price}
+            onChange={(e: any) => setPrice(e.target.value)}
+            placeholder="11.00"
+          />
+          <Select
+            label="Currency"
+            value={currency}
+            onChange={(e: any) => setCurrency(e.target.value)}
+            options={[
+              { value: 'USD', label: 'USD' },
+              { value: 'PKR', label: 'PKR' },
+            ]}
+          />
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          You can set the other currency's price afterwards under Prices, and the pack gets its own
+          SKU on the SKU page.
+        </p>
+
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancel</Button>
+          <Button
+            className="flex-1"
+            disabled={!valid || create.isPending}
+            onClick={() => create.mutate()}
+          >
+            {create.isPending ? 'Creating...' : 'Create pack'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
