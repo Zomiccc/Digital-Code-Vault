@@ -197,6 +197,8 @@ export const api = {
     apiFetch(`/admin/codes/batches/${batchId}/use-first`, { method: 'POST' }),
   createManualOrder: (data: any) =>
     apiFetch('/admin/orders/create', { method: 'POST', body: JSON.stringify(data) }),
+  getProductDenominationStock: (productId: string) =>
+    apiFetch(`/admin/products/${productId}/denominations`),
   getEmergencyStop: () => apiFetch('/admin/system/emergency'),
   listEmergencyTargets: () => apiFetch('/admin/emergency/targets'),
   freezeMerchant: (id: string, frozen: boolean) =>

@@ -31,14 +31,27 @@ export function FulfillmentPage() {
   const orderProducts = (hierarchyForOrder || []).flatMap((c: any) => c.products);
   const selectedProductData = orderProducts.find((p: any) => p.id === orderForm.productId);
   const selectedProductVariants = selectedProductData?.productRegions?.flatMap((pr: any) => pr.variants) || [];
-  const selectedProductDenominations = selectedProductData?.denominations || [];
+  // The catalogue lists every value ever defined for a product, whether or not
+  // a code is left in it. Ordering a value with empty stock failed at
+  // allocation with "no combination sums to 150", so the real counts are
+  // fetched and shown instead.
+  const { data: denominationStock } = useQuery({
+    queryKey: ['denomination-stock', orderForm.productId],
+    queryFn: () => api.getProductDenominationStock(orderForm.productId),
+    enabled: showCreate && !!orderForm.productId,
+  });
+  const selectedProductDenominations = (denominationStock as any[]) || [];
   // Denominations of one product share a currency, so the first one names it.
   const orderValueCurrency = selectedProductDenominations[0]?.currency || 'USD';
+  const inStock = selectedProductDenominations.filter((d: any) => (d.available_stock ?? 0) > 0);
+  const stockTotal = inStock.reduce(
+    (sum: number, d: any) => sum + Number(d.face_value) * (d.available_stock ?? 0), 0,
+  );
   // True when the typed value is not one of the stocked values, so the order
   // will be made up from a combination rather than a single matching code.
-  const isCustomAmount = !selectedProductDenominations.some(
-    (d: any) => Number(d.faceValue) === amount,
-  );
+  const isCustomAmount = !inStock.some((d: any) => Number(d.face_value) === amount);
+  // Nothing on the shelf adds up to this, so the order will be refused.
+  const beyondStock = validAmount && amount > stockTotal;
 
   const createOrderMutation = useMutation({
     mutationFn: () => api.createManualOrder({
@@ -158,24 +171,33 @@ export function FulfillmentPage() {
                 Quick pick
               </label>
               <div className="flex flex-wrap gap-2">
-                {selectedProductDenominations.map((d: any) => (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => setOrderForm({ ...orderForm, amount: String(Number(d.faceValue)) })}
-                    className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                      orderForm.amount === String(Number(d.faceValue))
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
-                    }`}
-                  >
-                    {formatPrice(d.faceValue, d.currency)}
-                  </button>
-                ))}
+                {selectedProductDenominations.map((d: any) => {
+                  const left = d.available_stock ?? 0;
+                  return (
+                    <button
+                      key={d.id}
+                      type="button"
+                      disabled={left === 0}
+                      title={left === 0 ? 'No codes left at this value' : `${left} code(s) available`}
+                      onClick={() => setOrderForm({ ...orderForm, amount: String(Number(d.face_value)) })}
+                      className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                        left === 0
+                          ? 'cursor-not-allowed bg-muted text-muted-foreground line-through opacity-60'
+                          : orderForm.amount === String(Number(d.face_value))
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                      }`}
+                    >
+                      {formatPrice(d.face_value, d.currency)}
+                      <span className="ml-1.5 text-xs opacity-70">{left} left</span>
+                    </button>
+                  );
+                })}
               </div>
               <p className="text-xs text-muted-foreground">
-                Shortcuts for the values in stock — or type any amount below and it will be made up
-                from whatever codes are available.
+                {inStock.length === 0
+                  ? 'No codes are in stock for this product — upload some before ordering.'
+                  : `Struck-through values have no codes left. In stock altogether: ${formatPrice(stockTotal, orderValueCurrency)}.`}
               </p>
             </div>
           )}
@@ -190,11 +212,18 @@ export function FulfillmentPage() {
             placeholder="e.g. 37.50"
           />
           {validAmount && !orderForm.variantId && selectedProductDenominations.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              {isCustomAmount
-                ? `Custom amount — will be made up from codes in stock that add up to ${formatPrice(amount, orderValueCurrency)}.`
-                : 'Matches a value in stock.'}
-            </p>
+            beyondStock ? (
+              <p className="text-xs text-amber-500">
+                Only {formatPrice(stockTotal, orderValueCurrency)} of codes are in stock, so
+                {' '}{formatPrice(amount, orderValueCurrency)} cannot be delivered.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {isCustomAmount
+                  ? `Will be made up from codes in stock that add up to exactly ${formatPrice(amount, orderValueCurrency)} — if no combination does, the order is refused.`
+                  : 'A code of this exact value is in stock.'}
+              </p>
+            )
           )}
           <div className="space-y-2">
             <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">

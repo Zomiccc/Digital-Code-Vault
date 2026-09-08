@@ -306,6 +306,18 @@ export class AdminController {
     return this.productsService.createDenomination(id, body.face_value, body.currency);
   }
 
+  /**
+   * A product's code values with how many of each are actually available.
+   *
+   * The manual order form used the catalogue for its shortcuts, which lists
+   * every value ever defined whether or not a code is left in it, so a value
+   * with empty stock looked orderable and failed at allocation.
+   */
+  @Get('products/:id/denominations')
+  async getProductDenominations(@Param('id') id: string) {
+    return this.productsService.getDenominations(id);
+  }
+
   // ─── Essentials Delivery Config (reusable denomination + quantity rules) ───
 
   @Get('products/:id/essentials/delivery-config')

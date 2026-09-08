@@ -289,6 +289,18 @@ export class FulfillmentService {
 
     // Select the active pool
     const activeStock = useMerchantPool ? merchantStock : dcvStock;
+
+    // What is actually on the shelf, for the error messages below. "No
+    // combination sums to 150" told an admin nothing: the product may well
+    // have a 150 denomination defined, with no codes left in it. Naming the
+    // codes that do exist turns a dead end into an obvious next step.
+    const describeStock = () => {
+      const held = activeStock
+        .filter((entry: any) => entry.availableCount > 0)
+        .sort((a: any, b: any) => a.faceValue - b.faceValue)
+        .map((entry: any) => `${formatMoney(entry.faceValue, orderCurrency)} x${entry.availableCount}`);
+      return held.length ? held.join(', ') : 'nothing';
+    };
     const activePoolMerchantId = useMerchantPool ? merchantId : null;
 
     // Find codes to deliver based on product type.
@@ -469,7 +481,9 @@ export class FulfillmentService {
       throw new BadRequestException({
         error: 'INSUFFICIENT_STOCK',
         code: 'INSUFFICIENT_STOCK',
-        message: `No combination of available denominations sums to ${amount}`,
+        message:
+          `${formatMoney(amount, orderCurrency)} cannot be made up from the codes in stock. ` +
+          `Available: ${describeStock()}. Upload codes for this value, or order an amount these add up to.`,
       });
     }
 
@@ -527,7 +541,9 @@ export class FulfillmentService {
       throw new BadRequestException({
         error: 'INSUFFICIENT_INVENTORY',
         code: 'AMOUNT_MISMATCH',
-        message: `No combination of available denominations exactly sums to ${amount}`,
+        message:
+          `${formatMoney(amount, orderCurrency)} cannot be made up exactly from the codes in stock. ` +
+          `Available: ${describeStock()}. Upload codes for this value, or order an amount these add up to.`,
       });
     }
 

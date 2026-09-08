@@ -26,17 +26,38 @@ export class EmergencyService {
     private auditService: AuditService,
   ) {}
 
+  /**
+   * A count that cannot take the page down.
+   *
+   * This screen is the one an admin reaches for when something is already
+   * wrong, so a single failing query must not turn it into a 500 with no
+   * explanation. A failed count reports as -1 and logs why.
+   */
+  private async safeCount(label: string, run: () => Promise<number>): Promise<number> {
+    try {
+      return await run();
+    } catch (err) {
+      this.logger.error(`Emergency status: ${label} count failed: ${(err as Error).message}`);
+      return -1;
+    }
+  }
+
   async getStatus() {
     const [stop, message, merchants, frozenMerchants, products, frozenProducts, keys, disabledKeys] =
       await Promise.all([
-        this.prisma.platformSetting.findUnique({ where: { key: EMERGENCY_STOP_KEY } }),
-        this.prisma.platformSetting.findUnique({ where: { key: EMERGENCY_MESSAGE_KEY } }),
-        this.prisma.merchant.count(),
-        this.prisma.merchant.count({ where: { NOT: { status: 'ACTIVE' } } }),
-        this.prisma.product.count(),
-        this.prisma.product.count({ where: { NOT: { status: 'ACTIVE' } } }),
-        this.prisma.apiKey.count(),
-        this.prisma.apiKey.count({ where: { NOT: { status: 'ACTIVE' } } }),
+        this.prisma.platformSetting.findUnique({ where: { key: EMERGENCY_STOP_KEY } })
+          .catch((err: Error) => {
+            this.logger.error(`Emergency status: reading the stop flag failed: ${err.message}`);
+            return null;
+          }),
+        this.prisma.platformSetting.findUnique({ where: { key: EMERGENCY_MESSAGE_KEY } })
+          .catch(() => null),
+        this.safeCount('merchants', () => this.prisma.merchant.count()),
+        this.safeCount('frozen merchants', () => this.prisma.merchant.count({ where: { NOT: { status: 'ACTIVE' } } })),
+        this.safeCount('products', () => this.prisma.product.count()),
+        this.safeCount('frozen products', () => this.prisma.product.count({ where: { NOT: { status: 'ACTIVE' } } })),
+        this.safeCount('api keys', () => this.prisma.apiKey.count()),
+        this.safeCount('disabled api keys', () => this.prisma.apiKey.count({ where: { NOT: { status: 'ACTIVE' } } })),
       ]);
 
     return {
