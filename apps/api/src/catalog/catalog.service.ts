@@ -553,9 +553,10 @@ export class CatalogService {
       orderBy: { sortOrder: 'asc' },
     });
 
-    // Denomination face values are stored in USD. Each product-region also reports
-    // its price in that region's own currency, so a Turkish listing reads in Lira
-    // and a Pakistani one in rupees, all derived from the one USD number.
+    // Every price is reported in the currency it is stored in, and each region
+    // carries the currency it reads in. Nothing is converted: a 250 Lira
+    // denomination is 250 Lira, and what a merchant pays for it comes from the
+    // selling price an admin set for their wallet's currency.
     const displays = await this.currencyService.displayCurrenciesForRegions(
       categories.flatMap((category) =>
         category.products.flatMap((product) => [
@@ -564,7 +565,7 @@ export class CatalogService {
         ]),
       ),
     );
-    const usd = { currency: 'USD', symbol: '$', rate: 1, converted: false, region: null };
+    const usd = { currency: 'USD', symbol: '$', region: null };
 
     return categories.map((category) => ({
       ...category,
@@ -576,7 +577,7 @@ export class CatalogService {
           regional_symbol: productDisplay.symbol,
           denominations: product.denominations.map((denomination) => ({
             ...denomination,
-            ...localPrice(Number(denomination.faceValue), productDisplay),
+            ...localPrice(Number(denomination.faceValue), denomination.currency, productDisplay),
           })),
           productRegions: product.productRegions.map((productRegion) => {
             const display = displays.get((productRegion.region?.code ?? '').trim()) ?? usd;
@@ -584,19 +585,13 @@ export class CatalogService {
               ...productRegion,
               denomination_prices: product.denominations.map((denomination) => ({
                 denomination_id: denomination.id,
-                ...localPrice(Number(denomination.faceValue), display),
+                ...localPrice(Number(denomination.faceValue), denomination.currency, display),
               })),
               variants: productRegion.variants.map((variant) => ({
                 ...variant,
-                // A variant already priced in the region's currency is shown as
-                // entered; only USD-priced ones are converted.
-                ...(variant.currency === display.currency
-                  ? {
-                      local_amount: Number(variant.customerPrice),
-                      local_currency: variant.currency,
-                      local_symbol: display.symbol,
-                    }
-                  : localPrice(Number(variant.customerPrice), display)),
+                // A pack is shown at the price it was entered at, in the
+                // currency it was entered in.
+                ...localPrice(Number(variant.customerPrice), variant.currency, display),
               })),
             };
           }),

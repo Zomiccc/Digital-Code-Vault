@@ -1,8 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { CurrencyService } from './currency.service';
-import { normaliseCurrency, roundMoney, convertFromUsd, convertToUsd, BASE_CURRENCY } from './money';
+import { normaliseCurrency, roundMoney, BASE_CURRENCY } from './money';
 
 export type PricedItem = 'DENOMINATION' | 'VARIANT';
 
@@ -22,9 +21,10 @@ export type ResolvedPrice = {
  * currency the platform sells in — a merchant paying from a rupee balance is
  * charged the rupee price that was set, not a dollar price run through a rate.
  *
- * A currency with no price set falls back to converting the item's own price at
- * the admin rate, so nothing is ever unpriced and this could be introduced
- * without repricing the catalogue by hand.
+ * A currency with no price set has no price: the item cannot be sold in that
+ * currency, and a wallet holding it is passed over. There is no exchange rate
+ * to fall back on, because inventing a price is exactly what the platform was
+ * asked to stop doing.
  */
 @Injectable()
 export class SellingPriceService {
@@ -33,7 +33,6 @@ export class SellingPriceService {
   constructor(
     private prisma: PrismaService,
     private auditService: AuditService,
-    private currencyService: CurrencyService,
   ) {}
 
   /** Every price set for one item, keyed by currency. */
@@ -50,18 +49,19 @@ export class SellingPriceService {
   }
 
   /**
-   * What this item sells for in `currency`.
+   * What this item sells for in `currency`, or null if it is not sold in it.
    *
-   * An explicit price wins. Otherwise the item's own price is converted — via
-   * USD, so any pair works — and `explicit` says which happened, letting a
-   * caller show "set" prices differently from derived ones.
+   * An explicit price wins. Failing that, an item already denominated in that
+   * currency is its own price. Anything else returns null: the platform will
+   * not invent a figure to charge a merchant, so an item with no rupee price
+   * cannot be bought from a rupee wallet until an admin sets one.
    */
   async priceIn(
     itemType: PricedItem,
     itemId: string,
     currency: string,
     base: { amount: number; currency: string },
-  ): Promise<ResolvedPrice> {
+  ): Promise<ResolvedPrice | null> {
     const code = normaliseCurrency(currency);
     const baseCode = normaliseCurrency(base.currency || BASE_CURRENCY);
 
@@ -76,16 +76,7 @@ export class SellingPriceService {
       return { currency: code, amount: roundMoney(base.amount), explicit: false };
     }
 
-    // Neither set nor same-currency: go through USD so any pair converts.
-    const amountUsd = baseCode === BASE_CURRENCY
-      ? base.amount
-      : convertToUsd(base.amount, await this.currencyService.getRate(baseCode));
-    const rate = await this.currencyService.getRate(code);
-    return {
-      currency: code,
-      amount: code === BASE_CURRENCY ? roundMoney(amountUsd) : convertFromUsd(amountUsd, rate),
-      explicit: false,
-    };
+    return null;
   }
 
   /** Set or replace one currency's price. */
@@ -140,8 +131,9 @@ export class SellingPriceService {
         entity: itemType, entityId: itemId, metadata: { currency: code }, ip,
       });
     }
-    // Removing an explicit price does not unprice the item; it goes back to
-    // being converted from the item's own price.
+    // Removing a currency's price does unprice the item in that currency. It
+    // stays sellable in the currency it is denominated in, and in any other
+    // currency an admin has priced it in.
     return { currency: code, removed: true };
   }
 

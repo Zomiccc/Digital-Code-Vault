@@ -690,16 +690,6 @@ model MerchantWallet {
   @@index([merchantId, spendOrder])
 }
 
-/// Admin-managed conversion rates against USD, which is always the base unit.
-/// USD itself is implicit and never stored.
-model ExchangeRate {
-  currency    String   @id // ISO code, e.g. "PKR", "TRY"
-  unitsPerUsd Decimal // 1 USD buys this many units, e.g. 300 for PKR
-  updatedBy   String?
-  updatedAt   DateTime @updatedAt
-  createdAt   DateTime @default(now())
-}
-
 // Cost tracking for each bulk code upload batch
 model CodeBatch {
   id             String   @id // same nanoid stored on each CodeItem.batchId

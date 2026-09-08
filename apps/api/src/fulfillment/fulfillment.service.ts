@@ -17,7 +17,6 @@ import { WebhookService } from '../webhooks/webhook.service';
 import { EmailService } from '../email/email.service';
 import { OrderDigestService } from '../email/order-digest.service';
 import { WalletService } from '../wallet/wallet.service';
-import { CurrencyService } from '../currency/currency.service';
 import { SellingPriceService } from '../currency/selling-price.service';
 import { MerchantWalletService, ChosenWallet, WalletShortfall } from '../wallet/merchant-wallet.service';
 import { normaliseCurrency, roundMoney, formatMoney } from '../currency/money';
@@ -35,7 +34,6 @@ export class FulfillmentService {
     private emailService: EmailService,
     private orderDigestService: OrderDigestService,
     private walletService: WalletService,
-    private currencyService: CurrencyService,
     private sellingPriceService: SellingPriceService,
     private merchantWalletService: MerchantWalletService,
   ) {}
@@ -72,13 +70,11 @@ export class FulfillmentService {
     const orderCurrency = normaliseCurrency(currency || 'USD');
     const chargeCurrency = normaliseCurrency(params.chargeCurrency || orderCurrency);
     const pricing = actorType === 'ADMIN' ? manualOrderPricing(amount, params.chargeAmount) : undefined;
-    // The platform's books are in USD, so a rupee sale is converted back for the
-    // revenue entry while the sale itself stays recorded in rupees.
-    const chargeUsd = pricing
-      ? chargeCurrency === 'USD'
-        ? pricing.charge_amount
-        : await this.currencyService.toUsd(pricing.charge_amount, chargeCurrency)
-      : 0;
+    // The platform's own ledger is kept in USD. A sale charged in another
+    // currency is recorded on the order in that currency - which is all that
+    // was asked for - and adds nothing to the USD ledger, because there is no
+    // rate to restate it at.
+    const chargeUsd = pricing && chargeCurrency === 'USD' ? pricing.charge_amount : 0;
 
     // ─── Emergency stop: pause ALL code delivery platform-wide ───
     if (actorType !== 'ADMIN') {
@@ -571,7 +567,7 @@ export class FulfillmentService {
             'VARIANT', variantId, walletCurrency,
             { amount: Number(variant.customerPrice), currency: variant.currency },
           );
-          return price.amount;
+          return price ? price.amount : null;
         }
         const rows = await loadDenominations();
         let sum = 0;
@@ -581,6 +577,9 @@ export class FulfillmentService {
             'DENOMINATION', item.denominationId, walletCurrency,
             { amount: row ? Number(row.faceValue) : item.faceValue, currency: row?.currency || 'USD' },
           );
+          // One unpriced line makes the whole order unpriceable in this
+          // currency, rather than being quietly charged short.
+          if (!price) return null;
           sum += price.amount * item.count;
         }
         return roundMoney(sum);
@@ -880,7 +879,7 @@ export class FulfillmentService {
                 description:
                   `Manual order: order value ${amount} ${orderCurrency}, ` +
                   `charged ${pricing.charge_amount} ${chargeCurrency}` +
-                  (chargeCurrency === 'USD' ? '' : ` (${chargeUsd} USD)`),
+                  (chargeCurrency === 'USD' ? '' : ' (recorded in ' + chargeCurrency + ', not added to the USD ledger)'),
               },
             });
           }

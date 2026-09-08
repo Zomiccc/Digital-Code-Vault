@@ -1,11 +1,12 @@
 // Run: node -r ts-node/register/transpile-only --test src/currency/regional-pricing.spec.ts
-// Display prices follow the region; unlike charging, they must never break.
+// A region names the currency it reads in. Nothing is converted, and display
+// must never break the catalogue.
 import 'reflect-metadata';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CurrencyService, localPrice } from './currency.service';
 
-function service(regions: any[], rates: Record<string, number>) {
+function service(regions: any[]) {
   let regionLookups = 0;
   const prisma: any = {
     region: {
@@ -15,87 +16,86 @@ function service(regions: any[], rates: Record<string, number>) {
         return regions.find((r) => wanted.includes(r.code) || wanted.includes(r.name)) ?? null;
       },
     },
-    exchangeRate: {
-      findUnique: async ({ where }: any) =>
-        rates[where.currency] === undefined
-          ? null
-          : { currency: where.currency, unitsPerUsd: rates[where.currency] },
-    },
   };
-  const sut = new CurrencyService(prisma, { log: async () => {} } as any);
+  const sut = new CurrencyService(prisma);
   return { sut, get regionLookups() { return regionLookups; } };
 }
 
 const regions = [
-  { code: 'TR', name: 'Turkey', currency: 'TRY', symbol: '₺' },
-  { code: 'PK', name: 'Pakistan', currency: 'PKR', symbol: '₨' },
+  { code: 'TR', name: 'Turkey', currency: 'TRY', symbol: '\u20ba' },
+  { code: 'PK', name: 'Pakistan', currency: 'PKR', symbol: '\u20a8' },
   { code: 'USA', name: 'United States', currency: 'USD', symbol: '$' },
   { code: 'BR', name: 'Brazil', currency: 'BRL', symbol: 'R$' },
 ];
-const rates = { TRY: 34.2, PKR: 300, BRL: 5.4 };
 
-test('each region prices in its own currency, not just Lira', async () => {
-  const { sut } = service(regions, rates);
+test('each region names its own currency, not just Lira', async () => {
+  const { sut } = service(regions);
 
   const turkey = await sut.displayCurrencyForRegion('TR');
-  assert.deepEqual(
-    [turkey.currency, turkey.symbol, turkey.rate, turkey.converted],
-    ['TRY', '₺', 34.2, true],
-  );
-  assert.equal(localPrice(100, turkey).local_amount, 3420);
+  assert.deepEqual([turkey.currency, turkey.symbol], ['TRY', '\u20ba']);
 
   const pakistan = await sut.displayCurrencyForRegion('PK');
-  assert.equal(localPrice(100, pakistan).local_amount, 30000);
-  assert.equal(localPrice(100, pakistan).local_symbol, '₨');
+  assert.deepEqual([pakistan.currency, pakistan.symbol], ['PKR', '\u20a8']);
 
   const brazil = await sut.displayCurrencyForRegion('BR');
-  assert.equal(localPrice(19.99, brazil).local_amount, 107.95);
+  assert.equal(brazil.currency, 'BRL');
 });
 
-test('a USD region stays in dollars and is not marked converted', async () => {
-  const { sut } = service(regions, rates);
-  const usa = await sut.displayCurrencyForRegion('USA');
-  assert.equal(usa.currency, 'USD');
-  assert.equal(usa.converted, false);
-  assert.equal(localPrice(100, usa).local_amount, 100);
+test('a price is shown in the currency it is stored in, never converted', async () => {
+  // The whole point of removing exchange rates: a 250 Lira code is 250 Lira.
+  // It used to be multiplied by a rate and shown as thousands.
+  const { sut } = service(regions);
+  const turkey = await sut.displayCurrencyForRegion('TR');
+  const shown = localPrice(250, 'TRY', turkey);
+  assert.deepEqual([shown.local_amount, shown.local_currency], [250, 'TRY']);
+  assert.equal(shown.local_formatted, '\u20ba250');
+});
+
+test('a dollar-priced item in a Lira region still reads in dollars', async () => {
+  // A pack entered at $11 is $11 wherever it is listed. Restating it in the
+  // region's currency would need a rate, and there is none.
+  const { sut } = service(regions);
+  const turkey = await sut.displayCurrencyForRegion('TR');
+  const shown = localPrice(11, 'USD', turkey);
+  assert.deepEqual([shown.local_currency, shown.local_formatted], ['USD', '$11']);
 });
 
 test('a region is also found by name, not only by code', async () => {
-  const { sut } = service(regions, rates);
+  const { sut } = service(regions);
   assert.equal((await sut.displayCurrencyForRegion('Turkey')).currency, 'TRY');
 });
 
 test('an unknown region falls back to USD instead of breaking the catalogue', async () => {
-  const { sut } = service(regions, rates);
+  const { sut } = service(regions);
   for (const missing of ['ZZ', '', null, undefined]) {
     const display = await sut.displayCurrencyForRegion(missing);
     assert.equal(display.currency, 'USD');
-    assert.equal(display.converted, false);
-    assert.equal(localPrice(50, display).local_amount, 50);
+    assert.equal(localPrice(50, null, display).local_amount, 50);
   }
 });
 
-test('a region whose currency has no rate yet shows USD rather than a wrong price', async () => {
-  // Brazil exists and prices in BRL, but no BRL rate has been configured.
-  const { sut } = service(regions, { TRY: 34.2 });
-  const display = await sut.displayCurrencyForRegion('BR');
-  assert.equal(display.currency, 'USD');
-  assert.equal(display.converted, false);
-  assert.equal(localPrice(100, display).local_amount, 100, 'must not silently invent a BRL price');
+test('an unreadable amount shows as zero rather than throwing', async () => {
+  const { sut } = service(regions);
+  const pakistan = await sut.displayCurrencyForRegion('PK');
+  assert.equal(localPrice(Number.NaN, 'PKR', pakistan).local_amount, 0);
 });
 
-test('formatted prices carry the region symbol and thousands separators', async () => {
-  const { sut } = service(regions, rates);
+test('formatted prices carry the currency symbol and thousands separators', async () => {
+  const { sut } = service(regions);
   const pakistan = await sut.displayCurrencyForRegion('PK');
-  assert.equal(localPrice(100, pakistan).local_formatted, '₨30,000.00');
-  assert.equal(localPrice(100, pakistan).amount_usd, 100);
-  assert.equal(localPrice(100, pakistan).fx_rate, 300);
+  assert.equal(localPrice(30000, 'PKR', pakistan).local_formatted, '\u20a830,000');
 });
 
 test('resolving many regions de-duplicates the lookups', async () => {
-  const harness = service(regions, rates);
+  const harness = service(regions);
   const map = await harness.sut.displayCurrenciesForRegions(['TR', 'TR', 'PK', '', null, 'TR']);
   assert.deepEqual([...map.keys()].sort(), ['PK', 'TR']);
   assert.equal(harness.regionLookups, 2, 'one lookup per distinct region');
   assert.equal(map.get('TR')!.currency, 'TRY');
+});
+
+test('a region lookup that throws still yields a usable display', async () => {
+  const prisma: any = { region: { findFirst: async () => { throw new Error('no such table'); } } };
+  const display = await new CurrencyService(prisma).displayCurrencyForRegion('TR');
+  assert.equal(display.currency, 'USD');
 });

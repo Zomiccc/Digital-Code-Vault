@@ -59,13 +59,7 @@ function service(options: {
     walletTransaction: { create: async ({ data }: any) => { txns.push(data); return data; } },
     $transaction: async (ops: any) => Promise.all(ops),
   };
-  const currency: any = {
-    getRate: async (code: string) => {
-      if (rates[code] === undefined) throw new Error(`No exchange rate is set for ${code}`);
-      return rates[code];
-    },
-  };
-  const sut = new MerchantWalletService(prisma, { log: async () => {} } as any, currency);
+  const sut = new MerchantWalletService(prisma, { log: async () => {} } as any);
   return { sut, rows, created, txns, updates };
 }
 
@@ -117,7 +111,7 @@ test('a currency the order cannot be priced in is skipped', async () => {
   });
   const { chosen, shortfalls } = await f.sut.chooseWalletForCharge('m1', priced({ USD: 101 }));
   assert.equal(chosen!.currency, 'USD', 'skipped the unpriceable wallet despite its balance');
-  assert.equal(shortfalls[0].reason, 'no_rate');
+  assert.equal(shortfalls[0].reason, 'no_price');
 });
 
 test('a preferred wallet that cannot cover the order falls back to the other', async () => {

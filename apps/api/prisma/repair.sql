@@ -17,15 +17,6 @@ ALTER TABLE "FulfillmentRequest" ADD COLUMN IF NOT EXISTS "chargedAmount"   DECI
 ALTER TABLE "FulfillmentRequest" ADD COLUMN IF NOT EXISTS "fxRate"          DECIMAL(65,30) NOT NULL DEFAULT 1;
 ALTER TABLE "WalletTransaction"  ADD COLUMN IF NOT EXISTS "currency"        TEXT NOT NULL DEFAULT 'USD';
 
-CREATE TABLE IF NOT EXISTS "ExchangeRate" (
-  "currency"    TEXT NOT NULL,
-  "unitsPerUsd" DECIMAL(65,30) NOT NULL,
-  "updatedBy"   TEXT,
-  "updatedAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "createdAt"   TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT "ExchangeRate_pkey" PRIMARY KEY ("currency")
-);
-
 CREATE INDEX IF NOT EXISTS "CodeBatch_denominationId_priority_idx"
   ON "CodeBatch" ("denominationId", "priority");
 

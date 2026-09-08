@@ -7,7 +7,6 @@ import {
 import { api } from '@/lib/api';
 import { Card, StatCard, Badge, Button, Table, Th, Td, Modal, Input } from '@/components/ui';
 import { formatCurrency, formatDate, statusColor, formatPrice } from '@/lib/utils';
-import { ExchangeRatesCard } from '@/components/ExchangeRates';
 
 export function FinancePage() {
   const queryClient = useQueryClient();
@@ -16,7 +15,6 @@ export function FinancePage() {
   const [adminNote, setAdminNote] = useState('');
   const [editedAmount, setEditedAmount] = useState('');
   const [tab, setTab] = useState<'overview' | 'costs' | 'funding' | 'reconciliation' | 'transactions'>('overview');
-  const [displayCurrency, setDisplayCurrency] = useState<'USD' | 'PKR'>('USD');
   const [batchDetailCurrency, setBatchDetailCurrency] = useState<string | null>(null);
 
   const { data: wallet, isLoading } = useQuery({
@@ -102,37 +100,11 @@ export function FinancePage() {
 
       {tab === 'overview' && (
         <>
-          {/* Currency toggle + exchange rate */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">Display currency:</span>
-              <div className="flex gap-1 rounded-lg border border-border bg-card p-1">
-                {(['USD', 'PKR'] as const).map((c) => (
-                  <button
-                    key={c}
-                    onClick={() => setDisplayCurrency(c)}
-                    className={`rounded-md px-3 py-1 text-sm font-medium transition-all ${
-                      displayCurrency === c ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'
-                    }`}
-                  >
-                    {c}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <ExchangeRatesCard />
-
           {/* Stats */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard
-              label={`Total Merchant Balances (${displayCurrency})`}
-              value={formatCurrency(
-                displayCurrency === 'USD'
-                  ? (financeOverview?.total_usd_balance || 0) + (financeOverview?.total_eur_balance || 0)
-                  : ((financeOverview?.total_usd_balance || 0) + (financeOverview?.total_eur_balance || 0)) * (financeOverview?.usd_to_pkr_rate || 280) + (financeOverview?.total_pkr_balance || 0)
-              )}
+              label="Merchant Balances (USD)"
+              value={formatCurrency(financeOverview?.total_usd_balance || 0, 'USD')}
               icon={DollarSign}
               color="text-blue-400"
             />
@@ -145,15 +117,15 @@ export function FinancePage() {
           <div className="grid gap-4 sm:grid-cols-3">
             <Card>
               <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">USD Balances</div>
-              <p className="mt-2 text-2xl font-semibold text-primary">{formatCurrency(financeOverview?.total_usd_balance || 0)}</p>
+              <p className="mt-2 text-2xl font-semibold text-primary">{formatCurrency(financeOverview?.total_usd_balance || 0, 'USD')}</p>
             </Card>
             <Card>
               <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">PKR Balances</div>
-              <p className="mt-2 text-2xl font-semibold text-primary">{formatCurrency(financeOverview?.total_pkr_balance || 0)}</p>
+              <p className="mt-2 text-2xl font-semibold text-primary">{formatCurrency(financeOverview?.total_pkr_balance || 0, 'PKR')}</p>
             </Card>
             <Card>
               <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">EUR Balances</div>
-              <p className="mt-2 text-2xl font-semibold text-primary">{formatCurrency(financeOverview?.total_eur_balance || 0)}</p>
+              <p className="mt-2 text-2xl font-semibold text-primary">{formatCurrency(financeOverview?.total_eur_balance || 0, 'EUR')}</p>
             </Card>
           </div>
 
@@ -198,20 +170,9 @@ export function FinancePage() {
 
       {tab === 'costs' && (
         <>
-          {/* Grand totals */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard
-              label="Total Cost (USD)"
-              value={formatCurrency(costBasis?.total_usd || 0)}
-              icon={DollarSign}
-              color="text-blue-400"
-            />
-            <StatCard
-              label="Total Cost (PKR)"
-              value={formatCurrency(costBasis?.total_pkr || 0)}
-              icon={DollarSign}
-              color="text-emerald-400"
-            />
+          {/* Cost is counted per currency; batches bought in rupees are not added
+              to batches bought in dollars. */}
+          <div className="grid gap-4 sm:grid-cols-2">
             <StatCard
               label="Total Batches"
               value={costBasis?.total_batches || 0}

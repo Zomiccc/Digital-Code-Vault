@@ -100,28 +100,6 @@ export class AdminController {
     return this.walletService.getPlatformFinanceOverview();
   }
 
-  @Patch('finance/exchange-rate')
-  @Roles('SUPER_ADMIN', 'FINANCE')
-  async updateExchangeRate(@Body() body: { rate: number }, @CurrentUser() user: any) {
-    return this.walletService.updateExchangeRate(body.rate, user.id);
-  }
-
-  // ─── Exchange rates ───
-  // USD is the base for every stored price; these are the rates the platform
-  // converts with, for merchant wallets and for regional display prices alike.
-
-  // ─── Selling prices, per currency ───
-  // Cost lives on the batch in its own currency; these are what the item sells
-  // for, set independently in USD and PKR.
-
-  @Get('prices/:itemType/:itemId')
-  @Roles('SUPER_ADMIN', 'FINANCE', 'INVENTORY_MANAGER', 'SUPPORT')
-  async listSellingPrices(
-    @Param('itemType') itemType: string,
-    @Param('itemId') itemId: string,
-  ) {
-    return this.sellingPriceService.listPrices(this.assertPricedItem(itemType), itemId);
-  }
 
   @Put('prices/:itemType/:itemId/:currency')
   @Roles('SUPER_ADMIN', 'FINANCE', 'INVENTORY_MANAGER')
@@ -159,33 +137,6 @@ export class AdminController {
       throw new BadRequestException('itemType must be DENOMINATION or VARIANT');
     }
     return upper;
-  }
-
-  @Get('currency/rates')
-  @Roles('SUPER_ADMIN', 'FINANCE', 'SUPPORT', 'INVENTORY_MANAGER')
-  async listExchangeRates() {
-    return this.currencyService.listRates();
-  }
-
-  @Put('currency/rates/:currency')
-  @Roles('SUPER_ADMIN', 'FINANCE')
-  async setExchangeRate(
-    @Param('currency') currency: string,
-    @Body() body: { units_per_usd: number },
-    @CurrentUser() user: any,
-    @Req() req: any,
-  ) {
-    return this.currencyService.setRate(currency, body.units_per_usd, user.id, req.ip);
-  }
-
-  @Delete('currency/rates/:currency')
-  @Roles('SUPER_ADMIN', 'FINANCE')
-  async deleteExchangeRate(
-    @Param('currency') currency: string,
-    @CurrentUser() user: any,
-    @Req() req: any,
-  ) {
-    return this.currencyService.deleteRate(currency, user.id, req.ip);
   }
 
   @Get('finance/cost-basis')

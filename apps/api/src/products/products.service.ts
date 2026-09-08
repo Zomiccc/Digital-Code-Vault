@@ -36,9 +36,9 @@ export class ProductsService {
   }
 
   /**
-   * Face values are stored in USD. Each product also carries the price in its own
-   * region's currency, so a Turkish product reads in Lira and a Pakistani one in
-   * rupees without the caller needing to know any rates.
+   * Each product carries the currency its region reads in, and each face value
+   * is reported in the currency it is stored in. Nothing is converted - there
+   * are no exchange rates, only the prices an admin sets per currency.
    */
   private async withRegionalPrices<T extends { region: string; denominations: any[] }>(products: T[]) {
     const displays = await this.currencyService.displayCurrenciesForRegions(
@@ -52,9 +52,7 @@ export class ProductsService {
         regional_symbol: display?.symbol ?? '$',
         denominations: product.denominations.map((denomination: any) => ({
           ...denomination,
-          ...(display
-            ? localPrice(Number(denomination.faceValue), display)
-            : {}),
+          ...localPrice(Number(denomination.faceValue), denomination.currency, display),
         })),
       };
     });
@@ -124,7 +122,7 @@ export class ProductsService {
       face_value: d.faceValue,
       currency: d.currency,
       available_stock: d.codeItems.length,
-      ...localPrice(Number(d.faceValue), display),
+      ...localPrice(Number(d.faceValue), d.currency, display),
     }));
   }
 

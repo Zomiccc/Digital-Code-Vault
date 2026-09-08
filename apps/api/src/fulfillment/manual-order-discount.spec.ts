@@ -95,9 +95,8 @@ function fixture() {
       walletLookups++;
       return 'admin-wallet';
     } } as any,
-    // An admin order skips the wallet, so no rate should ever be requested here.
-    { getRate: async () => { throw new Error('admin orders must not consult a rate'); } } as any,
-    // Likewise nothing should be priced against, or charged to, a merchant wallet.
+    // An admin order skips the wallet, so nothing should be priced against, or
+    // charged to, a merchant wallet.
     { priceIn: async () => { throw new Error('admin orders must not price a wallet'); } } as any,
     {
       chooseWalletForCharge: async () => { throw new Error('admin orders must not choose a wallet'); },

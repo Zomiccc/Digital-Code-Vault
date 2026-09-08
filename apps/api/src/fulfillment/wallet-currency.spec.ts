@@ -1,5 +1,6 @@
 // Run: node -r ts-node/register/transpile-only --test src/fulfillment/wallet-currency.spec.ts
-// A wallet is charged in its own currency while the platform's books stay in USD.
+// A wallet is charged the price set for its own currency, and the platform's
+// books stay in USD. Nothing is converted: there are no exchange rates.
 import 'reflect-metadata';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,8 +9,7 @@ import { FulfillmentService } from './fulfillment.service';
 function fixture(options: {
   walletCurrency: string;
   balance: number;
-  rate?: number;
-  /** Selling price per currency; falls back to the USD amount when absent. */
+  /** The price an admin set per currency. A currency with none is unpriced. */
   prices?: Record<string, number>;
 }) {
   let saved: any;
@@ -20,7 +20,7 @@ function fixture(options: {
   const revenueRecords: any[] = [];
   const merchantUpdates: any[] = [];
   let platformBalance = 0;
-  let rateLookups = 0;
+  let priceLookups = 0;
   const merchant = {
     id: 'merchant', name: 'Shop', status: 'ACTIVE', allowedProductIds: '[]',
     walletBalance: options.balance, currency: options.walletCurrency,
@@ -99,29 +99,25 @@ function fixture(options: {
     { sendDeliveryLinkEmail: async () => true, sendCustomerDeliveryEmail: async () => true } as any,
     { recordOrder: async () => {}, queueOrder: async () => {} } as any,
     { getOrCreateAdminWallet: async () => 'admin-wallet' } as any,
-    { getRate: async (currency: string) => {
-      rateLookups++;
-      if (currency === 'USD') return 1;
-      if (options.rate === undefined) throw new Error(`No exchange rate is set for ${currency}`);
-      return options.rate;
-    } } as any,
-    // Prices: an explicit figure when set for that currency, otherwise the USD
-    // amount converted at the rate — the same fallback the real service uses.
+    // Prices: the figure an admin set for that currency, or nothing. An item
+    // denominated in the wallet's own currency is its own price. There is no
+    // rate to fall back on, which is the point.
     {
       priceIn: async (_type: any, _id: any, currency: string, base: any) => {
+        priceLookups++;
         const explicit = options.prices?.[currency];
         if (explicit !== undefined) return { currency, amount: explicit, explicit: true };
-        if (currency === 'USD') return { currency, amount: base.amount, explicit: false };
-        rateLookups++;
-        if (options.rate === undefined) throw new Error(`No exchange rate is set for ${currency}`);
-        return { currency, amount: base.amount * options.rate, explicit: false };
+        if (currency === (base.currency || 'USD')) {
+          return { currency, amount: base.amount, explicit: false };
+        }
+        return null;
       },
     } as any,
     {
       chooseWalletForCharge: async (_merchantId: string, costInCurrency: any) => {
         const required = await costInCurrency(options.walletCurrency).catch(() => null);
         if (required === null) {
-          return { chosen: null, shortfalls: [{ currency: options.walletCurrency, balance: options.balance, required: 0, reason: 'no_rate' }] };
+          return { chosen: null, shortfalls: [{ currency: options.walletCurrency, balance: options.balance, required: 0, reason: 'no_price' }] };
         }
         if (Number(merchant.walletBalance) < required) {
           return { chosen: null, shortfalls: [{ currency: options.walletCurrency, balance: Number(merchant.walletBalance), required, reason: 'insufficient' }] };
@@ -133,8 +129,8 @@ function fixture(options: {
       },
       describeShortfall: (shortfalls: any[]) =>
         `Insufficient wallet balance. ${shortfalls.map((entry: any) =>
-          entry.reason === 'no_rate'
-            ? `${entry.currency} has no price or exchange rate configured`
+          entry.reason === 'no_price'
+            ? `${entry.currency} has no selling price set for this item`
             : `${entry.currency} holds ${entry.balance} of ${entry.required} needed`).join('; ')}.`,
     } as any,
   );
@@ -144,7 +140,7 @@ function fixture(options: {
     engineStock: (next: any[]) => { stock = next; },
     get platformBalance() { return platformBalance; },
     get saved() { return saved; },
-    get rateLookups() { return rateLookups; },
+    get priceLookups() { return priceLookups; },
   };
 }
 
@@ -153,36 +149,40 @@ const order = {
   idempotencyKey: 'k', actorType: 'MERCHANT' as const,
 };
 
-test('a $100 code on a 300 PKR wallet debits 30,000 PKR, not 100', async () => {
-  const f = fixture({ walletCurrency: 'PKR', balance: 67000, rate: 300 });
+test('a PKR wallet is debited the rupee price the admin set for the item', async () => {
+  // A $100 code priced at PKR 27,500. That figure is charged as entered; the
+  // platform no longer holds a rate it could have multiplied 100 by.
+  const f = fixture({ walletCurrency: 'PKR', balance: 67000, prices: { PKR: 27500 } });
   const result = await f.service.createFulfillment({ ...order });
 
   assert.equal(result.status, 'ALLOCATED');
-  assert.deepEqual(f.merchantUpdates, [{ walletBalance: { decrement: 30000 } }]);
-  assert.equal(Number(f.merchant.walletBalance), 37000, 'PKR 67,000 less PKR 30,000');
+  assert.deepEqual(f.merchantUpdates, [{ walletBalance: { decrement: 27500 } }]);
+  assert.equal(Number(f.merchant.walletBalance), 39500, 'PKR 67,000 less PKR 27,500');
 
   const debit = f.walletRows.find((row) => row.type === 'DEBIT');
-  assert.equal(debit.amount, 30000);
+  assert.equal(debit.amount, 27500);
   assert.equal(debit.currency, 'PKR');
 
-  // The order keeps the USD face value plus what was actually charged and at what rate.
+  // The order keeps the order value plus what was actually charged.
   assert.equal(Number(f.saved.amount), 100);
   assert.equal(f.saved.chargedCurrency, 'PKR');
-  assert.equal(f.saved.chargedAmount, 30000);
-  assert.equal(f.saved.fxRate, 300);
+  assert.equal(f.saved.chargedAmount, 27500);
 });
 
-test('the platform is credited in USD even when the wallet pays PKR', async () => {
-  const f = fixture({ walletCurrency: 'PKR', balance: 67000, rate: 300 });
-  await f.service.createFulfillment({ ...order });
-
-  const credit = f.revenueRecords.find((r) => r.type === 'CREDIT');
-  assert.equal(credit.amount, 100, 'platform revenue stays in USD');
-  assert.equal(f.platformBalance, 100);
+test('a wallet with no price set for the item is refused, not guessed at', async () => {
+  // The old behaviour converted the dollar price at the admin rate. With rates
+  // gone, an unpriced currency simply cannot buy the item.
+  const f = fixture({ walletCurrency: 'PKR', balance: 67000 });
+  await assert.rejects(
+    () => f.service.createFulfillment({ ...order }),
+    /PKR has no selling price set for this item/,
+  );
+  assert.deepEqual(f.merchantUpdates, [], 'no debit may be attempted');
+  assert.equal(f.walletRows.length, 0);
 });
 
 test('a USD wallet is charged the face value with no conversion', async () => {
-  const f = fixture({ walletCurrency: 'USD', balance: 500, rate: undefined });
+  const f = fixture({ walletCurrency: 'USD', balance: 500 });
   await f.service.createFulfillment({ ...order });
 
   assert.deepEqual(f.merchantUpdates, [{ walletBalance: { decrement: 100 } }]);
@@ -192,38 +192,20 @@ test('a USD wallet is charged the face value with no conversion', async () => {
   assert.equal(f.saved.fxRate, 1);
 });
 
-test('the balance check uses the converted amount, so PKR 20,000 cannot buy a $100 code', async () => {
-  const f = fixture({ walletCurrency: 'PKR', balance: 20000, rate: 300 });
-  // 20,000 exceeds the raw face value of 100 but is short of the 30,000 actually due.
-  await assert.rejects(
-    () => f.service.createFulfillment({ ...order }),
-    (error: any) => {
-      const message = error.response?.message ?? error.message;
-      assert.match(message, /Insufficient wallet balance/);
-      // Names the wallet and both figures, so the merchant knows what to top up.
-      assert.match(message, /PKR holds 20000 of 30000 needed/);
-      return true;
-    },
-  );
-  assert.deepEqual(f.merchantUpdates, [], 'no debit may be attempted');
-  assert.equal(f.walletRows.length, 0);
-  assert.equal(f.platformBalance, 0);
-});
-
 test('a wallet the order cannot be priced in refuses rather than guessing', async () => {
-  const f = fixture({ walletCurrency: 'TRY', balance: 100000, rate: undefined });
+  const f = fixture({ walletCurrency: 'TRY', balance: 100000 });
   await assert.rejects(
     () => f.service.createFulfillment({ ...order }),
-    /TRY has no price or exchange rate configured/,
+    /TRY has no selling price set for this item/,
   );
   assert.deepEqual(f.merchantUpdates, []);
   assert.equal(f.walletRows.length, 0);
 });
 
-test('the rate is read once per order so a mid-order change cannot split the charge', async () => {
-  const f = fixture({ walletCurrency: 'PKR', balance: 67000, rate: 300 });
+test('the price is read once per order so a mid-order change cannot split the charge', async () => {
+  const f = fixture({ walletCurrency: 'PKR', balance: 67000, prices: { PKR: 27500 } });
   await f.service.createFulfillment({ ...order });
-  assert.equal(f.rateLookups, 1);
+  assert.equal(f.priceLookups, 1);
 });
 
 // ─── A pack preset decides what is delivered, and what is charged ───
@@ -231,7 +213,7 @@ test('the rate is read once per order so a mid-order change cannot split the cha
 test('a preset delivers its codes even though they do not add up to the shelf price', async () => {
   // "PS Essential: 1 Month" sells for 9.99 but is delivered as $10 + $20. The
   // order used to be rejected with "no combination exactly sums to 9.99".
-  const f = fixture({ walletCurrency: 'USD', balance: 500, rate: undefined });
+  const f = fixture({ walletCurrency: 'USD', balance: 500 });
   f.engineStock([
     { denominationId: 'd10', faceValue: 10, availableCount: 5 },
     { denominationId: 'd20', faceValue: 20, availableCount: 5 },
@@ -254,7 +236,7 @@ test('a preset delivers its codes even though they do not add up to the shelf pr
 });
 
 test('the platform is credited the shelf price for a pack, not the code value', async () => {
-  const f = fixture({ walletCurrency: 'USD', balance: 500, rate: undefined });
+  const f = fixture({ walletCurrency: 'USD', balance: 500 });
   f.engineStock([
     { denominationId: 'd10', faceValue: 10, availableCount: 5 },
     { denominationId: 'd20', faceValue: 20, availableCount: 5 },
@@ -267,8 +249,11 @@ test('the platform is credited the shelf price for a pack, not the code value', 
   assert.equal(f.revenueRecords.find((r: any) => r.type === 'CREDIT').amount, 9.99);
 });
 
-test('a pack on a PKR wallet is charged the shelf price converted, not the code value', async () => {
-  const f = fixture({ walletCurrency: 'PKR', balance: 67000, rate: 300 });
+test('a pack on a PKR wallet is charged the rupee price set for the pack', async () => {
+  // "PS Essential: 1 Month" priced at PKR 2,800, delivered as a $10 and a $20
+  // code. The pack's own rupee price is charged - not the codes, and not a
+  // conversion of its dollar price.
+  const f = fixture({ walletCurrency: 'PKR', balance: 67000, prices: { PKR: 2800 } });
   f.engineStock([
     { denominationId: 'd10', faceValue: 10, availableCount: 5 },
     { denominationId: 'd20', faceValue: 20, availableCount: 5 },
@@ -278,20 +263,37 @@ test('a pack on a PKR wallet is charged the shelf price converted, not the code 
     { denominationId: 'd20', quantity: 1, denomination: { faceValue: 20 } },
   ]);
   await f.service.createFulfillment({ ...order, amount: 9.99, variantId: 'v-ess-1m' });
-  // 9.99 x 300, not 30 x 300.
-  assert.deepEqual(f.merchantUpdates, [{ walletBalance: { decrement: 2997 } }]);
+  assert.deepEqual(f.merchantUpdates, [{ walletBalance: { decrement: 2800 } }]);
+  assert.equal(f.saved.chargedAmount, 2800);
+});
+
+test('a pack with no rupee price cannot be bought from a rupee wallet', async () => {
+  const f = fixture({ walletCurrency: 'PKR', balance: 67000 });
+  f.engineStock([
+    { denominationId: 'd10', faceValue: 10, availableCount: 5 },
+    { denominationId: 'd20', faceValue: 20, availableCount: 5 },
+  ]);
+  f.setPreset([
+    { denominationId: 'd10', quantity: 1, denomination: { faceValue: 10 } },
+    { denominationId: 'd20', quantity: 1, denomination: { faceValue: 20 } },
+  ]);
+  await assert.rejects(
+    () => f.service.createFulfillment({ ...order, amount: 9.99, variantId: 'v-ess-1m' }),
+    /PKR has no selling price set for this item/,
+  );
+  assert.deepEqual(f.merchantUpdates, []);
 });
 
 test('an amount-matched order still charges the code value it allocated', async () => {
   // No preset: the codes were chosen to match the amount, so the two agree and
   // the shelf-price rule must not touch this path.
-  const f = fixture({ walletCurrency: 'USD', balance: 500, rate: undefined });
+  const f = fixture({ walletCurrency: 'USD', balance: 500 });
   await f.service.createFulfillment({ ...order });
   assert.deepEqual(f.merchantUpdates, [{ walletBalance: { decrement: 100 } }]);
 });
 
 test('without a preset, a price that matches no combination is still refused', async () => {
-  const f = fixture({ walletCurrency: 'USD', balance: 500, rate: undefined });
+  const f = fixture({ walletCurrency: 'USD', balance: 500 });
   f.engineStock([{ denominationId: 'd10', faceValue: 10, availableCount: 5 }]);
 
   await assert.rejects(
@@ -304,28 +306,15 @@ test('without a preset, a price that matches no combination is still refused', a
   assert.deepEqual(f.merchantUpdates, [], 'no debit for an unfulfillable amount');
 });
 
-test('a wallet is charged the price set for its currency, not a conversion', async () => {
-  // A $100 code sold for PKR 27,500. The rate would make it 30,000; the price
-  // set is what must be charged.
-  const f = fixture({ walletCurrency: 'PKR', balance: 67000, rate: 300, prices: { PKR: 27500 } });
-  await f.service.createFulfillment({ ...order });
-
-  assert.deepEqual(f.merchantUpdates, [{ walletBalance: { decrement: 27500 } }]);
-  assert.equal(f.saved.chargedAmount, 27500);
-  assert.equal(f.saved.chargedCurrency, 'PKR');
-  const debit = f.walletRows.find((row: any) => row.type === 'DEBIT');
-  assert.equal(debit.amount, 27500);
-});
-
 test('the platform still books USD when the wallet pays a set rupee price', async () => {
-  const f = fixture({ walletCurrency: 'PKR', balance: 67000, rate: 300, prices: { PKR: 27500 } });
+  const f = fixture({ walletCurrency: 'PKR', balance: 67000, prices: { PKR: 27500 } });
   await f.service.createFulfillment({ ...order });
   assert.equal(f.revenueRecords.find((r: any) => r.type === 'CREDIT').amount, 100);
 });
 
 test('a set price is enforced on the balance check too', async () => {
   // Holds more than the converted figure would need, but less than the price set.
-  const f = fixture({ walletCurrency: 'PKR', balance: 27000, rate: 300, prices: { PKR: 27500 } });
+  const f = fixture({ walletCurrency: 'PKR', balance: 27000, prices: { PKR: 27500 } });
   await assert.rejects(
     () => f.service.createFulfillment({ ...order }),
     (error: any) => {

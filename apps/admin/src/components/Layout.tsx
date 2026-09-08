@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Package, Database, Upload, FileText,
   ScrollText, UserCog, LogOut, Menu, X, Shield, ChevronRight,
   Wallet, Key, ShoppingCart, Webhook, Store, Gift, Plug, Layers, FolderTree,
-  MessagesSquare, Tags, Mail, ShieldAlert, Coins, BadgeDollarSign,
+  MessagesSquare, Tags, Mail, ShieldAlert, BadgeDollarSign,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth-context';
@@ -28,7 +28,6 @@ const adminNav = [
   { to: '/admin/email-logs', label: 'Email Logs', icon: Mail },
   { to: '/admin/staff', label: 'Staff', icon: UserCog },
   { to: '/admin/prices', label: 'Prices', icon: BadgeDollarSign },
-  { to: '/admin/currency', label: 'Currency & Rates', icon: Coins },
   { to: '/admin/emergency', label: 'Emergency', icon: ShieldAlert },
 ];
 

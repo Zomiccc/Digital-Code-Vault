@@ -24,7 +24,6 @@ export const REQUIRED_SCHEMA: { table: string; column: string }[] = [
   { table: 'FulfillmentRequest', column: 'chargedAmount' },
   { table: 'FulfillmentRequest', column: 'fxRate' },
   { table: 'WalletTransaction', column: 'currency' },
-  { table: 'ExchangeRate', column: 'unitsPerUsd' },
   { table: 'Denomination', column: 'sku' },
   { table: 'Variant', column: 'sku' },
   { table: 'MerchantWallet', column: 'balance' },
@@ -43,14 +42,6 @@ export const REPAIR_STATEMENTS: string[] = [
   `ALTER TABLE "FulfillmentRequest" ADD COLUMN IF NOT EXISTS "chargedAmount" DECIMAL(65,30) NOT NULL DEFAULT 0`,
   `ALTER TABLE "FulfillmentRequest" ADD COLUMN IF NOT EXISTS "fxRate" DECIMAL(65,30) NOT NULL DEFAULT 1`,
   `ALTER TABLE "WalletTransaction" ADD COLUMN IF NOT EXISTS "currency" TEXT NOT NULL DEFAULT 'USD'`,
-  `CREATE TABLE IF NOT EXISTS "ExchangeRate" (
-     "currency" TEXT NOT NULL,
-     "unitsPerUsd" DECIMAL(65,30) NOT NULL,
-     "updatedBy" TEXT,
-     "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-     CONSTRAINT "ExchangeRate_pkey" PRIMARY KEY ("currency")
-   )`,
   `CREATE INDEX IF NOT EXISTS "CodeBatch_denominationId_priority_idx" ON "CodeBatch" ("denominationId", "priority")`,
   `ALTER TABLE "Denomination" ADD COLUMN IF NOT EXISTS "sku" TEXT`,
   `CREATE INDEX IF NOT EXISTS "Denomination_sku_idx" ON "Denomination" ("sku")`,
@@ -105,10 +96,6 @@ export const REPAIR_STATEMENTS: string[] = [
    ON CONFLICT ("merchantId", "currency") DO NOTHING`,
   `CREATE INDEX IF NOT EXISTS "Variant_sku_idx" ON "Variant" ("sku")`,
   // Carry the pre-table USD->PKR rate across so no configured rate is lost.
-  `INSERT INTO "ExchangeRate" ("currency", "unitsPerUsd", "updatedAt")
-   SELECT 'PKR', "value"::decimal, CURRENT_TIMESTAMP FROM "PlatformSetting"
-   WHERE "key" = 'USD_TO_PKR_RATE' AND "value" ~ '^[0-9]+(\\.[0-9]+)?$'
-   ON CONFLICT ("currency") DO NOTHING`,
   // Rebuild batches for admin uploads whose batch insert failed while batchName
   // was missing — the reason batches disappeared from Inventory.
   `INSERT INTO "CodeBatch" ("id", "denominationId", "quantity", "currency", "createdAt")

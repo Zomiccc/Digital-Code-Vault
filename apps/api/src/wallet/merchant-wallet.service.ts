@@ -1,7 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { CurrencyService } from '../currency/currency.service';
 import { normaliseCurrency, roundMoney, BASE_CURRENCY } from '../currency/money';
 
 /** A wallet chosen to pay for an order, with the charge worked out. */
@@ -19,7 +18,7 @@ export type WalletShortfall = {
   balance: number;
   required: number;
   /** `no_rate` covers any currency the order could not be priced in. */
-  reason: 'insufficient' | 'no_rate';
+  reason: 'insufficient' | 'no_price';
 };
 
 /**
@@ -44,7 +43,6 @@ export class MerchantWalletService {
   constructor(
     private prisma: PrismaService,
     private auditService: AuditService,
-    private currencyService: CurrencyService,
   ) {}
 
   /**
@@ -122,7 +120,7 @@ export class MerchantWalletService {
       }
       if (required === null) {
         shortfalls.push({
-          currency: wallet.currency, balance: wallet.balance, required: 0, reason: 'no_rate',
+          currency: wallet.currency, balance: wallet.balance, required: 0, reason: 'no_price',
         });
         continue;
       }
@@ -148,8 +146,8 @@ export class MerchantWalletService {
   describeShortfall(shortfalls: WalletShortfall[]): string {
     if (!shortfalls.length) return 'No wallet is available to charge.';
     const parts = shortfalls.map((entry) =>
-      entry.reason === 'no_rate'
-        ? `${entry.currency} has no price or exchange rate configured`
+      entry.reason === 'no_price'
+        ? `${entry.currency} has no selling price set for this item`
         : `${entry.currency} holds ${entry.balance} of ${entry.required} needed`,
     );
     return `Insufficient wallet balance. ${parts.join('; ')}.`;

@@ -380,8 +380,6 @@ export class WalletService {
   // ─── Reconciliation ───
 
   async getPlatformFinanceOverview() {
-    const usdToPkrRate = (await this.rateFor('PKR')) ?? 280;
-
     // Aggregate merchant balances grouped by currency
     const merchants = await this.prisma.merchant.findMany({
       where: { status: 'ACTIVE' },
@@ -426,28 +424,12 @@ export class WalletService {
       fulfillment_revenue: Number(fulfillmentRevenue._sum.amount) || 0,
       funding_disbursed: Number(fundingDisbursed._sum.amount) || 0,
       active_merchant_count: activeMerchantCount,
-      usd_to_pkr_rate: usdToPkrRate,
     };
   }
 
   /** Kept for the existing Finance screen; PKR is one row in the rate table. */
-  async updateExchangeRate(rate: number, adminId: string) {
-    if (rate <= 0) throw new BadRequestException('Exchange rate must be greater than 0');
-    await this.prisma.exchangeRate.upsert({
-      where: { currency: 'PKR' },
-      create: { currency: 'PKR', unitsPerUsd: rate, updatedBy: adminId },
-      update: { unitsPerUsd: rate, updatedBy: adminId },
-    });
-    this.logger.log(`USD to PKR rate updated to ${rate} by admin ${adminId}`);
-    return { key: 'USD_TO_PKR_RATE', value: String(rate) };
-  }
 
   /** Units per USD for one currency, or undefined when no rate is configured. */
-  private async rateFor(currency: string): Promise<number | undefined> {
-    if (currency === 'USD') return 1;
-    const row = await this.prisma.exchangeRate.findUnique({ where: { currency } });
-    return row ? Number(row.unitsPerUsd) : undefined;
-  }
 
   async getReconciliationReport(limit = 100, offset = 0) {
     const [fulfillments, total] = await Promise.all([
@@ -629,30 +611,11 @@ export class WalletService {
       });
     }
 
-    const usdToPkrRate = (await this.rateFor('PKR')) ?? 280;
-
-    // Compute grand totals in USD and PKR
-    let totalUsd = 0;
-    let totalPkr = 0;
-    for (const [cur, data] of Object.entries(byCurrency)) {
-      if (cur === 'USD') {
-        totalUsd += data.total_cost;
-        totalPkr += data.total_cost * usdToPkrRate;
-      } else if (cur === 'PKR') {
-        totalPkr += data.total_cost;
-        totalUsd += data.total_cost / usdToPkrRate;
-      } else {
-        // Other currencies treated as USD equivalent for now
-        totalUsd += data.total_cost;
-        totalPkr += data.total_cost * usdToPkrRate;
-      }
-    }
-
+    // Cost is reported per currency and never summed across them. Adding a
+    // rupee batch to a dollar batch needs a rate, and a made-up rate produced a
+    // "total" that was true in neither currency.
     return {
       by_currency: byCurrency,
-      total_usd: totalUsd,
-      total_pkr: totalPkr,
-      usd_to_pkr_rate: usdToPkrRate,
       total_batches: batches.length,
       total_codes: batches.reduce((sum, b) => sum + b.quantity, 0),
     };

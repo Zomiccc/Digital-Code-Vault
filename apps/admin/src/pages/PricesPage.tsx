@@ -230,8 +230,9 @@ const SELLING_CURRENCIES = ['USD', 'PKR'] as const;
  * Cost lives on the batch, in whatever currency that batch was bought in. This
  * is the other side: what the item sells for, set independently per currency. A
  * $100 code can sell for $101 and for 27,500 rupees, and 27,500 is not 101 times
- * a rate — so each field is entered rather than derived. A currency left blank
- * falls back to converting the item's own price, shown as the placeholder.
+ * a rate — so each field is entered, never derived. A currency left blank means
+ * the item is not sold in it: a merchant paying from that balance is turned
+ * away rather than charged a guessed figure.
  */
 function PriceRow({
   itemType, itemId, label, secondary, sku, value, currency, onSaved,
@@ -332,7 +333,17 @@ function CurrencyPriceField({
         )}
       </div>
       {amount === null && (
-        <p className="text-xs text-muted-foreground">Not set — converted at your rate.</p>
+        fallback !== null
+          ? (
+            <p className="text-xs text-muted-foreground">
+              Not set — sells at its own value of {fallback}.
+            </p>
+          )
+          : (
+            <p className="text-xs text-amber-500">
+              Not set — cannot be sold in {currency}.
+            </p>
+          )
       )}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </div>
