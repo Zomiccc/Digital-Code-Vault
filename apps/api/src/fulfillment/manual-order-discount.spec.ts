@@ -294,8 +294,30 @@ test('controller validates before creating a platform merchant and forwards orig
 test('a rupee charge against a dollar order value is recorded as entered', () => {
   // 2,800 rupees on a $10 order used to be refused for exceeding "10". Nothing
   // is compared now — the charge is simply what the admin typed.
-  assert.equal(manualOrderPricing(10, 2800).charge_amount, 2800);
-  assert.equal(manualOrderPricing(10, 30000).charge_amount, 30000);
+  assert.equal(manualOrderPricing(10, 2800, false).charge_amount, 2800);
+  assert.equal(manualOrderPricing(10, 30000, false).charge_amount, 30000);
+});
+
+test('a charge in another currency is not turned into a discount', () => {
+  // 45,000 rupees for a $170 order was recorded as a discount of -44,830,
+  // which the order list then showed as a dollar figure. Rupees cannot be
+  // subtracted from dollars, so there is no discount to report.
+  const priced = manualOrderPricing(170, 45000, false);
+  assert.equal(priced.charge_amount, 45000);
+  assert.equal(priced.discount_amount, 0);
+  assert.equal(priced.original_amount, 170);
+});
+
+test('a discount is still worked out when both figures are the same currency', () => {
+  const discounted = manualOrderPricing(80, 77, true);
+  assert.deepEqual(
+    [discounted.charge_amount, discounted.discount_amount],
+    [77, 3],
+  );
+  // A charge above the order value reads as a markup, not a negative discount.
+  assert.equal(manualOrderPricing(80, 90, true).discount_amount, -10);
+  // Same currency is the default, so an omitted flag keeps the old behaviour.
+  assert.equal(manualOrderPricing(80, 77).discount_amount, 3);
 });
 
 test('charging more than the order value is recorded as a markup, not refused', () => {

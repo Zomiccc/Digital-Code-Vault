@@ -69,7 +69,9 @@ export class FulfillmentService {
     // and no comparison against the order value.
     const orderCurrency = normaliseCurrency(currency || 'USD');
     const chargeCurrency = normaliseCurrency(params.chargeCurrency || orderCurrency);
-    const pricing = actorType === 'ADMIN' ? manualOrderPricing(amount, params.chargeAmount) : undefined;
+    const pricing = actorType === 'ADMIN'
+      ? manualOrderPricing(amount, params.chargeAmount, chargeCurrency === orderCurrency)
+      : undefined;
     // The platform's own ledger is kept in USD. A sale charged in another
     // currency is recorded on the order in that currency - which is all that
     // was asked for - and adds nothing to the USD ledger, because there is no

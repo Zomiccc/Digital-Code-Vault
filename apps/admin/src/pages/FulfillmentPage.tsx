@@ -283,7 +283,8 @@ export function FulfillmentPage() {
               <Th>Merchant</Th>
               <Th>Merchant Address</Th>
               <Th>Product</Th>
-              <Th>Original / Net Price</Th>
+              <Th>Order value</Th>
+              <Th>Charged</Th>
               <Th>Status</Th>
               <Th>Customer Address</Th>
               <Th>Created</Th>
@@ -297,18 +298,12 @@ export function FulfillmentPage() {
                 <Td className="font-medium">{req.merchant?.name}</Td>
                 <Td><AddressWithMapsLink address={req.merchant?.address} /></Td>
                 <Td className="text-muted-foreground">{req.product?.name}</Td>
-                <Td className="font-medium">
-                  {formatPrice(req.amount, req.currency)}
-                  {Number(req.discountAmount) > 0 && (
-                    <div className="text-xs text-muted-foreground">
-                      Discount: {formatPrice(req.discountAmount, req.currency)}<br />
-                      Net: {formatPrice((Math.round(Number(req.amount) * 100) - Math.round(Number(req.discountAmount) * 100)) / 100, req.currency)}
-                    </div>
-                  )}
-                </Td>
+                <Td className="font-medium">{formatPrice(req.amount, req.currency)}</Td>
+                <ChargedCell req={req} />
                 <Td><Badge className={statusColor(req.status)}>{req.status}</Badge></Td>
                 <Td><AddressWithMapsLink address={req.customer_address} /></Td>
-                <Td className="text-muted-foreground">{formatDate(req.createdAt)}</Td>
+                {/* The API returns created_at; reading createdAt left this blank. */}
+                <Td className="text-muted-foreground">{formatDate(req.created_at)}</Td>
                 <Td className="text-right">
                   {(req.status === 'ALLOCATED' || req.status === 'PENDING') && (
                     <Button variant="outline" size="sm" onClick={() => setReverseItem(req)}>
@@ -320,7 +315,7 @@ export function FulfillmentPage() {
             ))}
             {(!data?.items || data.items.length === 0) && (
               <tr>
-                <Td colSpan={9} className="py-12 text-center text-muted-foreground">
+                <Td colSpan={10} className="py-12 text-center text-muted-foreground">
                   No fulfillment requests yet.
                 </Td>
               </tr>
@@ -353,5 +348,45 @@ export function FulfillmentPage() {
         </div>
       </Modal>
     </div>
+  );
+}
+
+/**
+ * What was actually taken for this order, in the currency it was taken in.
+ *
+ * A manual sale is priced by hand — an admin can charge 45,000 rupees for a
+ * $170 order — and the only record of that figure was buried on the order row.
+ * The discount underneath is shown only when the charge and the order value are
+ * in the same currency, because rupees minus dollars is not a discount.
+ */
+function ChargedCell({ req }: { req: any }) {
+  const charged = Number(req.chargedAmount ?? 0);
+  if (!charged) {
+    return <Td className="text-muted-foreground">—</Td>;
+  }
+
+  const currency = req.chargedCurrency || req.currency;
+  const sameCurrency = currency === req.currency;
+  const difference = sameCurrency
+    ? (Math.round(Number(req.amount) * 100) - Math.round(charged * 100)) / 100
+    : 0;
+
+  return (
+    <Td className="font-medium">
+      {formatPrice(charged, currency)}
+      {!sameCurrency && (
+        <div className="text-xs text-muted-foreground">charged in {currency}</div>
+      )}
+      {difference > 0 && (
+        <div className="text-xs text-emerald-500">
+          Discount {formatPrice(difference, currency)}
+        </div>
+      )}
+      {difference < 0 && (
+        <div className="text-xs text-amber-500">
+          Markup {formatPrice(Math.abs(difference), currency)}
+        </div>
+      )}
+    </Td>
   );
 }

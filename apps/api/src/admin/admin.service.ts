@@ -147,6 +147,11 @@ export class AdminService {
         amount: r.amount,
         discountAmount: r.discountAmount,
         netAmount: (Math.round(Number(r.amount) * 100) - Math.round(Number(r.discountAmount) * 100)) / 100,
+        // What was actually taken, in the currency it was taken in. A manual
+        // sale charged in rupees is the whole reason this is recorded, and the
+        // order list is where an admin goes looking for it.
+        chargedAmount: r.chargedAmount,
+        chargedCurrency: r.chargedCurrency,
         walletCharged: r.walletCharged,
         currency: r.currency,
         status: r.status,
