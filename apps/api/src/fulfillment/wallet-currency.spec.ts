@@ -53,7 +53,7 @@ function fixture(options: {
       })),
     },
     variant: { findUnique: async () => ({ id: 'v-ess-1m', customerPrice: 9.99, currency: 'USD' }) },
-    product: { findUnique: async () => ({ id: 'product', name: 'Code', status: 'ACTIVE', productType: 'NORMAL' }) },
+    product: { findUnique: async () => ({ id: 'product', name: 'Code', status: 'ACTIVE' }) },
     fulfillmentRequest: {
       findUnique: async () => saved,
       create: async ({ data }: any) => saved = { ...data, id: 'order', createdAt: new Date(), allocations: [] },

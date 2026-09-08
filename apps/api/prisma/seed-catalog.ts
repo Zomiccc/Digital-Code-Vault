@@ -305,7 +305,6 @@ async function ensureProduct(seed: ProductSeed, categoryId: string) {
       region: REGIONS[seed.regionCode].code,
       categoryId,
       status: seed.active === false ? 'INACTIVE' : 'ACTIVE',
-      productType: (seed.variants?.length ?? 0) > 0 ? 'ESSENTIALS' : 'NORMAL',
     },
   });
 }

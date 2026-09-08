@@ -228,7 +228,6 @@ model Product {
   id         String   @id @default(uuid())
   name       String
   region     String
-  productType String  @default("NORMAL") // NORMAL | ESSENTIALS
   sku        String?  // Optional SKU for auto-matching incoming webhook orders
   categoryId String?
   supplierId String?
@@ -244,30 +243,10 @@ model Product {
   fulfillmentReqs FulfillmentRequest[]
   connectedProducts ConnectedProduct[] @relation("ConnectedProductDcvProduct")
   productRegions ProductRegion[]
-  essentialsDeliveryItems EssentialsDeliveryItem[]
 
   @@index([merchantId])
   @@index([categoryId])
   @@index([sku])
-}
-
-// Essentials delivery rule: a reusable, denomination-based fulfillment configuration.
-// The admin defines WHICH denominations and HOW MANY of each are required — e.g.
-// "$10 x1 + $20 x1". At purchase time, the system automatically selects ANY available
-// code(s) matching each required denomination — the admin never picks individual codes.
-model EssentialsDeliveryItem {
-  id             String   @id @default(uuid())
-  productId      String
-  denominationId String
-  quantity       Int      @default(1)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  product      Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
-  denomination Denomination @relation(fields: [denominationId], references: [id], onDelete: Cascade)
-
-  @@unique([productId, denominationId])
-  @@index([productId])
 }
 
 model Denomination {
@@ -283,7 +262,6 @@ model Denomination {
   product   Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
   codeItems CodeItem[]
   combinationItems FulfillmentCombinationItem[]
-  essentialsDeliveryItems EssentialsDeliveryItem[]
   codeBatches CodeBatch[]
 
   @@unique([productId, faceValue, currency])

@@ -95,10 +95,6 @@ export class CreateProductDto {
   supplier_id?: string;
 
   @IsOptional()
-  @IsIn(['NORMAL', 'ESSENTIALS'])
-  product_type?: string;
-
-  @IsOptional()
   @IsString()
   category_id?: string;
 

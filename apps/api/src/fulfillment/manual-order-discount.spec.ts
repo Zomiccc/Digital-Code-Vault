@@ -23,7 +23,7 @@ function fixture() {
   const prisma: any = {
     platformSetting: { findUnique: async () => null },
     merchant: { findUnique: async () => merchant },
-    product: { findUnique: async () => ({ id: 'product', name: 'Code', status: 'ACTIVE', productType: 'NORMAL' }) },
+    product: { findUnique: async () => ({ id: 'product', name: 'Code', status: 'ACTIVE' }) },
     fulfillmentRequest: {
       findUnique: async () => saved,
       create: async ({ data }: any) => saved = { ...data, id: 'order', createdAt: new Date(), allocations: [] },

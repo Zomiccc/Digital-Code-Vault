@@ -139,7 +139,7 @@ export class ProductsService {
     return { sku: uniqueSku(base, taken.map((p) => p.sku!)) };
   }
 
-  async createProduct(data: { name: string; region: string; supplierId?: string; productType?: string; categoryId?: string; sku?: string }) {
+  async createProduct(data: { name: string; region: string; supplierId?: string; categoryId?: string; sku?: string }) {
     // Every product gets a SKU, because it is what matches incoming storefront
     // orders to this product. An explicit one is respected; otherwise one is
     // generated, and either way a collision is resolved rather than rejected.
@@ -155,7 +155,6 @@ export class ProductsService {
         name: data.name,
         region: data.region,
         supplierId: data.supplierId,
-        productType: data.productType || 'NORMAL',
         categoryId: data.categoryId || null,
         sku,
       },
@@ -196,15 +195,6 @@ export class ProductsService {
     });
   }
 
-  async updateProductType(productId: string, productType: string) {
-    if (!['NORMAL', 'ESSENTIALS'].includes(productType)) {
-      throw new Error('Invalid productType. Must be NORMAL or ESSENTIALS.');
-    }
-    return this.prisma.product.update({
-      where: { id: productId },
-      data: { productType },
-    });
-  }
 
   /**
    * Change what a code value is worth, and in which currency.

@@ -20,7 +20,6 @@ interface MockProduct {
   region: string;
   sku: string | null;
   status: string;
-  productType: string;
 }
 
 interface MockConnectedProduct {
@@ -232,7 +231,7 @@ async function main() {
   await test('SKU auto-match: webhook SKU matches a DCV Product.sku', async () => {
     const prisma = new MockPrisma();
     prisma.products = [
-      { id: 'prod-1', name: 'PSN USA', region: 'USA', sku: 'PSN-USA-10', status: 'ACTIVE', productType: 'NORMAL' },
+      { id: 'prod-1', name: 'PSN USA', region: 'USA', sku: 'PSN-USA-10', status: 'ACTIVE' },
     ];
     prisma.connectedProducts = [];
     prisma.incomingWebhooks = [{ id: 'wh-1', merchantId: 'm-1', processingStatus: 'PENDING', errorMessage: null }];
@@ -261,7 +260,7 @@ async function main() {
   await test('SKU present but no DCV product matches — should reject', async () => {
     const prisma = new MockPrisma();
     prisma.products = [
-      { id: 'prod-1', name: 'PSN USA', region: 'USA', sku: 'PSN-USA-10', status: 'ACTIVE', productType: 'NORMAL' },
+      { id: 'prod-1', name: 'PSN USA', region: 'USA', sku: 'PSN-USA-10', status: 'ACTIVE' },
     ];
     prisma.connectedProducts = [];
 
@@ -281,7 +280,7 @@ async function main() {
   await test('No SKU + no existing mapping — should reject', async () => {
     const prisma = new MockPrisma();
     prisma.products = [
-      { id: 'prod-1', name: 'PSN USA', region: 'USA', sku: 'PSN-USA-10', status: 'ACTIVE', productType: 'NORMAL' },
+      { id: 'prod-1', name: 'PSN USA', region: 'USA', sku: 'PSN-USA-10', status: 'ACTIVE' },
     ];
     prisma.connectedProducts = [];
 
@@ -300,7 +299,7 @@ async function main() {
   await test('Repeat order for already-mapped product — fulfills via explicit mapping', async () => {
     const prisma = new MockPrisma();
     prisma.products = [
-      { id: 'prod-1', name: 'PSN USA', region: 'USA', sku: 'PSN-USA-10', status: 'ACTIVE', productType: 'NORMAL' },
+      { id: 'prod-1', name: 'PSN USA', region: 'USA', sku: 'PSN-USA-10', status: 'ACTIVE' },
     ];
     prisma.connectedProducts = [
       {
@@ -335,7 +334,7 @@ async function main() {
   await test('Repeat order with no SKU but platformProductId mapping exists — fulfills', async () => {
     const prisma = new MockPrisma();
     prisma.products = [
-      { id: 'prod-2', name: 'Steam USA', region: 'USA', sku: null, status: 'ACTIVE', productType: 'NORMAL' },
+      { id: 'prod-2', name: 'Steam USA', region: 'USA', sku: null, status: 'ACTIVE' },
     ];
     prisma.connectedProducts = [
       {
@@ -368,7 +367,7 @@ async function main() {
   await test('SKU auto-match: similar but not exact SKU does not match', async () => {
     const prisma = new MockPrisma();
     prisma.products = [
-      { id: 'prod-1', name: 'PSN USA', region: 'USA', sku: 'PSN-USA-10', status: 'ACTIVE', productType: 'NORMAL' },
+      { id: 'prod-1', name: 'PSN USA', region: 'USA', sku: 'PSN-USA-10', status: 'ACTIVE' },
     ];
 
     const result = await matchProduct(
@@ -386,7 +385,7 @@ async function main() {
   await test('Auto-match persists: second order for same SKU uses explicit mapping', async () => {
     const prisma = new MockPrisma();
     prisma.products = [
-      { id: 'prod-1', name: 'PSN USA', region: 'USA', sku: 'PSN-USA-10', status: 'ACTIVE', productType: 'NORMAL' },
+      { id: 'prod-1', name: 'PSN USA', region: 'USA', sku: 'PSN-USA-10', status: 'ACTIVE' },
     ];
     prisma.connectedProducts = [
       {

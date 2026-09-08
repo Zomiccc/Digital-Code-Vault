@@ -142,8 +142,6 @@ export const api = {
   listProducts: () => apiFetch('/admin/products'),
   createProduct: (data: any) =>
     apiFetch('/admin/products', { method: 'POST', body: JSON.stringify(data) }),
-  updateProductType: (productId: string, productType: string) =>
-    apiFetch(`/admin/products/${productId}/type`, { method: 'PATCH', body: JSON.stringify({ product_type: productType }) }),
   updateProductCategory: (productId: string, categoryId: string | null) =>
     apiFetch(`/admin/products/${productId}/category`, { method: 'PATCH', body: JSON.stringify({ category_id: categoryId }) }),
   listSkus: (search?: string) =>

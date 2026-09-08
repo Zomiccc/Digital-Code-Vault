@@ -206,7 +206,6 @@ export class AdminController {
       region: body.region,
       supplierId: body.supplier_id,
       categoryId: body.category_id,
-      productType: body.product_type,
       sku: body.sku,
     });
   }
@@ -284,12 +283,6 @@ export class AdminController {
   @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
   async updateProductSku(@Param('id') id: string, @Body() body: { sku?: string | null }) {
     return this.productsService.updateProductSku(id, body.sku || null);
-  }
-
-  @Patch('products/:id/type')
-  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
-  async updateProductType(@Param('id') id: string, @Body() body: { product_type: string }) {
-    return this.productsService.updateProductType(id, body.product_type);
   }
 
   @Patch('products/:id/category')
