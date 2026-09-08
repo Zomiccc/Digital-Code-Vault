@@ -170,26 +170,35 @@ export function FulfillmentPage() {
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Quick pick
               </label>
+              {/* Every value is orderable, whatever its own stock. A $150 order
+                  with no $150 codes left is filled from three $50s, so striking
+                  those values out and refusing the click was simply wrong — it
+                  hid orders that go through perfectly well. The count is a hint
+                  about which single code is on the shelf, nothing more. */}
               <div className="flex flex-wrap gap-2">
                 {selectedProductDenominations.map((d: any) => {
                   const left = d.available_stock ?? 0;
+                  const selected = orderForm.amount === String(Number(d.face_value));
                   return (
                     <button
                       key={d.id}
                       type="button"
-                      disabled={left === 0}
-                      title={left === 0 ? 'No codes left at this value' : `${left} code(s) available`}
+                      title={left > 0
+                        ? `${left} code(s) of this value available`
+                        : 'No code of this value — the order is made up from other codes'}
                       onClick={() => setOrderForm({ ...orderForm, amount: String(Number(d.face_value)) })}
                       className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                        left === 0
-                          ? 'cursor-not-allowed bg-muted text-muted-foreground line-through opacity-60'
-                          : orderForm.amount === String(Number(d.face_value))
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                        selected
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
                       }`}
                     >
                       {formatPrice(d.face_value, d.currency)}
-                      <span className="ml-1.5 text-xs opacity-70">{left} left</span>
+                      {left > 0 && (
+                        <span className={`ml-1.5 text-xs ${selected ? 'opacity-80' : 'opacity-60'}`}>
+                          {left}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -197,7 +206,7 @@ export function FulfillmentPage() {
               <p className="text-xs text-muted-foreground">
                 {inStock.length === 0
                   ? 'No codes are in stock for this product — upload some before ordering.'
-                  : `Struck-through values have no codes left. In stock altogether: ${formatPrice(stockTotal, orderValueCurrency)}.`}
+                  : `The small number is how many codes of that exact value are left; a value with none is made up from other codes. In stock altogether: ${formatPrice(stockTotal, orderValueCurrency)}.`}
               </p>
             </div>
           )}
