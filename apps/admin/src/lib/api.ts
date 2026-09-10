@@ -109,15 +109,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     }),
-  merchantRegister: (data: {
-    name: string; email: string; password: string;
-    firstName: string; lastName: string; phone: string;
-    idDocType: string; idFrontImage: string; idBackImage: string; businessNtn: string;
-  }) =>
-    apiFetch('/auth/merchant/register', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
   customerLogin: (email: string, password: string) =>
     apiFetch('/auth/customer/login', {
       method: 'POST',
@@ -490,8 +481,6 @@ export const api = {
     apiFetch(`/admin/connected-products/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   adminDeleteConnectedProduct: (id: string) =>
     apiFetch(`/admin/connected-products/${id}`, { method: 'DELETE' }),
-  adminUpdateMerchantCurrency: (id: string, currency: string) =>
-    apiFetch(`/admin/merchants/${id}/currency`, { method: 'PATCH', body: JSON.stringify({ currency }) }),
   adminListEmailLogs: (params?: { limit?: number; status?: string; recipient?: string }) => {
     const qs = new URLSearchParams();
     if (params?.limit) qs.set('limit', String(params.limit));

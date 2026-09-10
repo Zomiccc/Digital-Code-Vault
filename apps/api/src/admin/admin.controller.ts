@@ -99,6 +99,22 @@ export class AdminController {
   }
 
 
+  /**
+   * Every price set for one item.
+   *
+   * This route did not exist: the Prices screen asked for it on every render
+   * and got a 404, so no price ever appeared and saving one looked like it did
+   * nothing — the save worked, and the re-read that would have shown it 404'd.
+   */
+  @Get('prices/:itemType/:itemId')
+  @Roles('SUPER_ADMIN', 'FINANCE', 'INVENTORY_MANAGER', 'SUPPORT')
+  async listSellingPrices(
+    @Param('itemType') itemType: string,
+    @Param('itemId') itemId: string,
+  ) {
+    return this.sellingPriceService.listPrices(this.assertPricedItem(itemType), itemId);
+  }
+
   @Put('prices/:itemType/:itemId/:currency')
   @Roles('SUPER_ADMIN', 'FINANCE', 'INVENTORY_MANAGER')
   async setSellingPrice(
