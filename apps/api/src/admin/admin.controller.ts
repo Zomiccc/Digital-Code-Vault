@@ -210,6 +210,18 @@ export class AdminController {
     });
   }
 
+  @Delete('products/:id')
+  @Roles('SUPER_ADMIN')
+  async deleteProduct(@Param('id') id: string, @CurrentUser() user: any, @Req() req: any) {
+    return this.productsService.deleteProduct(id, user?.id, req.ip);
+  }
+
+  @Delete('denominations/:id')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async deleteDenomination(@Param('id') id: string, @CurrentUser() user: any, @Req() req: any) {
+    return this.productsService.deleteDenomination(id, user?.id, req.ip);
+  }
+
   // ─── SKUs (products and their denominations) ───
 
   @Get('skus')

@@ -199,3 +199,87 @@ test('an unknown denomination is reported rather than created', async () => {
     /Denomination not found/,
   );
 });
+
+// ─── Deleting a value or a product ───
+
+/**
+ * CodeItem cascades from Denomination and Denomination from Product, so an
+ * unguarded delete quietly takes stored codes with it. These fixtures count
+ * what is in the way and assert nothing is written when something is.
+ */
+function deleteFixture(counts: {
+  codes?: number; ruleItems?: number; orders?: number; connected?: number;
+} = {}) {
+  const deleted: string[] = [];
+  const prisma: any = {
+    denomination: {
+      findUnique: async () => ({ id: 'd1', faceValue: 10, currency: 'USD', product: { name: 'PSN USA' } }),
+      findMany: async () => [{ id: 'd1' }],
+      delete: async ({ where }: any) => { deleted.push(`denomination:${where.id}`); return {}; },
+    },
+    product: {
+      findUnique: async () => ({ id: 'p1', name: 'PSN USA', region: 'USA' }),
+      delete: async ({ where }: any) => { deleted.push(`product:${where.id}`); return {}; },
+    },
+    variant: { findMany: async () => [] },
+    codeItem: { count: async () => counts.codes ?? 0 },
+    fulfillmentCombinationItem: { count: async () => counts.ruleItems ?? 0 },
+    fulfillmentRequest: { count: async () => counts.orders ?? 0 },
+    connectedProduct: { count: async () => counts.connected ?? 0 },
+    sellingPrice: { deleteMany: async () => { deleted.push('prices'); return {}; } },
+    $transaction: async (fn: any) => fn(prisma),
+  };
+  const sut = new ProductsService(prisma, {} as any, audit());
+  return { sut, deleted };
+}
+
+test('an empty code value is deleted, and its prices go with it', async () => {
+  const f = deleteFixture();
+  assert.deepEqual(await f.sut.deleteDenomination('d1', 'admin-1'), { id: 'd1', deleted: true });
+  assert.deepEqual(f.deleted, ['prices', 'denomination:d1']);
+});
+
+test('a value still holding codes is refused, and nothing is written', async () => {
+  // The codes cascade, so deleting would erase what customers were sent.
+  const f = deleteFixture({ codes: 12 });
+  await assert.rejects(() => f.sut.deleteDenomination('d1', 'admin-1'), /still holds 12 code/);
+  assert.deepEqual(f.deleted, []);
+});
+
+test('a value a delivery rule hands out is refused', async () => {
+  const f = deleteFixture({ ruleItems: 2 });
+  await assert.rejects(() => f.sut.deleteDenomination('d1', 'admin-1'), /2 delivery rule/);
+  assert.deepEqual(f.deleted, []);
+});
+
+test('a product with no history is deleted', async () => {
+  const f = deleteFixture();
+  assert.deepEqual(await f.sut.deleteProduct('p1', 'admin-1'), { id: 'p1', deleted: true });
+  assert.deepEqual(f.deleted, ['prices', 'product:p1']);
+});
+
+test('a product with orders is refused rather than erasing what was delivered', async () => {
+  const f = deleteFixture({ orders: 7 });
+  await assert.rejects(() => f.sut.deleteProduct('p1', 'admin-1'), /7 order\(s\)/);
+  assert.deepEqual(f.deleted, []);
+});
+
+test('a product still holding codes, or linked to a storefront, is refused', async () => {
+  const withCodes = deleteFixture({ codes: 3 });
+  await assert.rejects(() => withCodes.sut.deleteProduct('p1', 'admin-1'), /3 code\(s\)/);
+  assert.deepEqual(withCodes.deleted, []);
+
+  const linked = deleteFixture({ connected: 1 });
+  await assert.rejects(() => linked.sut.deleteProduct('p1', 'admin-1'), /1 storefront product/);
+  assert.deepEqual(linked.deleted, []);
+});
+
+test('deleting something that is not there is reported, not silently ignored', async () => {
+  const prisma: any = {
+    denomination: { findUnique: async () => null },
+    product: { findUnique: async () => null },
+  };
+  const sut = new ProductsService(prisma, {} as any, audit());
+  await assert.rejects(() => sut.deleteDenomination('nope'), /Denomination not found/);
+  await assert.rejects(() => sut.deleteProduct('nope'), /Product not found/);
+});

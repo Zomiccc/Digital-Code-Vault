@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo } from 'react';
-import { Plus, Package, Tags, Download } from 'lucide-react';
+import { Plus, Package, Tags, Download, Trash2, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Input, Select, Modal, Badge, Table, Th, Td } from '@/components/ui';
 import { statusColor, formatPrice } from '@/lib/utils';
@@ -16,6 +16,8 @@ export function ProductsPage() {
   const [skuGenResult, setSkuGenResult] = useState<any>(null);
   const [form, setForm] = useState({ name: '', region: '', supplierId: '', category_id: '', sku: '' });
   const [denomValue, setDenomValue] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<any>(null);
+  const [deleteError, setDeleteError] = useState('');
 
   // Preview the SKU the product will get, so it is visible before creating it.
   const { data: suggestedSku } = useQuery({
@@ -46,6 +48,28 @@ export function ProductsPage() {
       setShowDenom(null);
       setDenomValue('');
     },
+  });
+
+  // A value is deleted from its own chip; a product from its card. Both refuse
+  // server-side when there is history behind them, and that refusal is what the
+  // admin needs to read, so it is shown rather than swallowed.
+  const deleteDenomination = useMutation({
+    mutationFn: (denominationId: string) => api.deleteDenomination(denominationId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      setDeleteError('');
+    },
+    onError: (err: any) => setDeleteError(err.message),
+  });
+
+  const deleteProduct = useMutation({
+    mutationFn: (productId: string) => api.deleteProduct(productId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      setConfirmDelete(null);
+      setDeleteError('');
+    },
+    onError: (err: any) => setDeleteError(err.message),
   });
 
   if (isLoading) {
@@ -86,20 +110,45 @@ export function ProductsPage() {
               </div>
               <div className="flex flex-col gap-2">
                 <Button variant="outline" size="sm" onClick={() => setShowDenom(p)}>Add Denom</Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setDeleteError(''); setConfirmDelete(p); }}
+                >
+                  <Trash2 className="mr-1 h-3 w-3" /> Delete
+                </Button>
               </div>
             </div>
 
             {p.denominations && p.denominations.length > 0 && (
               <div className="mt-5 flex flex-wrap gap-2">
                 {p.denominations.map((d: any) => (
-                  <Badge key={d.id} className="bg-secondary text-secondary-foreground">
+                  <Badge key={d.id} className="group bg-secondary text-secondary-foreground">
                     {formatPrice(d.faceValue, d.currency)} <span className="ml-1 text-xs opacity-60">({d.availableCount ?? 0})</span>
+                    <button
+                      type="button"
+                      aria-label={`Delete the ${formatPrice(d.faceValue, d.currency)} value`}
+                      title="Delete this value"
+                      disabled={deleteDenomination.isPending}
+                      onClick={() => {
+                        setDeleteError('');
+                        deleteDenomination.mutate(d.id);
+                      }}
+                      className="ml-1.5 rounded p-0.5 opacity-40 transition-opacity hover:bg-destructive/20 hover:text-destructive hover:opacity-100"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
                   </Badge>
                 ))}
               </div>
             )}
             {(!p.denominations || p.denominations.length === 0) && (
               <p className="mt-5 text-xs text-muted-foreground">No denominations configured</p>
+            )}
+
+            {deleteError && deleteDenomination.variables &&
+              p.denominations?.some((d: any) => d.id === deleteDenomination.variables) && (
+              <p role="alert" className="mt-3 text-xs text-destructive">{deleteError}</p>
             )}
 
             {/* Which codes a product delivers is set on the Delivery Rules
@@ -109,6 +158,41 @@ export function ProductsPage() {
           </Card>
         ))}
       </div>
+
+      <Modal
+        open={!!confirmDelete}
+        onClose={() => { setConfirmDelete(null); setDeleteError(''); }}
+        title="Delete this product?"
+      >
+        <div className="space-y-4">
+          <p className="text-sm">
+            <span className="font-semibold">{confirmDelete?.name}</span>
+            {confirmDelete?.region ? ` (${confirmDelete.region})` : ''} will be deleted, along with
+            its code values, regions and packs.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            A product with orders against it, or with codes still stored, cannot be deleted — that
+            history has to stay. You will be told which it is.
+          </p>
+          {deleteError && <p role="alert" className="text-sm text-destructive">{deleteError}</p>}
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              className="flex-1"
+              onClick={() => { setConfirmDelete(null); setDeleteError(''); }}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="flex-1 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteProduct.isPending}
+              onClick={() => deleteProduct.mutate(confirmDelete.id)}
+            >
+              {deleteProduct.isPending ? 'Deleting...' : 'Delete product'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create Product">
         <div className="space-y-4">

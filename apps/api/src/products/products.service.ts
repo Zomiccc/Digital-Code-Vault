@@ -127,6 +127,130 @@ export class ProductsService {
   }
 
   /**
+   * Delete a code value, but only while nothing has ever been stored in it.
+   *
+   * CodeItem cascades from Denomination, so an unguarded delete would take
+   * every code with it — including sold and delivered ones, and with them the
+   * record of what a customer was given. A value holding codes is therefore
+   * refused, naming what is in the way, and the codes have to be dealt with
+   * first.
+   */
+  async deleteDenomination(denominationId: string, adminId?: string, ip?: string) {
+    const denomination = await this.prisma.denomination.findUnique({
+      where: { id: denominationId },
+      include: { product: { select: { name: true } } },
+    });
+    if (!denomination) throw new NotFoundException('Denomination not found');
+
+    const [codes, ruleItems] = await Promise.all([
+      this.prisma.codeItem.count({ where: { denominationId } }),
+      this.prisma.fulfillmentCombinationItem.count({ where: { denominationId } }),
+    ]);
+
+    if (codes > 0) {
+      throw new BadRequestException(
+        `This value still holds ${codes} code(s). Remove or use them up before deleting it, ` +
+        `otherwise their history goes with it.`,
+      );
+    }
+    if (ruleItems > 0) {
+      throw new BadRequestException(
+        `${ruleItems} delivery rule(s) hand out this value. Change those rules first, ` +
+        `or they would silently stop working.`,
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      // Prices are addressed by id rather than by a foreign key, so nothing
+      // cleans them up on their own; a later value reusing the id would
+      // inherit them.
+      await tx.sellingPrice.deleteMany({
+        where: { itemType: 'DENOMINATION', itemId: denominationId },
+      });
+      await tx.denomination.delete({ where: { id: denominationId } });
+    });
+
+    if (adminId) {
+      await this.auditService.log({
+        actorType: 'ADMIN', actorId: adminId, action: 'denomination.delete',
+        entity: 'Denomination', entityId: denominationId,
+        metadata: {
+          product: denomination.product?.name,
+          faceValue: Number(denomination.faceValue),
+          currency: denomination.currency,
+        },
+        ip,
+      });
+    }
+    return { id: denominationId, deleted: true };
+  }
+
+  /**
+   * Delete a product, but only while it has no history worth keeping.
+   *
+   * Denominations, regions and packs cascade from a product, and codes cascade
+   * from those, so this is a wide delete. An order that ever referenced the
+   * product blocks it outright — the database would refuse anyway, with a
+   * foreign-key error nobody can read — and so does any stored code.
+   */
+  async deleteProduct(productId: string, adminId?: string, ip?: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { id: true, name: true, region: true },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+
+    const [orders, codes, connected] = await Promise.all([
+      this.prisma.fulfillmentRequest.count({ where: { productId } }),
+      this.prisma.codeItem.count({ where: { denomination: { productId } } }),
+      this.prisma.connectedProduct.count({ where: { dcvProductId: productId } }),
+    ]);
+
+    if (orders > 0) {
+      throw new BadRequestException(
+        `${product.name} has ${orders} order(s) against it and cannot be deleted — that would ` +
+        `erase the record of what was delivered. Deactivate it instead to take it off sale.`,
+      );
+    }
+    if (codes > 0) {
+      throw new BadRequestException(
+        `${product.name} still holds ${codes} code(s) across its values. Remove those first.`,
+      );
+    }
+    if (connected > 0) {
+      throw new BadRequestException(
+        `${product.name} is linked to ${connected} storefront product. Unlink it first, ` +
+        `or those orders would stop resolving.`,
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const denominations = await tx.denomination.findMany({
+        where: { productId }, select: { id: true },
+      });
+      const variants = await tx.variant.findMany({
+        where: { productRegion: { productId } }, select: { id: true },
+      });
+      const pricedIds = [...denominations.map((d) => d.id), ...variants.map((v) => v.id)];
+      if (pricedIds.length) {
+        await tx.sellingPrice.deleteMany({ where: { itemId: { in: pricedIds } } });
+      }
+      // Denominations, product-regions and their variants all cascade.
+      await tx.product.delete({ where: { id: productId } });
+    });
+
+    if (adminId) {
+      await this.auditService.log({
+        actorType: 'ADMIN', actorId: adminId, action: 'product.delete',
+        entity: 'Product', entityId: productId,
+        metadata: { name: product.name, region: product.region },
+        ip,
+      });
+    }
+    return { id: productId, deleted: true };
+  }
+
+  /**
    * Suggest the SKU a product would get, without creating anything. The admin UI
    * previews this while typing so the SKU is visible before the product exists.
    */

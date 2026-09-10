@@ -1,9 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo, useEffect } from 'react';
-import { Plus, Trash2, Search, AlertTriangle, CheckCircle2, Package, Pencil } from 'lucide-react';
+import {
+  Plus, Trash2, Search, AlertTriangle, CheckCircle2, Package, Pencil,
+  ArrowLeft, ChevronRight,
+} from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Input, Select, Badge, Modal } from '@/components/ui';
 import { formatPrice } from '@/lib/utils';
+import { familyOf } from '@/lib/product-family';
 
 /**
  * Delivery rules.
@@ -14,9 +18,20 @@ import { formatPrice } from '@/lib/utils';
  * with its rule visible, and says plainly when an item has no rule and would
  * therefore fail to deliver.
  */
+/**
+ * Delivery rules drill down exactly the way Inventory does:
+ *
+ *   PlayStation → PSN USA / PSN Turkey / … → the packs sold there
+ *
+ * The flat list showed every pack of every brand at once, which on a real
+ * catalogue is hundreds of rows and nothing to hold on to. Each step answers
+ * one question instead, and the counts on each tile say where the gaps are so
+ * an unset rule is still findable without opening anything.
+ */
 export function FulfillmentPresetsPage() {
   const queryClient = useQueryClient();
-  const [search, setSearch] = useState('');
+  const [family, setFamily] = useState<string | null>(null);
+  const [regionKey, setRegionKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<any>(null);
   const [creating, setCreating] = useState(false);
 
@@ -29,8 +44,8 @@ export function FulfillmentPresetsPage() {
     queryFn: () => api.listCombinations(),
   });
 
-  // Every sellable item, flattened out of the catalogue tree with its product,
-  // region, denominations and whatever rules currently point at it.
+  // Every sellable item, flattened out of the catalogue tree with the brand and
+  // region it belongs to, and whatever rules currently point at it.
   const items = useMemo(() => {
     const byVariant = new Map<string, any[]>();
     for (const rule of rules || []) {
@@ -41,12 +56,20 @@ export function FulfillmentPresetsPage() {
     const flat: any[] = [];
     for (const category of hierarchy || []) {
       for (const product of category.products || []) {
+        const brand = familyOf({
+          brand: category.brand?.name,
+          category: category.name,
+          product_sku: product.sku,
+          product: product.name,
+        });
         for (const productRegion of product.productRegions || []) {
           for (const variant of productRegion.variants || []) {
             flat.push({
               variant,
               product,
+              brand,
               region: productRegion.region,
+              regionKey: productRegion.region?.code || product.region || '—',
               denominations: product.denominations || [],
               rules: byVariant.get(variant.id) || [],
             });
@@ -54,33 +77,89 @@ export function FulfillmentPresetsPage() {
         }
       }
     }
+    return flat;
+  }, [hierarchy, rules]);
 
-    const term = search.trim().toLowerCase();
-    return flat
-      .filter((item) =>
-        !term ||
-        `${item.variant.name} ${item.product.name} ${item.region?.code ?? ''}`.toLowerCase().includes(term))
-      .sort((a, b) =>
-        a.product.name.localeCompare(b.product.name) || a.variant.name.localeCompare(b.variant.name));
-  }, [hierarchy, rules, search]);
-
-  const missing = items.filter((item) => !item.rules.some((rule: any) => rule.active)).length;
   const loading = loadingCatalog || loadingRules;
+  const unset = (item: any) => !item.rules.some((rule: any) => rule.active);
+  const missing = items.filter(unset).length;
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['catalog-hierarchy'] });
+    queryClient.invalidateQueries({ queryKey: ['all-combinations'] });
+  };
+
+  const header = (
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">Delivery rules</h1>
+        <p className="text-sm text-muted-foreground">
+          For each thing you sell, which codes get delivered when someone buys it. An item with no
+          rule cannot be delivered.
+        </p>
+      </div>
+      <Button onClick={() => setCreating(true)}>
+        <Plus className="mr-2 h-4 w-4" /> New pack
+      </Button>
+    </div>
+  );
+
+  const modals = (
+    <>
+      {creating && (
+        <NewPackModal
+          hierarchy={hierarchy || []}
+          onClose={() => setCreating(false)}
+          onCreated={() => {
+            refresh();
+            queryClient.invalidateQueries({ queryKey: ['skus'] });
+            setCreating(false);
+          }}
+        />
+      )}
+      {editing && (
+        <RuleEditor
+          item={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { refresh(); setEditing(null); }}
+        />
+      )}
+    </>
+  );
+
+  if (family && regionKey) {
+    return (
+      <div className="space-y-6 animate-slide-up">
+        <ItemsInRegion
+          family={family}
+          regionKey={regionKey}
+          items={items.filter((item) => item.brand === family && item.regionKey === regionKey)}
+          onBack={() => setRegionKey(null)}
+          onEdit={setEditing}
+          onChanged={refresh}
+        />
+        {modals}
+      </div>
+    );
+  }
+
+  if (family) {
+    return (
+      <div className="space-y-6 animate-slide-up">
+        <RegionsInFamily
+          family={family}
+          items={items.filter((item) => item.brand === family)}
+          onBack={() => setFamily(null)}
+          onOpen={setRegionKey}
+        />
+        {modals}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-slide-up">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Delivery rules</h1>
-          <p className="text-sm text-muted-foreground">
-            For each thing you sell, which codes get delivered when someone buys it. An item with no
-            rule cannot be delivered.
-          </p>
-        </div>
-        <Button onClick={() => setCreating(true)}>
-          <Plus className="mr-2 h-4 w-4" /> New pack
-        </Button>
-      </div>
+      {header}
 
       {missing > 0 && (
         <Card className="border-amber-500/40 bg-amber-500/5">
@@ -91,78 +170,220 @@ export function FulfillmentPresetsPage() {
                 {missing} item{missing === 1 ? '' : 's'} cannot be delivered
               </p>
               <p className="text-sm text-muted-foreground">
-                Orders for these will fail until you set a rule. They are marked below.
+                Orders for these will fail until you set a rule. The brands holding them are
+                marked below.
               </p>
             </div>
           </div>
         </Card>
       )}
 
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search item, product or region..."
-          className="w-full rounded-lg border border-input bg-background py-2.5 pl-10 pr-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/30"
-        />
-      </div>
-
       {loading && <p role="status" className="text-muted-foreground">Loading...</p>}
+      {!loading && <FamilyGrid items={items} onOpen={setFamily} />}
+      {modals}
+    </div>
+  );
+}
 
-      <div className="space-y-3">
-        {items.map((item) => (
-          <ItemRow
-            key={item.variant.id}
-            item={item}
-            onEdit={() => setEditing(item)}
-            onPriceSaved={() => {
-              queryClient.invalidateQueries({ queryKey: ['catalog-hierarchy'] });
-              queryClient.invalidateQueries({ queryKey: ['all-combinations'] });
-            }}
+/** Level 1 — one box per brand, with how many of its items still need a rule. */
+function FamilyGrid({ items, onOpen }: { items: any[]; onOpen: (family: string) => void }) {
+  const [search, setSearch] = useState('');
+
+  const families = useMemo(() => {
+    const grouped = new Map<string, any[]>();
+    for (const item of items) {
+      if (!grouped.has(item.brand)) grouped.set(item.brand, []);
+      grouped.get(item.brand)!.push(item);
+    }
+    const term = search.trim().toLowerCase();
+    return [...grouped.entries()]
+      .filter(([name]) => !term || name.toLowerCase().includes(term))
+      .sort(([a], [b]) => a.localeCompare(b));
+  }, [items, search]);
+
+  return (
+    <div className="space-y-4">
+      <SearchBox value={search} onChange={setSearch} placeholder="Search brand..." />
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {families.map(([name, group]) => (
+          <RuleTile
+            key={name}
+            title={name}
+            subtitle={`${new Set(group.map((item) => item.regionKey)).size} region(s)`}
+            total={group.length}
+            unset={group.filter((item) => !item.rules.some((rule: any) => rule.active)).length}
+            onClick={() => onOpen(name)}
           />
         ))}
-        {!loading && items.length === 0 && (
-          <Card className="py-12 text-center text-muted-foreground">
-            Nothing to configure yet. Items appear here once a product has variants.
+        {families.length === 0 && (
+          <Card className="col-span-full py-12 text-center text-muted-foreground">
+            Nothing to configure yet. Items appear here once a product has packs.
           </Card>
         )}
       </div>
+    </div>
+  );
+}
 
-      {creating && (
-        <NewPackModal
-          hierarchy={hierarchy || []}
-          onClose={() => setCreating(false)}
-          onCreated={() => {
-            queryClient.invalidateQueries({ queryKey: ['catalog-hierarchy'] });
-            queryClient.invalidateQueries({ queryKey: ['all-combinations'] });
-            queryClient.invalidateQueries({ queryKey: ['skus'] });
-            setCreating(false);
-          }}
-        />
-      )}
+/** Level 2 — the regions of one brand. */
+function RegionsInFamily({
+  family, items, onBack, onOpen,
+}: { family: string; items: any[]; onBack: () => void; onOpen: (regionKey: string) => void }) {
+  const [search, setSearch] = useState('');
 
-      {editing && (
-        <RuleEditor
-          item={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            queryClient.invalidateQueries({ queryKey: ['all-combinations'] });
-            queryClient.invalidateQueries({ queryKey: ['catalog-hierarchy'] });
-            setEditing(null);
-          }}
-        />
-      )}
+  const regions = useMemo(() => {
+    const grouped = new Map<string, any[]>();
+    for (const item of items) {
+      if (!grouped.has(item.regionKey)) grouped.set(item.regionKey, []);
+      grouped.get(item.regionKey)!.push(item);
+    }
+    const term = search.trim().toLowerCase();
+    return [...grouped.entries()]
+      .filter(([key, group]) =>
+        !term || `${key} ${group[0].product.name}`.toLowerCase().includes(term))
+      .sort(([a], [b]) => a.localeCompare(b));
+  }, [items, search]);
+
+  return (
+    <div className="space-y-4">
+      <Button variant="ghost" onClick={onBack} className="-ml-2">
+        <ArrowLeft className="mr-2 h-4 w-4" /> All brands
+      </Button>
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">{family}</h1>
+        <p className="text-sm text-muted-foreground">Pick a region to see the packs sold there.</p>
+      </div>
+      <SearchBox value={search} onChange={setSearch} placeholder="Search region or product..." />
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {regions.map(([key, group]) => (
+          <RuleTile
+            key={key}
+            title={group[0].region?.name || key}
+            subtitle={group[0].product.name}
+            total={group.length}
+            unset={group.filter((item) => !item.rules.some((rule: any) => rule.active)).length}
+            onClick={() => onOpen(key)}
+          />
+        ))}
+        {regions.length === 0 && (
+          <Card className="col-span-full py-12 text-center text-muted-foreground">
+            No regions found.
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Level 3 — the packs sold in one region, and what each one delivers. */
+function ItemsInRegion({
+  family, regionKey, items, onBack, onEdit, onChanged,
+}: {
+  family: string; regionKey: string; items: any[];
+  onBack: () => void; onEdit: (item: any) => void; onChanged: () => void;
+}) {
+  const [search, setSearch] = useState('');
+  const term = search.trim().toLowerCase();
+  const shown = items
+    .filter((item) => !term || item.variant.name.toLowerCase().includes(term))
+    .sort((a, b) => a.variant.name.localeCompare(b.variant.name));
+  const region = items[0]?.region;
+
+  return (
+    <div className="space-y-4">
+      <Button variant="ghost" onClick={onBack} className="-ml-2">
+        <ArrowLeft className="mr-2 h-4 w-4" /> {family}
+      </Button>
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">{region?.name || regionKey}</h1>
+        <p className="text-sm text-muted-foreground">
+          {items[0]?.product.name} · what each pack hands over when someone buys it.
+        </p>
+      </div>
+      <SearchBox value={search} onChange={setSearch} placeholder="Search pack..." />
+      <div className="space-y-3">
+        {shown.map((item) => (
+          <ItemRow
+            key={item.variant.id}
+            item={item}
+            onEdit={() => onEdit(item)}
+            onPriceSaved={onChanged}
+            onRuleDeleted={onChanged}
+          />
+        ))}
+        {shown.length === 0 && (
+          <Card className="py-12 text-center text-muted-foreground">No packs found.</Card>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** A brand or region box: how many items it holds, and how many lack a rule. */
+function RuleTile({
+  title, subtitle, total, unset, onClick,
+}: { title: string; subtitle?: string; total: number; unset: number; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group rounded-xl border bg-card p-4 text-left transition-all hover:bg-muted/30 ${
+        unset > 0 ? 'border-amber-500/40 hover:border-amber-500/60' : 'border-border hover:border-primary/40'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate font-medium">{title}</p>
+          {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
+        </div>
+        <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Badge className="bg-muted text-muted-foreground">{total} pack{total === 1 ? '' : 's'}</Badge>
+        {unset > 0 ? (
+          <Badge className="bg-amber-500/10 text-amber-500">{unset} without a rule</Badge>
+        ) : (
+          <Badge className="bg-emerald-500/10 text-emerald-400">all set</Badge>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function SearchBox({
+  value, onChange, placeholder,
+}: { value: string; onChange: (value: string) => void; placeholder: string }) {
+  return (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-lg border border-input bg-background py-2.5 pl-10 pr-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/30"
+      />
     </div>
   );
 }
 
 /** One sellable item and, in plain words, what it delivers. */
-function ItemRow({ item, onEdit, onPriceSaved }: { item: any; onEdit: () => void; onPriceSaved: () => void }) {
+function ItemRow({
+  item, onEdit, onPriceSaved, onRuleDeleted,
+}: { item: any; onEdit: () => void; onPriceSaved: () => void; onRuleDeleted: () => void }) {
   const active = item.rules.filter((rule: any) => rule.active);
   const main = active[0];
   const deliverable = !!main;
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState('');
+
+  // Removing a rule leaves the pack undeliverable rather than deleting the
+  // pack, which is why it asks first and says so.
+  const removeRule = useMutation({
+    mutationFn: () => api.deleteCombination(main.id),
+    onSuccess: () => { setConfirming(false); onRuleDeleted(); },
+    onError: (err: any) => setError(err.message),
+  });
 
   return (
     <Card className={deliverable ? '' : 'border-amber-500/40'}>
@@ -204,10 +425,48 @@ function ItemRow({ item, onEdit, onPriceSaved }: { item: any; onEdit: () => void
           )}
         </div>
 
-        <Button variant={deliverable ? 'outline' : 'primary'} onClick={onEdit}>
-          {deliverable ? 'Change' : 'Set rule'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant={deliverable ? 'outline' : 'primary'} onClick={onEdit}>
+            {deliverable ? 'Change' : 'Set rule'}
+          </Button>
+          {deliverable && (
+            <Button
+              variant="ghost"
+              title="Delete this rule"
+              aria-label={`Delete the delivery rule for ${item.variant.name}`}
+              onClick={() => { setError(''); setConfirming(true); }}
+            >
+              <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
+            </Button>
+          )}
+        </div>
       </div>
+
+      <Modal open={confirming} onClose={() => setConfirming(false)} title="Delete this rule?">
+        <div className="space-y-4">
+          <p className="text-sm">
+            <span className="font-semibold">{item.variant.name}</span> currently delivers{' '}
+            <span className="font-medium">{main ? describe(main) : 'nothing'}</span>.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            The pack itself stays, but with no rule an order for it will fail until you set a new
+            one.
+          </p>
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+            <Button
+              className="flex-1 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={removeRule.isPending}
+              onClick={() => removeRule.mutate()}
+            >
+              {removeRule.isPending ? 'Deleting...' : 'Delete rule'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </Card>
   );
 }
