@@ -195,8 +195,40 @@ export const api = {
     apiFetch(`/admin/codes/batches/${batchId}/use-first`, { method: 'POST' }),
   createManualOrder: (data: any) =>
     apiFetch('/admin/orders/create', { method: 'POST', body: JSON.stringify(data) }),
-  deleteProduct: (productId: string) =>
-    apiFetch(`/admin/products/${productId}`, { method: 'DELETE' }),
+  deleteProduct: (productId: string, force = false) =>
+    apiFetch(`/admin/products/${productId}${force ? '?force=true' : ''}`, { method: 'DELETE' }),
+  findCode: (code: string) =>
+    apiFetch(`/admin/codes/find?code=${encodeURIComponent(code)}`),
+  /**
+   * Download every code of a product as a CSV.
+   *
+   * Not apiFetch: that parses JSON, and this is a file. Saving it is the whole
+   * point — deleting a product erases its codes, so this is the only copy.
+   */
+  downloadProductCodes: async (productId: string, filename: string) => {
+    const token = localStorage.getItem('vault_access_token');
+    const res = await fetch(`${API_BASE}/admin/products/${productId}/codes.csv`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      let message = `Export failed (${res.status})`;
+      try {
+        const body = await res.json();
+        message = body.message || message;
+      } catch { /* the body was not JSON */ }
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    return { count: Number(res.headers.get('X-Code-Count') || 0) };
+  },
   deleteDenomination: (denominationId: string) =>
     apiFetch(`/admin/denominations/${denominationId}`, { method: 'DELETE' }),
   getProductDenominationStock: (productId: string) =>
@@ -400,6 +432,8 @@ export const api = {
   deleteProductRegion: (id: string) =>
     apiFetch(`/admin/catalog/product-regions/${id}`, { method: 'DELETE' }),
 
+  regenerateVariantSku: (variantId: string) =>
+    apiFetch(`/admin/skus/variant/${variantId}/regenerate`, { method: 'POST' }),
   getCatalogHierarchy: () => apiFetch('/admin/catalog/hierarchy'),
   // Brand -> category -> subcategory -> products, which is what the Add Product
   // flow walks and what the Catalog screen shows as one tree.

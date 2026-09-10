@@ -173,7 +173,7 @@ function ProductPrices({ product, onBack }: { product: any; onBack: () => void }
           <p className="text-sm text-muted-foreground">
             These are selling prices, set per currency. What a batch cost you is separate and stays
             on the batch in its own currency. A merchant paying from a rupee balance is charged the
-            rupee price set here; a currency left blank is converted from the other at your rate.
+            rupee price set here; leave a currency blank and the item is simply not sold in it.
           </p>
         </div>
       </Card>

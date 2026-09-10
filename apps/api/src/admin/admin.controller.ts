@@ -1,6 +1,6 @@
 import { manualOrderPricing } from '../fulfillment/manual-order-pricing';
 import {
-  Controller, Get, Post, Patch, Put, Delete, Body, Param, Query, Req, Inject, forwardRef,
+  Controller, Get, Post, Patch, Put, Delete, Body, Param, Query, Req, Res, Inject, forwardRef,
   UseGuards, NotFoundException, BadRequestException,
 } from '@nestjs/common';
 import { AdminService } from './admin.service';
@@ -213,8 +213,13 @@ export class AdminController {
 
   @Delete('products/:id')
   @Roles('SUPER_ADMIN')
-  async deleteProduct(@Param('id') id: string, @CurrentUser() user: any, @Req() req: any) {
-    return this.productsService.deleteProduct(id, user?.id, req.ip);
+  async deleteProduct(
+    @Param('id') id: string,
+    @Query('force') force: string,
+    @CurrentUser() user: any,
+    @Req() req: any,
+  ) {
+    return this.productsService.deleteProduct(id, user?.id, req.ip, { force: force === 'true' });
   }
 
   @Delete('denominations/:id')
@@ -262,6 +267,12 @@ export class AdminController {
     @CurrentUser() user: any, @Req() req: any,
   ) {
     return this.skuService.setVariantSku(id, body.sku, user.id, req.ip);
+  }
+
+  @Post('skus/variant/:id/regenerate')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async regenerateVariantSku(@Param('id') id: string, @CurrentUser() user: any, @Req() req: any) {
+    return this.skuService.regenerateVariantSku(id, user?.id, req.ip);
   }
 
   @Post('skus/product/:id/resync')
@@ -551,6 +562,27 @@ export class AdminController {
     @CurrentUser() user: any, @Req() req: any,
   ) {
     return this.emergencyService.setApiKeyDisabled(id, body.disabled, user.id, req.ip);
+  }
+
+  @Get('codes/find')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER', 'SUPPORT', 'FINANCE')
+  async findCode(@Query('code') code: string) {
+    return this.codesService.findCode(code);
+  }
+
+  @Get('products/:id/codes.csv')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async exportProductCodes(
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+    @Req() req: any,
+    @Res({ passthrough: true }) res: any,
+  ) {
+    const exported = await this.codesService.exportProductCodes(id, user?.id, req.ip);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
+    res.setHeader('X-Code-Count', String(exported.count));
+    return exported.csv;
   }
 
   @Post('codes/:id/reveal')

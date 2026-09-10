@@ -186,14 +186,25 @@ export class ProductsService {
   }
 
   /**
-   * Delete a product, but only while it has no history worth keeping.
+   * Delete a product.
    *
    * Denominations, regions and packs cascade from a product, and codes cascade
-   * from those, so this is a wide delete. An order that ever referenced the
-   * product blocks it outright — the database would refuse anyway, with a
-   * foreign-key error nobody can read — and so does any stored code.
+   * from those, so this is a wide delete. Without `force` a product carrying
+   * history is refused: the database would refuse anyway, with a foreign-key
+   * error nobody can read, and more importantly the codes and what was
+   * delivered would be gone.
+   *
+   * With `force` it goes ahead, but only once the codes have been exported —
+   * see below. The wallet ledger is kept and unhooked from the orders rather
+   * than deleted, because what a merchant was charged is a financial record
+   * that does not belong to the product.
    */
-  async deleteProduct(productId: string, adminId?: string, ip?: string) {
+  async deleteProduct(
+    productId: string,
+    adminId?: string,
+    ip?: string,
+    options: { force?: boolean } = {},
+  ) {
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
       select: { id: true, name: true, region: true },
@@ -206,25 +217,47 @@ export class ProductsService {
       this.prisma.connectedProduct.count({ where: { dcvProductId: productId } }),
     ]);
 
-    if (orders > 0) {
-      throw new BadRequestException(
-        `${product.name} has ${orders} order(s) against it and cannot be deleted — that would ` +
-        `erase the record of what was delivered. Deactivate it instead to take it off sale.`,
-      );
-    }
-    if (codes > 0) {
-      throw new BadRequestException(
-        `${product.name} still holds ${codes} code(s) across its values. Remove those first.`,
-      );
-    }
-    if (connected > 0) {
-      throw new BadRequestException(
-        `${product.name} is linked to ${connected} storefront product. Unlink it first, ` +
-        `or those orders would stop resolving.`,
-      );
+    if (!options.force) {
+      if (orders > 0) {
+        throw new BadRequestException(
+          `${product.name} has ${orders} order(s) against it. Export its codes first, then ` +
+          `delete it — that keeps a record of what was bought and delivered.`,
+        );
+      }
+      if (codes > 0) {
+        throw new BadRequestException(
+          `${product.name} still holds ${codes} code(s) across its values. Export them first, ` +
+          `then delete it.`,
+        );
+      }
+      if (connected > 0) {
+        throw new BadRequestException(
+          `${product.name} is linked to ${connected} storefront product. Unlink it first, ` +
+          `or those orders would stop resolving.`,
+        );
+      }
+    } else if (orders > 0 || codes > 0) {
+      // The export is the whole safeguard, so it is checked rather than
+      // trusted: deleting cascades to every code, and once they are gone
+      // there is nothing to go back to. The audit trail already records an
+      // export, so that record is the proof.
+      const exported = await this.prisma.auditLog.findFirst({
+        where: {
+          action: 'codes.export',
+          entityId: productId,
+          createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!exported) {
+        throw new BadRequestException(
+          `Download the codes for ${product.name} before deleting it. Its codes and delivery ` +
+          `history are erased by this and the export is the only copy.`,
+        );
+      }
     }
 
-    await this.prisma.$transaction(async (tx) => {
+    const removed = await this.prisma.$transaction(async (tx) => {
       const denominations = await tx.denomination.findMany({
         where: { productId }, select: { id: true },
       });
@@ -235,19 +268,55 @@ export class ProductsService {
       if (pricedIds.length) {
         await tx.sellingPrice.deleteMany({ where: { itemId: { in: pricedIds } } });
       }
-      // Denominations, product-regions and their variants all cascade.
+
+      let detachedTransactions = 0;
+      if (options.force && orders > 0) {
+        const orderRows = await tx.fulfillmentRequest.findMany({
+          where: { productId }, select: { id: true },
+        });
+        const orderIds = orderRows.map((row) => row.id);
+
+        // A wallet transaction is the record of money moving and outlives the
+        // order it paid for, so the link is cut and the row kept.
+        const detached = await tx.walletTransaction.updateMany({
+          where: { fulfillmentId: { in: orderIds } },
+          data: { fulfillmentId: null },
+        });
+        detachedTransactions = detached.count;
+
+        await tx.connectedProduct.updateMany({
+          where: { dcvProductId: productId },
+          data: { dcvProductId: null },
+        });
+
+        // Allocations and delivery tokens cascade from the order.
+        await tx.fulfillmentRequest.deleteMany({ where: { productId } });
+      }
+
+      // Denominations, their codes, product-regions and variants all cascade.
       await tx.product.delete({ where: { id: productId } });
-    });
+      return { detachedTransactions };
+    }, { timeout: 120_000 });
 
     if (adminId) {
       await this.auditService.log({
-        actorType: 'ADMIN', actorId: adminId, action: 'product.delete',
+        actorType: 'ADMIN', actorId: adminId,
+        action: options.force ? 'product.force_delete' : 'product.delete',
         entity: 'Product', entityId: productId,
-        metadata: { name: product.name, region: product.region },
+        metadata: {
+          name: product.name, region: product.region,
+          orders, codes, connected,
+          wallet_transactions_kept: removed.detachedTransactions,
+        },
         ip,
       });
     }
-    return { id: productId, deleted: true };
+    return {
+      id: productId, deleted: true,
+      orders_removed: options.force ? orders : 0,
+      codes_removed: options.force ? codes : 0,
+      wallet_transactions_kept: removed.detachedTransactions,
+    };
   }
 
   /**

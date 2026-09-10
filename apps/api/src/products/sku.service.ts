@@ -203,7 +203,49 @@ export class SkuService {
     return { id: updated.id, sku: updated.sku };
   }
 
-  async setProductSku(productId: string, sku: string | null, adminId: string, ip?: string) {
+/**
+   * Re-derive a pack's SKU from its name, and hand back both the old and the
+   * new one.
+   *
+   * A pack's SKU is built from its name, so renaming it or changing what it
+   * delivers leaves the old SKU describing something that no longer exists.
+   * Regenerating keeps the two in step — but a SKU is also how a storefront
+   * order finds this pack, so the caller is told what changed and can say so
+   * rather than the mapping breaking quietly.
+   */
+  async regenerateVariantSku(variantId: string, adminId?: string, ip?: string) {
+    const variant = await this.prisma.variant.findUnique({
+      where: { id: variantId },
+      include: { productRegion: { include: { product: true } } },
+    });
+    if (!variant) throw new NotFoundException('Pack not found');
+
+    const product = variant.productRegion.product;
+    const productSku = product.sku || resolveProductSkuBase(product.name, product.region);
+    const base = variantSku(productSku, variant.name);
+
+    // The SKU it already has is not a collision with itself.
+    const taken = await this.takenSkus();
+    taken.delete((variant.sku || '').toUpperCase());
+    const next = uniqueSku(base, [...taken]);
+
+    if (next === variant.sku) {
+      return { id: variantId, sku: variant.sku, previous: variant.sku, changed: false };
+    }
+
+    await this.prisma.variant.update({ where: { id: variantId }, data: { sku: next } });
+    if (adminId) {
+      await this.auditService.log({
+        actorType: 'ADMIN', actorId: adminId, action: 'sku.variant.regenerate',
+        entity: 'Variant', entityId: variantId,
+        metadata: { from: variant.sku, to: next, pack: variant.name },
+        ip,
+      });
+    }
+    return { id: variantId, sku: next, previous: variant.sku, changed: true };
+  }
+
+    async setProductSku(productId: string, sku: string | null, adminId: string, ip?: string) {
     const product = await this.prisma.product.findUnique({ where: { id: productId } });
     if (!product) throw new NotFoundException('Product not found');
 

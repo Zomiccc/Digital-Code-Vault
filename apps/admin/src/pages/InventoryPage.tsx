@@ -117,6 +117,8 @@ function FamilyGrid({
         </p>
       )}
 
+      <CodeLookup />
+
       <SearchBox value={search} onChange={setSearch} placeholder="Search brand..." />
       {isLoading && <p role="status" className="text-muted-foreground">Loading inventory...</p>}
 
@@ -606,5 +608,110 @@ function RevealModal({
         <p className="py-6 text-center text-muted-foreground">Could not reveal this code.</p>
       )}
     </Modal>
+  );
+}
+
+/**
+ * Find where one code lives.
+ *
+ * Codes are encrypted at rest, so they cannot be searched for as text. Each one
+ * carries a hash of itself for duplicate detection, and that hash answers this
+ * exactly — paste the code and it is matched or it is not. Nothing is revealed:
+ * the answer is which product, region, value and batch hold it, which is what
+ * you need when a customer is asking about a code in their hand.
+ */
+function CodeLookup() {
+  const [code, setCode] = useState('');
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState('');
+  const [searching, setSearching] = useState(false);
+
+  const run = async () => {
+    if (!code.trim()) return;
+    setSearching(true);
+    setError('');
+    setResult(null);
+    try {
+      setResult(await api.findCode(code.trim()));
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  return (
+    <Card className="space-y-3">
+      <div>
+        <h2 className="font-semibold">Find a code</h2>
+        <p className="text-xs text-muted-foreground">
+          Paste a code to see which product, region, value and batch it belongs to.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <input
+          type="text"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') run(); }}
+          placeholder="Paste the full code"
+          aria-label="Code to find"
+          className="flex-1 rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/30"
+        />
+        <Button onClick={run} disabled={!code.trim() || searching}>
+          {searching ? 'Searching...' : 'Find'}
+        </Button>
+        {(result || error) && (
+          <Button
+            variant="ghost"
+            onClick={() => { setResult(null); setError(''); setCode(''); }}
+          >
+            Clear
+          </Button>
+        )}
+      </div>
+
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+
+      {result && !result.found && (
+        <p className="text-sm text-muted-foreground">
+          No code in the vault matches that. It has to be the whole code, exactly as it was
+          uploaded.
+        </p>
+      )}
+
+      {result?.found && (
+        <div className="rounded-lg border border-border bg-muted/30 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-sm">{result.masked}</span>
+            <Badge className={statusColor(result.status)}>{result.status}</Badge>
+          </div>
+          <dl className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+            <Fact label="Product" value={result.product} />
+            <Fact label="Region" value={result.region} />
+            <Fact
+              label="Value"
+              value={formatPrice(result.face_value, result.currency)}
+            />
+            <Fact label="Batch" value={result.batch_name || result.batch_id || 'no batch'} />
+            <Fact label="Supplier" value={result.supplier || '—'} />
+            <Fact label="Uploaded" value={formatDate(result.created_at)} />
+            {result.revealed_at && (
+              <Fact label="Revealed" value={formatDate(result.revealed_at)} />
+            )}
+          </dl>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex gap-2">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="font-medium">{value}</dd>
+    </div>
   );
 }

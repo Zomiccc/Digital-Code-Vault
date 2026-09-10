@@ -208,7 +208,7 @@ test('an unknown denomination is reported rather than created', async () => {
  * what is in the way and assert nothing is written when something is.
  */
 function deleteFixture(counts: {
-  codes?: number; ruleItems?: number; orders?: number; connected?: number;
+  codes?: number; ruleItems?: number; orders?: number; connected?: number; exported?: boolean;
 } = {}) {
   const deleted: string[] = [];
   const prisma: any = {
@@ -222,11 +222,20 @@ function deleteFixture(counts: {
       delete: async ({ where }: any) => { deleted.push(`product:${where.id}`); return {}; },
     },
     variant: { findMany: async () => [] },
+    walletTransaction: { updateMany: async () => ({ count: 0 }) },
+    auditLog: { findFirst: async () => (counts.exported ? { id: 'a1' } : null) },
     codeItem: { count: async () => counts.codes ?? 0 },
     fulfillmentCombinationItem: { count: async () => counts.ruleItems ?? 0 },
-    fulfillmentRequest: { count: async () => counts.orders ?? 0 },
-    connectedProduct: { count: async () => counts.connected ?? 0 },
     sellingPrice: { deleteMany: async () => { deleted.push('prices'); return {}; } },
+    fulfillmentRequest: {
+      count: async () => counts.orders ?? 0,
+      findMany: async () => Array.from({ length: counts.orders ?? 0 }, (_, i) => ({ id: `o${i}` })),
+      deleteMany: async () => { deleted.push('orders'); return { count: counts.orders ?? 0 }; },
+    },
+    connectedProduct: {
+      count: async () => counts.connected ?? 0,
+      updateMany: async () => ({ count: 0 }),
+    },
     $transaction: async (fn: any) => fn(prisma),
   };
   const sut = new ProductsService(prisma, {} as any, audit());
@@ -254,7 +263,8 @@ test('a value a delivery rule hands out is refused', async () => {
 
 test('a product with no history is deleted', async () => {
   const f = deleteFixture();
-  assert.deepEqual(await f.sut.deleteProduct('p1', 'admin-1'), { id: 'p1', deleted: true });
+  const result = await f.sut.deleteProduct('p1', 'admin-1');
+  assert.deepEqual([result.id, result.deleted, result.orders_removed], ['p1', true, 0]);
   assert.deepEqual(f.deleted, ['prices', 'product:p1']);
 });
 
@@ -262,6 +272,29 @@ test('a product with orders is refused rather than erasing what was delivered', 
   const f = deleteFixture({ orders: 7 });
   await assert.rejects(() => f.sut.deleteProduct('p1', 'admin-1'), /7 order\(s\)/);
   assert.deepEqual(f.deleted, []);
+});
+
+test('forcing a delete without exporting the codes first is refused', async () => {
+  // The export is the only copy of the codes once this runs, so it is checked
+  // against the audit trail rather than taken on trust from the screen.
+  const f = deleteFixture({ orders: 7, codes: 40, exported: false });
+  await assert.rejects(
+    () => f.sut.deleteProduct('p1', 'admin-1', undefined, { force: true }),
+    /Download the codes/,
+  );
+  assert.deepEqual(f.deleted, [], 'nothing may be written');
+});
+
+test('once the codes are exported, a product with orders can be forced out', async () => {
+  const f = deleteFixture({ orders: 7, codes: 40, exported: true });
+  const result = await f.sut.deleteProduct('p1', 'admin-1', undefined, { force: true });
+  assert.deepEqual(
+    [result.deleted, result.orders_removed, result.codes_removed],
+    [true, 7, 40],
+  );
+  // The orders go; the product goes with them. The wallet ledger is detached,
+  // never deleted, because it records money and not a product.
+  assert.deepEqual(f.deleted, ['prices', 'orders', 'product:p1']);
 });
 
 test('a product still holding codes, or linked to a storefront, is refused', async () => {

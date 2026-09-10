@@ -218,7 +218,139 @@ export class CodesService {
    * Admin reveal a single code (requires SUPER_ADMIN or INVENTORY_MANAGER).
    * Decrypts the code in-memory, enforces one-time reveal, logs the action.
    */
-  async revealCode(codeItemId: string, adminId: string, ip?: string) {
+/**
+   * Where does this code live?
+   *
+   * Codes are encrypted at rest, so they cannot be searched with LIKE. Each one
+   * carries a hash of its plaintext for duplicate detection, and that same hash
+   * answers this exactly: hash what was typed and look it up. Nothing is
+   * revealed here — the answer is which product, region, value and batch hold
+   * it, which is what someone chasing a code actually needs.
+   */
+  async findCode(rawCode: string) {
+    const code = (rawCode || '').trim();
+    if (!code) throw new BadRequestException('Enter a code to search for');
+
+    const item = await this.prisma.codeItem.findFirst({
+      where: { codeHash: this.encryptionService.hashCode(code) },
+      include: {
+        denomination: { include: { product: true } },
+        supplier: { select: { name: true } },
+      },
+    });
+    if (!item) return { found: false as const, code };
+
+    const batch = item.batchId
+      ? await this.prisma.codeBatch.findUnique({ where: { id: item.batchId } })
+      : null;
+
+    return {
+      found: true as const,
+      id: item.id,
+      masked: this.encryptionService.maskCode(code),
+      status: item.status,
+      product: item.denomination.product.name,
+      product_id: item.denomination.product.id,
+      region: item.denomination.product.region,
+      denomination_id: item.denomination.id,
+      face_value: Number(item.denomination.faceValue),
+      currency: item.denomination.currency,
+      batch_id: item.batchId,
+      batch_name: batch?.batchName || null,
+      supplier: item.supplier?.name || null,
+      source: item.source,
+      created_at: item.createdAt,
+      revealed_at: item.revealedAt,
+      reserved_until: item.reservedUntil,
+    };
+  }
+
+  /**
+   * Every code a product holds, decrypted, as CSV.
+   *
+   * This is what has to be taken out before a product with history can be
+   * deleted: deleting cascades to its codes, so without this the record of
+   * what was bought and what was handed to which customer is simply gone.
+   * Delivered codes are included with their timestamps for exactly that
+   * reason — an export that skipped them would defeat the point.
+   */
+  async exportProductCodes(productId: string, adminId?: string, ip?: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { id: true, name: true, region: true, sku: true },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+
+    const items = await this.prisma.codeItem.findMany({
+      where: { denomination: { productId } },
+      include: {
+        denomination: true,
+        supplier: { select: { name: true } },
+      },
+      orderBy: [{ denominationId: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    const batchIds = [...new Set(items.map((item) => item.batchId).filter(Boolean) as string[])];
+    const batches = batchIds.length
+      ? await this.prisma.codeBatch.findMany({ where: { id: { in: batchIds } } })
+      : [];
+    const batchById = new Map(batches.map((batch) => [batch.id, batch]));
+
+    const header = [
+      'product', 'product_sku', 'region', 'denomination', 'currency', 'denomination_sku',
+      'code', 'status', 'batch_id', 'batch_name', 'batch_cost_per_code', 'batch_currency',
+      'supplier', 'source', 'created_at', 'revealed_at', 'revealed_ip',
+    ];
+
+    const rows = items.map((item) => {
+      const batch = item.batchId ? batchById.get(item.batchId) : undefined;
+      // A code that cannot be decrypted still has to appear, or the export
+      // would quietly be short and nobody would know which one was missing.
+      let plaintext: string;
+      try {
+        plaintext = this.encryptionService.decrypt(item.encryptedCode);
+      } catch {
+        plaintext = 'DECRYPTION_FAILED';
+        this.logger.error(`Export: could not decrypt code ${item.id}`);
+      }
+      return [
+        product.name,
+        product.sku ?? '',
+        product.region,
+        String(Number(item.denomination.faceValue)),
+        item.denomination.currency,
+        item.denomination.sku ?? '',
+        plaintext,
+        item.status,
+        item.batchId ?? '',
+        batch?.batchName ?? '',
+        batch?.costPerCode != null ? String(Number(batch.costPerCode)) : '',
+        batch?.currency ?? '',
+        item.supplier?.name ?? '',
+        item.source,
+        item.createdAt.toISOString(),
+        item.revealedAt ? item.revealedAt.toISOString() : '',
+        item.revealedIp ?? '',
+      ];
+    });
+
+    if (adminId) {
+      await this.auditService.log({
+        actorType: 'ADMIN', actorId: adminId, action: 'codes.export',
+        entity: 'Product', entityId: productId,
+        metadata: { product: product.name, codes: rows.length },
+        ip,
+      });
+    }
+
+    return {
+      filename: `${(product.sku || product.name).replace(/[^A-Za-z0-9_-]+/g, '-')}-codes.csv`,
+      csv: toCsv(header, rows),
+      count: rows.length,
+    };
+  }
+
+    async revealCode(codeItemId: string, adminId: string, ip?: string) {
     const item = await this.prisma.codeItem.findUnique({
       where: { id: codeItemId },
       include: { denomination: { include: { product: true } } },
@@ -228,36 +360,49 @@ export class CodesService {
       throw new NotFoundException('Code item not found');
     }
 
-    if (item.status === 'DELIVERED') {
-      throw new BadRequestException('Code has already been revealed');
-    }
-
-    if (item.status === 'VOIDED') {
-      throw new BadRequestException('Code has been voided and cannot be revealed');
+    // A code held for an order in flight must not be shown, because showing it
+    // hands it out twice: the order is still going to deliver it.
+    if (item.status === 'RESERVED') {
+      throw new BadRequestException(
+        'This code is reserved for an order being processed. Wait for that order to finish, or reverse it first.',
+      );
     }
 
     const plaintext = this.encryptionService.decrypt(item.encryptedCode);
 
-    await this.prisma.codeItem.update({
-      where: { id: codeItemId },
-      data: {
-        status: 'DELIVERED',
-        revealedAt: new Date(),
-        revealedIp: ip || null,
-        reservedUntil: null,
-        reservedByReqId: null,
-      },
-    });
+    // Opening the same code twice used to be an error — "Code has already been
+    // revealed" — which read as a fault in the platform rather than as a fact
+    // about the code, and made revealing look unreliable: it worked on a fresh
+    // code and failed on one already seen. Seeing it again reveals nothing new,
+    // so it is shown, and only the first reveal spends it.
+    const alreadyRevealed = item.status === 'DELIVERED' || item.status === 'VOIDED';
+    if (!alreadyRevealed) {
+      await this.prisma.codeItem.update({
+        where: { id: codeItemId },
+        data: {
+          status: 'DELIVERED',
+          revealedAt: new Date(),
+          revealedIp: ip || null,
+          reservedUntil: null,
+          reservedByReqId: null,
+        },
+      });
+    }
 
     await this.auditService.log({
       actorType: 'ADMIN',
       actorId: adminId,
+      // Every reveal is logged under the same action, first or fiftieth, so
+      // "who has seen this code" is one filter rather than two.
       action: 'codes.reveal',
       entity: 'CodeItem',
       entityId: codeItemId,
       metadata: {
         denomination: item.denomination.faceValue,
         product: item.denomination.product.name,
+        repeat: alreadyRevealed,
+        previous_status: item.status,
+        first_revealed_at: item.revealedAt,
       },
       ip,
     });
@@ -268,7 +413,11 @@ export class CodesService {
       masked: this.encryptionService.maskCode(plaintext),
       denomination: item.denomination.faceValue,
       product: item.denomination.product.name,
-      status: 'DELIVERED',
+      status: alreadyRevealed ? item.status : 'DELIVERED',
+      // So the screen can say "already revealed on ..." rather than implying
+      // this is the first time anyone has seen it.
+      already_revealed: alreadyRevealed,
+      revealed_at: item.revealedAt,
     };
   }
 
@@ -688,4 +837,14 @@ export class CodesService {
 
     return { success: true };
   }
+}
+
+/**
+ * Minimal RFC-4180 CSV. A code can contain a comma or a quote, and a gift-card
+ * code mangled by the export is worthless, so every field is quoted and inner
+ * quotes are doubled.
+ */
+function toCsv(header: string[], rows: string[][]): string {
+  const cell = (value: string) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  return [header, ...rows].map((row) => row.map(cell).join(',')).join('\r\n');
 }

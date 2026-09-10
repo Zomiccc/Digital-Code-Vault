@@ -5,10 +5,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SellingPriceService } from './selling-price.service';
 
-function service(prices: Record<string, number> = {}) {
+function service(prices: Record<string, number> = {}, itemExists = true) {
   const rows = { ...prices };
   const audits: any[] = [];
   const prisma: any = {
+    // A price is written against an id with no foreign key behind it, so the
+    // service checks the item is really there before saving.
+    denomination: { count: async () => (itemExists ? 1 : 0) },
+    variant: { count: async () => (itemExists ? 1 : 0) },
     sellingPrice: {
       findUnique: async ({ where }: any) => {
         const key = where.itemType_itemId_currency.currency;
@@ -110,4 +114,17 @@ test('variants are priced by the same rules as denominations', async () => {
     await unpriced.sut.priceIn('VARIANT', 'v1', 'PKR', { amount: 9.99, currency: 'USD' }),
     null,
   );
+});
+
+test('a price for an item that no longer exists is refused, not silently written', () => {
+  // SellingPrice has no foreign key, so a stale page could save a price
+  // against a deleted value. It wrote without complaint and then never
+  // appeared, which looks precisely like the save button doing nothing.
+  const f = service({}, false);
+  return assert.rejects(
+    () => f.sut.setPrice('DENOMINATION', 'gone', 'PKR', 27500, 'admin-1'),
+    /no longer exists/,
+  ).then(() => {
+    assert.deepEqual(f.rows, {}, 'nothing may be written');
+  });
 });

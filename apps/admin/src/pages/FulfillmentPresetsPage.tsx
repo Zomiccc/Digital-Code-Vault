@@ -137,6 +137,7 @@ export function FulfillmentPresetsPage() {
           onBack={() => setRegionKey(null)}
           onEdit={setEditing}
           onChanged={refresh}
+          onNewPack={() => setCreating(true)}
         />
         {modals}
       </div>
@@ -151,6 +152,7 @@ export function FulfillmentPresetsPage() {
           items={items.filter((item) => item.brand === family)}
           onBack={() => setFamily(null)}
           onOpen={setRegionKey}
+          onNewPack={() => setCreating(true)}
         />
         {modals}
       </div>
@@ -227,8 +229,11 @@ function FamilyGrid({ items, onOpen }: { items: any[]; onOpen: (family: string) 
 
 /** Level 2 — the regions of one brand. */
 function RegionsInFamily({
-  family, items, onBack, onOpen,
-}: { family: string; items: any[]; onBack: () => void; onOpen: (regionKey: string) => void }) {
+  family, items, onBack, onOpen, onNewPack,
+}: {
+  family: string; items: any[]; onBack: () => void;
+  onOpen: (regionKey: string) => void; onNewPack: () => void;
+}) {
   const [search, setSearch] = useState('');
 
   const regions = useMemo(() => {
@@ -249,9 +254,14 @@ function RegionsInFamily({
       <Button variant="ghost" onClick={onBack} className="-ml-2">
         <ArrowLeft className="mr-2 h-4 w-4" /> All brands
       </Button>
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">{family}</h1>
-        <p className="text-sm text-muted-foreground">Pick a region to see the packs sold there.</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">{family}</h1>
+          <p className="text-sm text-muted-foreground">Pick a region to see the packs sold there.</p>
+        </div>
+        {/* Offered here as well as at the top, so adding a pack does not mean
+            walking back out of the brand you are already inside. */}
+        <Button onClick={onNewPack}><Plus className="mr-2 h-4 w-4" /> New pack</Button>
       </div>
       <SearchBox value={search} onChange={setSearch} placeholder="Search region or product..." />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -277,10 +287,10 @@ function RegionsInFamily({
 
 /** Level 3 — the packs sold in one region, and what each one delivers. */
 function ItemsInRegion({
-  family, regionKey, items, onBack, onEdit, onChanged,
+  family, regionKey, items, onBack, onEdit, onChanged, onNewPack,
 }: {
   family: string; regionKey: string; items: any[];
-  onBack: () => void; onEdit: (item: any) => void; onChanged: () => void;
+  onBack: () => void; onEdit: (item: any) => void; onChanged: () => void; onNewPack: () => void;
 }) {
   const [search, setSearch] = useState('');
   const term = search.trim().toLowerCase();
@@ -294,11 +304,14 @@ function ItemsInRegion({
       <Button variant="ghost" onClick={onBack} className="-ml-2">
         <ArrowLeft className="mr-2 h-4 w-4" /> {family}
       </Button>
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">{region?.name || regionKey}</h1>
-        <p className="text-sm text-muted-foreground">
-          {items[0]?.product.name} · what each pack hands over when someone buys it.
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">{region?.name || regionKey}</h1>
+          <p className="text-sm text-muted-foreground">
+            {items[0]?.product.name} · what each pack hands over when someone buys it.
+          </p>
+        </div>
+        <Button onClick={onNewPack}><Plus className="mr-2 h-4 w-4" /> New pack</Button>
       </div>
       <SearchBox value={search} onChange={setSearch} placeholder="Search pack..." />
       <div className="space-y-3">
@@ -490,7 +503,11 @@ function describe(rule: any): string {
 function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void; onSaved: () => void }) {
   const existing = item.rules.find((rule: any) => rule.active) || item.rules[0];
   const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [name, setName] = useState(item.variant.name);
   const [error, setError] = useState('');
+  // Set once the SKU has been re-derived, because a changed SKU has to be
+  // copied into the storefront or its orders stop matching.
+  const [newSku, setNewSku] = useState<{ from: string | null; to: string } | null>(null);
 
   useEffect(() => {
     const initial: Record<string, number> = {};
@@ -498,7 +515,9 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
       initial[line.denominationId] = line.quantity;
     }
     setQuantities(initial);
-  }, [existing?.id]);
+    setName(item.variant.name);
+    setNewSku(null);
+  }, [existing?.id, item.variant.id, item.variant.name]);
 
   const price = Number(item.variant.customerPrice);
   const chosen = item.denominations
@@ -509,24 +528,46 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
   // Kept only to describe the rule, never to block saving it.
   const matches = Math.abs(totalValue - price) < 0.005;
 
+  const renamed = name.trim() && name.trim() !== item.variant.name;
+
   const save = useMutation({
     mutationFn: async () => {
       const items = chosen.map((line: any) => ({
         denominationId: line.denomination.id,
         quantity: line.quantity,
       }));
-      if (existing) {
-        return api.updateCombination(existing.id, { items, active: true });
+
+      if (renamed) {
+        await api.updateVariant(item.variant.id, { name: name.trim() });
       }
-      return api.createCombination({
-        variantId: item.variant.id,
-        name: `${item.variant.name} delivery`,
-        priority: 1,
-        active: true,
-        items,
-      });
+
+      if (existing) {
+        await api.updateCombination(existing.id, {
+          items, active: true, name: `${name.trim()} delivery`,
+        });
+      } else {
+        await api.createCombination({
+          variantId: item.variant.id,
+          name: `${name.trim()} delivery`,
+          priority: 1,
+          active: true,
+          items,
+        });
+      }
+
+      // The SKU is derived from the pack's name and what it delivers, so it is
+      // re-derived whenever either changes. It is reported rather than applied
+      // quietly: a SKU is how a storefront order finds this pack.
+      return api.regenerateVariantSku(item.variant.id);
     },
-    onSuccess: onSaved,
+    onSuccess: (result: any) => {
+      if (result?.changed) {
+        setNewSku({ from: result.previous ?? null, to: result.sku });
+        setError('');
+        return;
+      }
+      onSaved();
+    },
     onError: (err: any) => setError(err.message),
   });
 
@@ -545,6 +586,19 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
   return (
     <Modal open onClose={onClose} title={`When someone buys "${item.variant.name}"`} size="lg">
       <div className="space-y-5">
+        <div className="space-y-1">
+          <Input
+            label="Pack name"
+            value={name}
+            onChange={(e: any) => setName(e.target.value)}
+            placeholder={item.variant.name}
+          />
+          <p className="text-xs text-muted-foreground">
+            Renaming the pack renames its rule too, and the SKU is re-derived from the new name
+            when you save.
+          </p>
+        </div>
+
         <p className="text-sm text-muted-foreground">
           Choose which codes to hand over when someone buys this. They do not have to add up to the
           price — a subscription is priced independently of the cards behind it. The merchant is
@@ -618,9 +672,27 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
           </div>
         </div>
 
+        {newSku && (
+          <div className="rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm">
+            <p className="font-semibold">Saved — SKU regenerated</p>
+            <p className="mt-1 text-muted-foreground">
+              {newSku.from ? <><span className="font-mono">{newSku.from}</span> → </> : 'Now '}
+              <span className="font-mono text-primary">{newSku.to}</span>
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Put this SKU on the matching product in your store, or its orders will stop finding
+              this pack.
+            </p>
+          </div>
+        )}
+
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
         <div className="flex flex-wrap gap-2">
+          {newSku ? (
+            <Button className="flex-1" onClick={onSaved}>Done</Button>
+          ) : (
+          <>
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancel</Button>
           {existing && (
             <Button
@@ -640,6 +712,8 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
             <Plus className="mr-2 h-4 w-4" />
             {save.isPending ? 'Saving...' : existing ? 'Save rule' : 'Create rule'}
           </Button>
+          </>
+          )}
         </div>
       </div>
     </Modal>

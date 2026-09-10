@@ -15,6 +15,10 @@ export function ProductsPage() {
   const [denomValue, setDenomValue] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<any>(null);
   const [deleteError, setDeleteError] = useState('');
+  // Set once this product's codes have actually been downloaded. The server
+  // checks the same thing against the audit trail, so this only mirrors it.
+  const [exported, setExported] = useState<{ productId: string; count: number } | null>(null);
+  const [exporting, setExporting] = useState(false);
 
 
 
@@ -46,14 +50,32 @@ export function ProductsPage() {
   });
 
   const deleteProduct = useMutation({
-    mutationFn: (productId: string) => api.deleteProduct(productId),
+    mutationFn: ({ productId, force }: { productId: string; force: boolean }) =>
+      api.deleteProduct(productId, force),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
       setConfirmDelete(null);
       setDeleteError('');
+      setExported(null);
     },
     onError: (err: any) => setDeleteError(err.message),
   });
+
+  const exportCodes = async (product: any) => {
+    setExporting(true);
+    setDeleteError('');
+    try {
+      const { count } = await api.downloadProductCodes(
+        product.id,
+        `${(product.sku || product.name).replace(/[^A-Za-z0-9_-]+/g, '-')}-codes.csv`,
+      );
+      setExported({ productId: product.id, count });
+    } catch (err: any) {
+      setDeleteError(err.message);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   if (isLoading) {
     return <div className="flex h-full items-center justify-center text-muted-foreground">Loading products...</div>;
@@ -96,7 +118,7 @@ export function ProductsPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => { setDeleteError(''); setConfirmDelete(p); }}
+                  onClick={() => { setDeleteError(''); setExported(null); setConfirmDelete(p); }}
                 >
                   <Trash2 className="mr-1 h-3 w-3" /> Delete
                 </Button>
@@ -144,36 +166,72 @@ export function ProductsPage() {
 
       <Modal
         open={!!confirmDelete}
-        onClose={() => { setConfirmDelete(null); setDeleteError(''); }}
+        onClose={() => { setConfirmDelete(null); setDeleteError(''); setExported(null); }}
         title="Delete this product?"
       >
         <div className="space-y-4">
           <p className="text-sm">
             <span className="font-semibold">{confirmDelete?.name}</span>
             {confirmDelete?.region ? ` (${confirmDelete.region})` : ''} will be deleted, along with
-            its code values, regions and packs.
+            its code values, regions, packs and every code it holds.
           </p>
-          <p className="text-sm text-muted-foreground">
-            A product with orders against it, or with codes still stored, cannot be deleted — that
-            history has to stay. You will be told which it is.
-          </p>
+
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+            <p className="text-sm font-semibold text-amber-500">Take the codes out first</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              The CSV is the only copy once this is done. It carries every code — the ones still in
+              stock and the ones already delivered — with their value, batch, supplier, upload date
+              and when each was revealed.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                disabled={exporting}
+                onClick={() => exportCodes(confirmDelete)}
+              >
+                <Download className="mr-2 h-4 w-4" />
+                {exporting ? 'Preparing...' : 'Download codes CSV'}
+              </Button>
+              {exported && exported.productId === confirmDelete?.id && (
+                <span className="text-sm text-emerald-500">
+                  {exported.count} code(s) downloaded
+                </span>
+              )}
+            </div>
+          </div>
+
           {deleteError && <p role="alert" className="text-sm text-destructive">{deleteError}</p>}
+
           <div className="flex gap-2">
             <Button
               variant="secondary"
               className="flex-1"
-              onClick={() => { setConfirmDelete(null); setDeleteError(''); }}
+              onClick={() => { setConfirmDelete(null); setDeleteError(''); setExported(null); }}
             >
               Cancel
             </Button>
             <Button
               className="flex-1 bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={deleteProduct.isPending}
-              onClick={() => deleteProduct.mutate(confirmDelete.id)}
+              disabled={
+                deleteProduct.isPending ||
+                exporting ||
+                exported?.productId !== confirmDelete?.id
+              }
+              title={
+                exported?.productId === confirmDelete?.id
+                  ? 'Delete this product and everything under it'
+                  : 'Download the codes first'
+              }
+              onClick={() => deleteProduct.mutate({ productId: confirmDelete.id, force: true })}
             >
-              {deleteProduct.isPending ? 'Deleting...' : 'Delete product'}
+              {deleteProduct.isPending ? 'Deleting...' : 'Delete permanently'}
             </Button>
           </div>
+
+          <p className="text-xs text-muted-foreground">
+            Orders against this product are removed with it. What each merchant was charged stays
+            in the wallet ledger — that is a money record and does not belong to the product.
+          </p>
         </div>
       </Modal>
 

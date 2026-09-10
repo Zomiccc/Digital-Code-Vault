@@ -96,6 +96,20 @@ export class SellingPriceService {
       throw new BadRequestException('Price must have at most two decimal places');
     }
 
+    // SellingPrice points at an item by id with no foreign key behind it, so a
+    // price could be written for something that does not exist — a denomination
+    // deleted while the page was still open, say. It saved without complaint
+    // and then never appeared, which looks exactly like the save doing nothing.
+    const exists = itemType === 'DENOMINATION'
+      ? await this.prisma.denomination.count({ where: { id: itemId } })
+      : await this.prisma.variant.count({ where: { id: itemId } });
+    if (!exists) {
+      throw new BadRequestException(
+        `That ${itemType === 'DENOMINATION' ? 'code value' : 'pack'} no longer exists. ` +
+        'Reload the page and try again.',
+      );
+    }
+
     const previous = await this.prisma.sellingPrice.findUnique({
       where: { itemType_itemId_currency: { itemType, itemId, currency: code } },
     });

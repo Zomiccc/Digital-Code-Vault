@@ -746,30 +746,31 @@ export class CatalogService {
 
   // ─── Catalog Hierarchy Query ───
 
+  /**
+   * Everything sellable, grouped by category.
+   *
+   * Driven by products rather than by categories, because it was the other way
+   * round and that made a product disappear from Fulfillment and Delivery
+   * Rules the moment its category was deactivated — deleting a category
+   * deactivates it, so tidying the catalogue silently took working products
+   * off both screens. A product with no category, or an inactive one, is
+   * grouped under "Uncategorised" and stays reachable.
+   */
   async getCatalogHierarchy() {
-    const categories = await this.prisma.category.findMany({
-      where: { active: true },
+    const products = await this.prisma.product.findMany({
+      where: { status: 'ACTIVE' },
       include: {
-        brand: true,
-        products: {
-          where: { status: 'ACTIVE' },
+        category: { include: { brand: true } },
+        productRegions: {
+          where: { active: true },
           include: {
-            productRegions: {
-              where: { active: true },
-              include: {
-                region: true,
-                variants: {
-                  where: { active: true },
-                  orderBy: { sortOrder: 'asc' },
-                },
-              },
-            },
-            denominations: { orderBy: { faceValue: 'asc' } },
+            region: true,
+            variants: { where: { active: true }, orderBy: { sortOrder: 'asc' } },
           },
-          orderBy: { name: 'asc' },
         },
+        denominations: { orderBy: { faceValue: 'asc' } },
       },
-      orderBy: { sortOrder: 'asc' },
+      orderBy: { name: 'asc' },
     });
 
     // Every price is reported in the currency it is stored in, and each region
@@ -777,46 +778,60 @@ export class CatalogService {
     // denomination is 250 Lira, and what a merchant pays for it comes from the
     // selling price an admin set for their wallet's currency.
     const displays = await this.currencyService.displayCurrenciesForRegions(
-      categories.flatMap((category) =>
-        category.products.flatMap((product) => [
-          product.region,
-          ...product.productRegions.map((pr) => pr.region?.code),
-        ]),
-      ),
+      products.flatMap((product) => [
+        product.region,
+        ...product.productRegions.map((pr) => pr.region?.code),
+      ]),
     );
     const usd = { currency: 'USD', symbol: '$', region: null };
 
-    return categories.map((category) => ({
-      ...category,
-      products: category.products.map((product) => {
-        const productDisplay = displays.get((product.region ?? '').trim()) ?? usd;
-        return {
-          ...product,
-          regional_currency: productDisplay.currency,
-          regional_symbol: productDisplay.symbol,
-          denominations: product.denominations.map((denomination) => ({
-            ...denomination,
-            ...localPrice(Number(denomination.faceValue), denomination.currency, productDisplay),
-          })),
-          productRegions: product.productRegions.map((productRegion) => {
-            const display = displays.get((productRegion.region?.code ?? '').trim()) ?? usd;
-            return {
-              ...productRegion,
-              denomination_prices: product.denominations.map((denomination) => ({
-                denomination_id: denomination.id,
-                ...localPrice(Number(denomination.faceValue), denomination.currency, display),
-              })),
-              variants: productRegion.variants.map((variant) => ({
-                ...variant,
-                // A pack is shown at the price it was entered at, in the
-                // currency it was entered in.
-                ...localPrice(Number(variant.customerPrice), variant.currency, display),
-              })),
-            };
-          }),
-        };
-      }),
-    }));
+    const decorate = (product: (typeof products)[number]) => {
+      const productDisplay = displays.get((product.region ?? '').trim()) ?? usd;
+      return {
+        ...product,
+        regional_currency: productDisplay.currency,
+        regional_symbol: productDisplay.symbol,
+        denominations: product.denominations.map((denomination) => ({
+          ...denomination,
+          ...localPrice(Number(denomination.faceValue), denomination.currency, productDisplay),
+        })),
+        productRegions: product.productRegions.map((productRegion) => {
+          const display = displays.get((productRegion.region?.code ?? '').trim()) ?? usd;
+          return {
+            ...productRegion,
+            denomination_prices: product.denominations.map((denomination) => ({
+              denomination_id: denomination.id,
+              ...localPrice(Number(denomination.faceValue), denomination.currency, display),
+            })),
+            variants: productRegion.variants.map((variant) => ({
+              ...variant,
+              // A pack is shown at the price it was entered at, in the
+              // currency it was entered in.
+              ...localPrice(Number(variant.customerPrice), variant.currency, display),
+            })),
+          };
+        }),
+      };
+    };
+
+    const UNCATEGORISED = '__uncategorised__';
+    const groups = new Map<string, any>();
+    for (const product of products) {
+      const key = product.category?.id ?? UNCATEGORISED;
+      if (!groups.has(key)) {
+        groups.set(key, product.category
+          ? { ...product.category, products: [] }
+          : {
+              id: null, name: 'Uncategorised', slug: 'uncategorised',
+              brand: null, sortOrder: 9999, active: true, products: [],
+            });
+      }
+      groups.get(key).products.push(decorate(product));
+    }
+
+    return [...groups.values()].sort(
+      (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name),
+    );
   }
 
   // ─── Dashboard Stats ───
