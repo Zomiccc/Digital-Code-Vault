@@ -28,6 +28,8 @@ export const REQUIRED_SCHEMA: { table: string; column: string }[] = [
   { table: 'Variant', column: 'sku' },
   { table: 'MerchantWallet', column: 'balance' },
   { table: 'SellingPrice', column: 'amount' },
+  { table: 'Subcategory', column: 'categoryId' },
+  { table: 'Product', column: 'subcategoryId' },
 ];
 
 /**
@@ -35,6 +37,36 @@ export const REQUIRED_SCHEMA: { table: string; column: string }[] = [
  * as separate strings rather than parsed out of a .sql file.
  */
 export const REPAIR_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS "Subcategory" (
+     "id"         TEXT NOT NULL,
+     "name"       TEXT NOT NULL,
+     "slug"       TEXT NOT NULL,
+     "categoryId" TEXT NOT NULL,
+     "regionId"   TEXT,
+     "sortOrder"  INTEGER NOT NULL DEFAULT 0,
+     "active"     BOOLEAN NOT NULL DEFAULT true,
+     "createdAt"  TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     "updatedAt"  TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+     CONSTRAINT "Subcategory_pkey" PRIMARY KEY ("id")
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "Subcategory_slug_key" ON "Subcategory" ("slug")`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "Subcategory_categoryId_name_key" ON "Subcategory" ("categoryId", "name")`,
+  `CREATE INDEX IF NOT EXISTS "Subcategory_categoryId_idx" ON "Subcategory" ("categoryId")`,
+  `CREATE INDEX IF NOT EXISTS "Subcategory_regionId_idx" ON "Subcategory" ("regionId")`,
+  `ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS "subcategoryId" TEXT`,
+  `CREATE INDEX IF NOT EXISTS "Product_subcategoryId_idx" ON "Product" ("subcategoryId")`,
+  // Postgres has no ADD CONSTRAINT IF NOT EXISTS, and these run on every boot,
+  // so each drops its own constraint first. Without the keys the onDelete rules
+  // in the Prisma schema never fire and a deleted category leaves orphans.
+  `ALTER TABLE "Subcategory" DROP CONSTRAINT IF EXISTS "Subcategory_categoryId_fkey"`,
+  `ALTER TABLE "Subcategory" ADD CONSTRAINT "Subcategory_categoryId_fkey"
+     FOREIGN KEY ("categoryId") REFERENCES "Category"("id") ON DELETE CASCADE ON UPDATE CASCADE`,
+  `ALTER TABLE "Subcategory" DROP CONSTRAINT IF EXISTS "Subcategory_regionId_fkey"`,
+  `ALTER TABLE "Subcategory" ADD CONSTRAINT "Subcategory_regionId_fkey"
+     FOREIGN KEY ("regionId") REFERENCES "Region"("id") ON DELETE SET NULL ON UPDATE CASCADE`,
+  `ALTER TABLE "Product" DROP CONSTRAINT IF EXISTS "Product_subcategoryId_fkey"`,
+  `ALTER TABLE "Product" ADD CONSTRAINT "Product_subcategoryId_fkey"
+     FOREIGN KEY ("subcategoryId") REFERENCES "Subcategory"("id") ON DELETE SET NULL ON UPDATE CASCADE`,
   `ALTER TABLE "CodeBatch" ADD COLUMN IF NOT EXISTS "batchName" TEXT`,
   `ALTER TABLE "CodeBatch" ADD COLUMN IF NOT EXISTS "priority" INTEGER NOT NULL DEFAULT 0`,
   `ALTER TABLE "FulfillmentRequest" ADD COLUMN IF NOT EXISTS "discountAmount" DECIMAL(65,30) NOT NULL DEFAULT 0`,

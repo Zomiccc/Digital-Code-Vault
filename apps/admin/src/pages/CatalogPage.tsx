@@ -1,10 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Plus, Trash2, Globe, FolderTree, Tags, Layers } from 'lucide-react';
+import { Plus, Trash2, Globe, FolderTree, Tags, Layers, GitBranch } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Input, Select, Modal, Badge } from '@/components/ui';
 
-type Tab = 'brands' | 'categories' | 'regions' | 'productRegions';
+type Tab = 'brands' | 'categories' | 'subcategories' | 'regions' | 'productRegions';
 
 export function CatalogPage() {
   const queryClient = useQueryClient();
@@ -14,18 +14,24 @@ export function CatalogPage() {
     <div className="space-y-6 animate-slide-up">
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Catalog Management</h1>
-        <p className="text-sm text-muted-foreground">Manage brands, categories, regions, product-region mappings, and variants (Brand → Category → Product → Variant)</p>
+        <p className="text-sm text-muted-foreground">
+          Brand → Category → Subcategory → Product. A brand is the company (Microsoft), a category
+          is what it sells (Xbox Digital Codes), and a subcategory is the grouping inside it
+          (Xbox USA, Xbox Game Pass). Products are then filed under a subcategory.
+        </p>
       </div>
 
       <div className="flex gap-2 border-b border-border">
         <TabButton active={tab === 'brands'} onClick={() => setTab('brands')} icon={Layers} label="Brands" />
         <TabButton active={tab === 'categories'} onClick={() => setTab('categories')} icon={FolderTree} label="Categories" />
+        <TabButton active={tab === 'subcategories'} onClick={() => setTab('subcategories')} icon={GitBranch} label="Sub-categories" />
         <TabButton active={tab === 'regions'} onClick={() => setTab('regions')} icon={Globe} label="Regions" />
         <TabButton active={tab === 'productRegions'} onClick={() => setTab('productRegions')} icon={Tags} label="Product-Regions" />
       </div>
 
       {tab === 'brands' && <BrandsTab />}
       {tab === 'categories' && <CategoriesTab />}
+      {tab === 'subcategories' && <SubcategoriesTab />}
       {tab === 'regions' && <RegionsTab />}
       {tab === 'productRegions' && <ProductRegionsTab />}
     </div>
@@ -322,3 +328,169 @@ function ProductRegionsTab() {
   );
 }
 
+/**
+ * Sub-categories: the grouping inside a category.
+ *
+ * Most of them stand for a region — "Xbox USA" is the USA region under Xbox
+ * Digital Codes — and one that names a region lends it to every product filed
+ * under it, so the region stops being typed by hand on each product. The link
+ * is optional, because "Xbox Game Pass" belongs beside "Xbox USA" without
+ * being a place.
+ */
+function SubcategoriesTab() {
+  const queryClient = useQueryClient();
+  const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => api.listCategories() });
+  const { data: regions } = useQuery({ queryKey: ['regions'], queryFn: () => api.listRegions() });
+  const { data: subcategories, isLoading } = useQuery({
+    queryKey: ['subcategories'],
+    queryFn: () => api.listSubcategories(),
+  });
+
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ name: '', categoryId: '', regionId: '' });
+  const [error, setError] = useState('');
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['subcategories'] });
+    queryClient.invalidateQueries({ queryKey: ['catalog-tree'] });
+  };
+
+  const createMutation = useMutation({
+    mutationFn: () => api.createSubcategory({
+      name: form.name.trim(),
+      categoryId: form.categoryId,
+      regionId: form.regionId || null,
+    }),
+    onSuccess: () => {
+      refresh();
+      setShowCreate(false);
+      setForm({ name: '', categoryId: '', regionId: '' });
+      setError('');
+    },
+    onError: (err: any) => setError(err.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deleteSubcategory(id),
+    onSuccess: refresh,
+    onError: (err: any) => setError(err.message),
+  });
+
+  if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
+
+  // Grouped under their category, so the tree is readable at a glance.
+  const byCategory = new Map<string, any[]>();
+  for (const sub of subcategories || []) {
+    const key = sub.category?.name || 'Uncategorised';
+    if (!byCategory.has(key)) byCategory.set(key, []);
+    byCategory.get(key)!.push(sub);
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button onClick={() => { setError(''); setShowCreate(true); }}>
+          <Plus className="mr-2 h-4 w-4" /> Add Sub-category
+        </Button>
+      </div>
+
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+
+      {[...byCategory.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([category, rows]) => (
+        <div key={category} className="space-y-2">
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            {category}
+          </h3>
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+            {rows.map((sub: any) => (
+              <Card key={sub.id} hover>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h4 className="font-semibold">{sub.name}</h4>
+                    <p className="text-xs text-muted-foreground">
+                      {sub.region
+                        ? `${sub.region.name} (${sub.region.code}) · ${sub.region.currency}`
+                        : 'No region — products here need one of their own'}
+                    </p>
+                    <div className="mt-3 flex items-center gap-2">
+                      <Badge className={sub.active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-destructive/10 text-destructive'}>
+                        {sub.active ? 'ACTIVE' : 'INACTIVE'}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {sub._count?.products || 0} product(s)
+                      </span>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    title={sub._count?.products
+                      ? 'Has products — this deactivates it instead of deleting'
+                      : 'Delete this sub-category'}
+                    onClick={() => { setError(''); deleteMutation.mutate(sub.id); }}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {(!subcategories || subcategories.length === 0) && (
+        <Card className="py-12 text-center text-muted-foreground">
+          No sub-categories yet. Add one to group products inside a category.
+        </Card>
+      )}
+
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Add Sub-category">
+        <div className="space-y-4">
+          <Select
+            label="Category"
+            value={form.categoryId}
+            onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
+            options={[
+              { value: '', label: '— Select —' },
+              ...(categories?.map((c: any) => ({
+                value: c.id,
+                label: c.brand ? `${c.brand.name} › ${c.name}` : c.name,
+              })) || []),
+            ]}
+          />
+          <Input
+            label="Name"
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            placeholder="e.g. Xbox USA, or Xbox Game Pass"
+          />
+          <Select
+            label="Region (optional)"
+            value={form.regionId}
+            onChange={(e) => setForm({ ...form, regionId: e.target.value })}
+            options={[
+              { value: '', label: 'No region' },
+              ...(regions?.map((r: any) => ({
+                value: r.id,
+                label: `${r.name} (${r.code}) · ${r.currency}`,
+              })) || []),
+            ]}
+          />
+          <p className="text-xs text-muted-foreground">
+            Pick a region and every product filed under this sub-category takes it automatically,
+            along with the currency it prices in. Leave it blank for a grouping that is not a
+            place, such as Game Pass.
+          </p>
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          <Button
+            onClick={() => createMutation.mutate()}
+            disabled={createMutation.isPending || !form.name.trim() || !form.categoryId}
+            className="w-full"
+          >
+            {createMutation.isPending ? 'Creating...' : 'Create'}
+          </Button>
+        </div>
+      </Modal>
+    </div>
+  );
+}

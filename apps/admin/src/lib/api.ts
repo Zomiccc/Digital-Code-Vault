@@ -401,6 +401,20 @@ export const api = {
     apiFetch(`/admin/catalog/product-regions/${id}`, { method: 'DELETE' }),
 
   getCatalogHierarchy: () => apiFetch('/admin/catalog/hierarchy'),
+  // Brand -> category -> subcategory -> products, which is what the Add Product
+  // flow walks and what the Catalog screen shows as one tree.
+  getCatalogTree: () => apiFetch('/admin/catalog/tree'),
+  listSubcategories: (categoryId?: string, activeOnly = false) =>
+    apiFetch(`/admin/catalog/subcategories?${new URLSearchParams({
+      ...(categoryId ? { categoryId } : {}),
+      ...(activeOnly ? { active: 'true' } : {}),
+    })}`),
+  createSubcategory: (data: { name: string; categoryId: string; regionId?: string | null; sortOrder?: number }) =>
+    apiFetch('/admin/catalog/subcategories', { method: 'POST', body: JSON.stringify(data) }),
+  updateSubcategory: (id: string, data: any) =>
+    apiFetch(`/admin/catalog/subcategories/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteSubcategory: (id: string) =>
+    apiFetch(`/admin/catalog/subcategories/${id}`, { method: 'DELETE' }),
   getCatalogStats: () => apiFetch('/admin/catalog/stats'),
 
   // Variants & fulfillment combinations (presets)

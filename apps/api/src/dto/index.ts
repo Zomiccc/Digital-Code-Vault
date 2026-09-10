@@ -86,9 +86,12 @@ export class CreateProductDto {
   @IsNotEmpty()
   name!: string;
 
+  // Optional because a subcategory can name the region instead; the service
+  // refuses when neither does, which is a clearer error than "region required"
+  // on a form that never asked for one.
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  region!: string;
+  region?: string;
 
   @IsOptional()
   @IsString()
@@ -97,6 +100,10 @@ export class CreateProductDto {
   @IsOptional()
   @IsString()
   category_id?: string;
+
+  @IsOptional()
+  @IsString()
+  subcategory_id?: string;
 
   @IsOptional()
   @IsString()

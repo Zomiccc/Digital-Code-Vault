@@ -146,6 +146,225 @@ export class CatalogService {
     return { id, deactivated: true };
   }
 
+  // ─── Subcategories ───
+
+  /**
+   * The groupings inside a category — "Xbox USA", "Xbox Game Pass".
+   *
+   * A subcategory may point at a region, and one that does lends its region to
+   * every product filed under it, which is how adding a product stops being a
+   * matter of typing "USA" correctly by hand.
+   */
+  async listSubcategories(categoryId?: string, activeOnly = false) {
+    return this.prisma.subcategory.findMany({
+      where: {
+        ...(categoryId ? { categoryId } : {}),
+        ...(activeOnly ? { active: true } : {}),
+      },
+      include: {
+        region: true,
+        category: { select: { id: true, name: true, brandId: true } },
+        _count: { select: { products: true } },
+      },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    });
+  }
+
+  async createSubcategory(
+    data: { name: string; categoryId: string; regionId?: string | null; sortOrder?: number },
+    actorId?: string,
+  ) {
+    const category = await this.prisma.category.findUnique({ where: { id: data.categoryId } });
+    if (!category) throw new NotFoundException('Category not found');
+
+    const name = data.name.trim();
+    if (!name) throw new BadRequestException('A subcategory needs a name');
+
+    const clash = await this.prisma.subcategory.findFirst({
+      where: { categoryId: data.categoryId, name },
+    });
+    if (clash) throw new BadRequestException(`${category.name} already has a "${name}" subcategory`);
+
+    // The slug is unique platform-wide, so it carries the category to keep two
+    // brands from colliding on an obvious name like "USA".
+    const slug = await this.uniqueSubcategorySlug(`${category.name}-${name}`);
+
+    const created = await this.prisma.subcategory.create({
+      data: {
+        name, slug,
+        categoryId: data.categoryId,
+        regionId: data.regionId || null,
+        sortOrder: data.sortOrder || 0,
+      },
+      include: { region: true },
+    });
+
+    if (actorId) {
+      await this.auditService.log({
+        actorType: 'ADMIN', actorId, action: 'subcategory.create',
+        entity: 'Subcategory', entityId: created.id,
+        metadata: { name, category: category.name, region: created.region?.code ?? null },
+      });
+    }
+    return created;
+  }
+
+  async updateSubcategory(
+    id: string,
+    data: { name?: string; regionId?: string | null; sortOrder?: number; active?: boolean },
+    actorId?: string,
+  ) {
+    const existing = await this.prisma.subcategory.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Subcategory not found');
+
+    if (data.name !== undefined) {
+      const name = data.name.trim();
+      if (!name) throw new BadRequestException('A subcategory needs a name');
+      const clash = await this.prisma.subcategory.findFirst({
+        where: { categoryId: existing.categoryId, name, id: { not: id } },
+      });
+      if (clash) throw new BadRequestException(`Another subcategory here is already called "${name}"`);
+    }
+
+    const updated = await this.prisma.subcategory.update({
+      where: { id },
+      data: {
+        ...(data.name !== undefined ? { name: data.name.trim() } : {}),
+        ...(data.regionId !== undefined ? { regionId: data.regionId || null } : {}),
+        ...(data.sortOrder !== undefined ? { sortOrder: data.sortOrder } : {}),
+        ...(data.active !== undefined ? { active: data.active } : {}),
+      },
+      include: { region: true },
+    });
+
+    if (actorId) {
+      await this.auditService.log({
+        actorType: 'ADMIN', actorId, action: 'subcategory.update',
+        entity: 'Subcategory', entityId: id, metadata: { ...data },
+      });
+    }
+    return updated;
+  }
+
+  /**
+   * Remove a subcategory. Products keep working either way — the link is
+   * optional and set to null — but an occupied one is deactivated rather than
+   * deleted, so its products are not quietly orphaned out of the tree.
+   */
+  async deleteSubcategory(id: string, actorId?: string) {
+    const existing = await this.prisma.subcategory.findUnique({
+      where: { id },
+      include: { _count: { select: { products: true } } },
+    });
+    if (!existing) throw new NotFoundException('Subcategory not found');
+
+    if (existing._count.products > 0) {
+      await this.prisma.subcategory.update({ where: { id }, data: { active: false } });
+      if (actorId) {
+        await this.auditService.log({
+          actorType: 'ADMIN', actorId, action: 'subcategory.deactivate',
+          entity: 'Subcategory', entityId: id,
+          metadata: { products: existing._count.products },
+        });
+      }
+      return { id, deactivated: true, products: existing._count.products };
+    }
+
+    await this.prisma.subcategory.delete({ where: { id } });
+    if (actorId) {
+      await this.auditService.log({
+        actorType: 'ADMIN', actorId, action: 'subcategory.delete',
+        entity: 'Subcategory', entityId: id, metadata: { name: existing.name },
+      });
+    }
+    return { id, deleted: true };
+  }
+
+  private async uniqueSubcategorySlug(base: string) {
+    const root = slugify(base) || 'subcategory';
+    let candidate = root;
+    for (let attempt = 2; attempt < 100; attempt++) {
+      const taken = await this.prisma.subcategory.findUnique({ where: { slug: candidate } });
+      if (!taken) return candidate;
+      candidate = `${root}-${attempt}`;
+    }
+    return `${root}-${Date.now()}`;
+  }
+
+  /**
+   * The catalogue as a tree: brand, then category, then subcategory, then the
+   * products filed under each. This is what the Add Product flow walks, and
+   * what the Catalog screen shows instead of four disconnected tabs.
+   *
+   * Products that predate subcategories, or were never filed under one, are
+   * returned against their category so nothing disappears from view.
+   */
+  async getCatalogTree() {
+    const [brands, looseCategories] = await Promise.all([
+      this.prisma.brand.findMany({
+        where: { active: true },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+        include: {
+          categories: {
+            where: { active: true },
+            orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+            include: {
+              subcategories: {
+                where: { active: true },
+                orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+                include: {
+                  region: true,
+                  products: {
+                    where: { status: 'ACTIVE' },
+                    orderBy: { name: 'asc' },
+                    include: { denominations: { orderBy: { faceValue: 'asc' } } },
+                  },
+                },
+              },
+              products: {
+                where: { status: 'ACTIVE', subcategoryId: null },
+                orderBy: { name: 'asc' },
+                include: { denominations: { orderBy: { faceValue: 'asc' } } },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.category.findMany({
+        where: { active: true, brandId: null },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+        include: {
+          subcategories: {
+            where: { active: true },
+            orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+            include: {
+              region: true,
+              products: {
+                where: { status: 'ACTIVE' },
+                orderBy: { name: 'asc' },
+                include: { denominations: { orderBy: { faceValue: 'asc' } } },
+              },
+            },
+          },
+          products: {
+            where: { status: 'ACTIVE', subcategoryId: null },
+            orderBy: { name: 'asc' },
+            include: { denominations: { orderBy: { faceValue: 'asc' } } },
+          },
+        },
+      }),
+    ]);
+
+    return [
+      ...brands,
+      // A category with no brand still has to be reachable, or its products
+      // would only exist on the flat Products screen.
+      ...(looseCategories.length
+        ? [{ id: null, name: 'Uncategorised', slug: 'uncategorised', categories: looseCategories }]
+        : []),
+    ];
+  }
+
   // ─── Regions ───
 
   async listRegions(activeOnly = false) {

@@ -206,6 +206,7 @@ export class AdminController {
       region: body.region,
       supplierId: body.supplier_id,
       categoryId: body.category_id,
+      subcategoryId: body.subcategory_id,
       sku: body.sku,
     });
   }

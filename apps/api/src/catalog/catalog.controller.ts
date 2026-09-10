@@ -80,6 +80,46 @@ export class CatalogController {
     return this.catalogService.deleteCategory(id, user.id);
   }
 
+  // ─── Subcategories ───
+
+  @Get('subcategories')
+  async listSubcategories(
+    @Query('categoryId') categoryId?: string,
+    @Query('active') active?: string,
+  ) {
+    return this.catalogService.listSubcategories(categoryId, active === 'true');
+  }
+
+  @Post('subcategories')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async createSubcategory(
+    @Body() body: { name: string; categoryId: string; regionId?: string | null; sortOrder?: number },
+    @CurrentUser() user: any,
+  ) {
+    return this.catalogService.createSubcategory(body, user.id);
+  }
+
+  @Patch('subcategories/:id')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async updateSubcategory(
+    @Param('id') id: string,
+    @Body() body: { name?: string; regionId?: string | null; sortOrder?: number; active?: boolean },
+    @CurrentUser() user: any,
+  ) {
+    return this.catalogService.updateSubcategory(id, body, user.id);
+  }
+
+  @Delete('subcategories/:id')
+  @Roles('SUPER_ADMIN', 'INVENTORY_MANAGER')
+  async deleteSubcategory(@Param('id') id: string, @CurrentUser() user: any) {
+    return this.catalogService.deleteSubcategory(id, user.id);
+  }
+
+  @Get('tree')
+  async getCatalogTree() {
+    return this.catalogService.getCatalogTree();
+  }
+
   // ─── Regions ───
 
   @Get('regions')

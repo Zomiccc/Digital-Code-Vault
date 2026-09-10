@@ -263,7 +263,40 @@ export class ProductsService {
     return { sku: uniqueSku(base, taken.map((p) => p.sku!)) };
   }
 
-  async createProduct(data: { name: string; region: string; supplierId?: string; categoryId?: string; sku?: string }) {
+  /**
+   * Create a product.
+   *
+   * A subcategory may stand in for the region and the category: filing a
+   * product under "Xbox USA" is enough to know it belongs to Xbox Digital
+   * Codes and sells in USA, so neither has to be typed again. An explicit
+   * region still wins, and a product created without a subcategory behaves
+   * exactly as it always did.
+   */
+  async createProduct(data: {
+    name: string; region?: string; supplierId?: string;
+    categoryId?: string; subcategoryId?: string; sku?: string;
+  }) {
+    const subcategory = data.subcategoryId
+      ? await this.prisma.subcategory.findUnique({
+          where: { id: data.subcategoryId },
+          include: { region: true },
+        })
+      : null;
+    if (data.subcategoryId && !subcategory) {
+      throw new NotFoundException('Subcategory not found');
+    }
+
+    // The subcategory answers both of these when it can, so filing a product
+    // under "Xbox USA" is enough — the region is not typed again, and mistyping
+    // it was how a product ended up in a region of its own.
+    const region = (data.region || subcategory?.region?.code || '').trim();
+    if (!region) {
+      throw new BadRequestException(
+        'A product needs a region — either give one, or file it under a subcategory that has one',
+      );
+    }
+    const categoryId = data.categoryId || subcategory?.categoryId || null;
+
     // Every product gets a SKU, because it is what matches incoming storefront
     // orders to this product. An explicit one is respected; otherwise one is
     // generated, and either way a collision is resolved rather than rejected.
@@ -271,18 +304,30 @@ export class ProductsService {
       where: { sku: { not: null } },
       select: { sku: true },
     });
-    const base = data.sku?.trim() || resolveProductSkuBase(data.name, data.region);
+    const base = data.sku?.trim() || resolveProductSkuBase(data.name, region);
     const sku = uniqueSku(base, taken.map((p) => p.sku!));
 
-    return this.prisma.product.create({
+    const product = await this.prisma.product.create({
       data: {
         name: data.name,
-        region: data.region,
+        region,
         supplierId: data.supplierId,
-        categoryId: data.categoryId || null,
+        categoryId,
+        subcategoryId: subcategory?.id || null,
         sku,
       },
     });
+
+    // Packs hang off a product-region, so a product whose subcategory names a
+    // region gets that link straight away. Without it the product exists but
+    // has nowhere to put a pack, which is a dead end nobody expects.
+    if (subcategory?.regionId) {
+      await this.prisma.productRegion
+        .create({ data: { productId: product.id, regionId: subcategory.regionId } })
+        .catch(() => undefined);
+    }
+
+    return product;
   }
 
   async updateProductCategory(productId: string, categoryId: string | null) {

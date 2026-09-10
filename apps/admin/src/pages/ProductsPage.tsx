@@ -7,33 +7,16 @@ import { statusColor, formatPrice } from '@/lib/utils';
 
 export function ProductsPage() {
   const { data: products, isLoading } = useQuery({ queryKey: ['products'], queryFn: api.listProducts });
-  const { data: suppliers } = useQuery({ queryKey: ['suppliers'], queryFn: api.listSuppliers });
-  const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => api.listCategories() });
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [showDenom, setShowDenom] = useState<any>(null);
   const [showSkuExport, setShowSkuExport] = useState(false);
   const [skuGenResult, setSkuGenResult] = useState<any>(null);
-  const [form, setForm] = useState({ name: '', region: '', supplierId: '', category_id: '', sku: '' });
   const [denomValue, setDenomValue] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<any>(null);
   const [deleteError, setDeleteError] = useState('');
 
-  // Preview the SKU the product will get, so it is visible before creating it.
-  const { data: suggestedSku } = useQuery({
-    queryKey: ['suggest-sku', form.name, form.region],
-    queryFn: () => api.suggestSku(form.name, form.region),
-    enabled: showCreate && form.name.trim().length > 1,
-  });
 
-  const createMutation = useMutation({
-    mutationFn: () => api.createProduct({ name: form.name, region: form.region, supplierId: form.supplierId || undefined, category_id: form.category_id || undefined, sku: form.sku || undefined }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['products'] });
-      setShowCreate(false);
-      setForm({ name: '', region: '', supplierId: '', category_id: '', sku: '' });
-    },
-  });
 
 
   const updateCategoryMutation = useMutation({
@@ -194,63 +177,15 @@ export function ProductsPage() {
         </div>
       </Modal>
 
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create Product">
-        <div className="space-y-4">
-          <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. PSN" />
-          <Input label="Region" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })} placeholder="e.g. USA" />
-          <div className="space-y-2">
-            <Input
-              label="SKU — matches storefront orders to this product"
-              value={form.sku}
-              onChange={(e) => setForm({ ...form, sku: e.target.value })}
-              placeholder={suggestedSku?.sku || 'e.g. PSN-USA'}
-            />
-            {suggestedSku?.sku && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span>Suggested: <span className="font-mono text-primary">{suggestedSku.sku}</span></span>
-                {form.sku !== suggestedSku.sku && (
-                  <button
-                    type="button"
-                    className="rounded border border-input px-2 py-0.5 hover:bg-muted"
-                    onClick={() => setForm({ ...form, sku: suggestedSku.sku })}
-                  >
-                    Use this
-                  </button>
-                )}
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground">
-              Leave blank and this SKU is assigned automatically. Enter the same SKU on the
-              product in your store so its orders match this product.
-            </p>
-          </div>
-          <Select
-            label="Supplier"
-            value={form.supplierId}
-            onChange={(e) => setForm({ ...form, supplierId: e.target.value })}
-            options={[
-              { value: '', label: '— None —' },
-              ...(suppliers?.map((s: any) => ({ value: s.id, label: s.name })) || []),
-            ]}
-          />
-          <Select
-            label="Category"
-            value={form.category_id}
-            onChange={(e) => setForm({ ...form, category_id: e.target.value })}
-            options={[
-              { value: '', label: '— None —' },
-              ...(categories?.map((c: any) => ({ value: c.id, label: c.name })) || []),
-            ]}
-          />
-          <p className="text-xs text-muted-foreground">
-            Add the product's code values here, then say which codes it delivers on the
-            Delivery Rules page.
-          </p>
-          <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending} className="w-full">
-            {createMutation.isPending ? 'Creating...' : 'Create'}
-          </Button>
-        </div>
-      </Modal>
+      {showCreate && (
+        <AddProductModal
+          onClose={() => setShowCreate(false)}
+          onCreated={() => {
+            queryClient.invalidateQueries({ queryKey: ['products'] });
+            setShowCreate(false);
+          }}
+        />
+      )}
 
       <Modal open={!!showDenom} onClose={() => setShowDenom(null)} title={`Add Denomination — ${showDenom?.name}`}>
         <div className="space-y-4">
@@ -456,5 +391,210 @@ function SkuEditor({ product }: { product: any }) {
       </div>
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </div>
+  );
+}
+
+/**
+ * Add a product by walking the catalogue rather than retyping it.
+ *
+ * Pick the category, then the sub-category, and the region comes with it —
+ * "Xbox USA" already knows it is the USA region, so the region is no longer a
+ * free-text box where a typo quietly created a region of its own. The code
+ * values are entered here too, because a product without them cannot be sold
+ * and creating them one dialog at a time afterwards was the slow part.
+ */
+function AddProductModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const { data: categories } = useQuery({ queryKey: ['categories'], queryFn: () => api.listCategories() });
+  const { data: suppliers } = useQuery({ queryKey: ['suppliers'], queryFn: api.listSuppliers });
+  const [categoryId, setCategoryId] = useState('');
+  const { data: subcategories } = useQuery({
+    queryKey: ['subcategories', categoryId],
+    queryFn: () => api.listSubcategories(categoryId, true),
+    enabled: !!categoryId,
+  });
+
+  const [subcategoryId, setSubcategoryId] = useState('');
+  const [name, setName] = useState('');
+  const [region, setRegion] = useState('');
+  const [supplierId, setSupplierId] = useState('');
+  const [sku, setSku] = useState('');
+  const [values, setValues] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const chosen = (subcategories || []).find((row: any) => row.id === subcategoryId);
+  // A sub-category with a region supplies it; one without still needs it typed.
+  const effectiveRegion = chosen?.region?.code || region;
+  const currency = chosen?.region?.currency || 'USD';
+
+  const { data: suggestedSku } = useQuery({
+    queryKey: ['suggest-sku', name, effectiveRegion],
+    queryFn: () => api.suggestSku(name, effectiveRegion),
+    enabled: name.trim().length > 1 && !!effectiveRegion,
+  });
+
+  // "10, 20, 50" or one per line — whatever an admin actually types.
+  const parsedValues = values
+    .split(/[\s,]+/)
+    .map((piece) => piece.trim())
+    .filter(Boolean)
+    .map(Number);
+  const valuesValid = parsedValues.every((value) => Number.isFinite(value) && value > 0);
+
+  const canSubmit = !!categoryId && name.trim().length > 0 && !!effectiveRegion && valuesValid;
+
+  const create = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const product = await api.createProduct({
+        name: name.trim(),
+        region: effectiveRegion,
+        category_id: categoryId,
+        subcategory_id: subcategoryId || undefined,
+        supplier_id: supplierId || undefined,
+        sku: sku.trim() || undefined,
+      });
+      // Values are added one at a time because that is the endpoint that
+      // exists; a failure part-way still leaves the product and whatever was
+      // created, so the error says how far it got.
+      for (const [index, value] of parsedValues.entries()) {
+        try {
+          await api.createDenomination(product.id, value, currency);
+        } catch (err: any) {
+          throw new Error(
+            `${name.trim()} was created, but its ${index === 0 ? 'first' : `${index + 1}th`} ` +
+            `value failed: ${err.message}. Add the rest from the product card.`,
+          );
+        }
+      }
+      onCreated();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Add Product" size="lg">
+      <div className="space-y-4">
+        <Select
+          label="Category"
+          value={categoryId}
+          onChange={(e: any) => { setCategoryId(e.target.value); setSubcategoryId(''); }}
+          options={[
+            { value: '', label: '— Select —' },
+            ...(categories?.map((c: any) => ({
+              value: c.id,
+              label: c.brand ? `${c.brand.name} › ${c.name}` : c.name,
+            })) || []),
+          ]}
+        />
+
+        <Select
+          label="Sub-category"
+          value={subcategoryId}
+          onChange={(e: any) => setSubcategoryId(e.target.value)}
+          options={[
+            {
+              value: '',
+              label: !categoryId
+                ? 'Pick a category first'
+                : (subcategories || []).length === 0
+                  ? 'None yet — add one under Catalog'
+                  : '— None —',
+            },
+            ...((subcategories || []).map((row: any) => ({
+              value: row.id,
+              label: row.region ? `${row.name} (${row.region.code})` : row.name,
+            }))),
+          ]}
+        />
+
+        {chosen?.region ? (
+          <p className="text-xs text-muted-foreground">
+            Region <span className="font-medium text-foreground">{chosen.region.name} ({chosen.region.code})</span>,
+            pricing in {chosen.region.currency} — taken from the sub-category.
+          </p>
+        ) : (
+          <Input
+            label="Region"
+            value={region}
+            onChange={(e: any) => setRegion(e.target.value)}
+            placeholder="e.g. USA"
+          />
+        )}
+
+        <Input
+          label="Name"
+          value={name}
+          onChange={(e: any) => setName(e.target.value)}
+          placeholder="e.g. Xbox Gift Card"
+        />
+
+        <div className="space-y-2">
+          <Input
+            label="SKU — matches storefront orders to this product"
+            value={sku}
+            onChange={(e: any) => setSku(e.target.value)}
+            placeholder={suggestedSku?.sku || 'e.g. XBOX-USA'}
+          />
+          {suggestedSku?.sku && sku !== suggestedSku.sku && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>Suggested: <span className="font-mono text-primary">{suggestedSku.sku}</span></span>
+              <button
+                type="button"
+                className="rounded border border-input px-2 py-0.5 hover:bg-muted"
+                onClick={() => setSku(suggestedSku.sku)}
+              >
+                Use this
+              </button>
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Leave blank and one is assigned automatically.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Input
+            label={`Code values (${currency})`}
+            value={values}
+            onChange={(e: any) => setValues(e.target.value)}
+            placeholder="10, 20, 50, 100"
+          />
+          {parsedValues.length > 0 && valuesValid && (
+            <p className="text-xs text-muted-foreground">
+              Creates {parsedValues.length} value(s): {parsedValues.map((v) => formatPrice(v, currency)).join(', ')}
+            </p>
+          )}
+          {!valuesValid && (
+            <p role="alert" className="text-xs text-destructive">
+              Values must be numbers above zero, separated by commas or spaces.
+            </p>
+          )}
+        </div>
+
+        <Select
+          label="Supplier (optional)"
+          value={supplierId}
+          onChange={(e: any) => setSupplierId(e.target.value)}
+          options={[
+            { value: '', label: '— None —' },
+            ...(suppliers?.map((sup: any) => ({ value: sup.id, label: sup.name })) || []),
+          ]}
+        />
+
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+
+        <div className="flex gap-2">
+          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancel</Button>
+          <Button className="flex-1" disabled={!canSubmit || busy} onClick={create}>
+            {busy ? 'Creating...' : 'Create product'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }

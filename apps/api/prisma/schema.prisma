@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "debian-openssl-3.0.x", "debian-openssl-1.1.x"]
 }
 
@@ -9,66 +9,66 @@ datasource db {
 }
 
 model AdminUser {
-  id           String    @id @default(uuid())
-  email        String    @unique
-  name         String
-  passwordHash String
-  role         String    @default("SUPPORT")
+  id              String    @id @default(uuid())
+  email           String    @unique
+  name            String
+  passwordHash    String
+  role            String    @default("SUPPORT")
   twoFactorSecret String?
-  isActive     Boolean   @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  isActive        Boolean   @default(true)
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }
 
 model Merchant {
-  id            String         @id @default(uuid())
-  name          String
-  email         String         @unique
-  address       String?
-  status        String         @default("ACTIVE")
-  walletBalance Decimal         @default(0)
-  currency      String         @default("USD")
-  allowedProductIds String     @default("[]")
-  twoFactorRequired Boolean    @default(false)
-  totalKeysGenerated Int        @default(0)
+  id                 String    @id @default(uuid())
+  name               String
+  email              String    @unique
+  address            String?
+  status             String    @default("ACTIVE")
+  walletBalance      Decimal   @default(0)
+  currency           String    @default("USD")
+  allowedProductIds  String    @default("[]")
+  twoFactorRequired  Boolean   @default(false)
+  totalKeysGenerated Int       @default(0)
   lastKeyGeneratedAt DateTime?
-  webhookSecret  String?        @unique
+  webhookSecret      String?   @unique
   // ─── Registration / KYC info ───
-  firstName      String?
-  lastName       String?
-  phone          String?
-  idDocType      String?        // CNIC | PASSPORT | LICENSE
-  idFrontImage   String?        // base64 data-URL
-  idBackImage    String?        // base64 data-URL
-  businessNtn    String?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  firstName          String?
+  lastName           String?
+  phone              String?
+  idDocType          String? // CNIC | PASSPORT | LICENSE
+  idFrontImage       String? // base64 data-URL
+  idBackImage        String? // base64 data-URL
+  businessNtn        String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  users           MerchantUser[]
-  apiKeys         ApiKey[]
-  fulfillmentReqs FulfillmentRequest[]
-  walletTxns      WalletTransaction[]
-  wallets         MerchantWallet[]
-  webhookEndpoints WebhookEndpoint[]
-  products        Product[]
+  users             MerchantUser[]
+  apiKeys           ApiKey[]
+  fulfillmentReqs   FulfillmentRequest[]
+  walletTxns        WalletTransaction[]
+  wallets           MerchantWallet[]
+  webhookEndpoints  WebhookEndpoint[]
+  products          Product[]
   connectedProducts ConnectedProduct[]
-  codeItems       CodeItem[]
-  fundingRequests FundingRequest[]
-  supportMessages SupportMessage[]
+  codeItems         CodeItem[]
+  fundingRequests   FundingRequest[]
+  supportMessages   SupportMessage[]
 }
 
 model MerchantUser {
-  id           String   @id @default(uuid())
-  merchantId   String
-  email        String   @unique
-  name         String
-  passwordHash String
+  id              String    @id @default(uuid())
+  merchantId      String
+  email           String    @unique
+  name            String
+  passwordHash    String
   twoFactorSecret String?
-  isActive     Boolean  @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  isActive        Boolean   @default(true)
+  lastLoginAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
 
@@ -76,16 +76,16 @@ model MerchantUser {
 }
 
 model ApiKey {
-  id           String       @id @default(uuid())
-  merchantId   String
-  keyPrefix    String
-  keyHash      String
-  scopes       String       @default("[]")
-  ipWhitelist  String       @default("[]")
-  status       String       @default("ACTIVE")
-  lastUsedAt   DateTime?
-  createdAt    DateTime     @default(now())
-  revokedAt    DateTime?
+  id          String    @id @default(uuid())
+  merchantId  String
+  keyPrefix   String
+  keyHash     String
+  scopes      String    @default("[]")
+  ipWhitelist String    @default("[]")
+  status      String    @default("ACTIVE")
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  revokedAt   DateTime?
 
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
 
@@ -101,8 +101,8 @@ model Supplier {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  products  Product[]
-  codeItems CodeItem[]
+  products    Product[]
+  codeItems   CodeItem[]
   codeBatches CodeBatch[]
 }
 
@@ -135,10 +135,38 @@ model Category {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  brand    Brand?    @relation(fields: [brandId], references: [id], onDelete: SetNull)
-  products Product[]
+  brand         Brand?        @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  products      Product[]
+  subcategories Subcategory[]
 
   @@index([brandId])
+}
+
+/// A grouping inside a category — "Xbox USA", "Xbox Game Pass".
+///
+/// Most subcategories are a region by another name, so one may point at a
+/// Region and a product filed under it inherits that region's currency. The
+/// link is optional because not every grouping is geographic: "Game Pass" sits
+/// beside "USA" and "UK" without being a place. Regions stay global and shared,
+/// which is what keeps the currency of a region the same for every brand.
+model Subcategory {
+  id         String   @id @default(uuid())
+  name       String
+  slug       String   @unique
+  categoryId String
+  regionId   String?
+  sortOrder  Int      @default(0)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  category Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  region   Region?   @relation(fields: [regionId], references: [id], onDelete: SetNull)
+  products Product[]
+
+  @@unique([categoryId, name])
+  @@index([categoryId])
+  @@index([regionId])
 }
 
 model Region {
@@ -152,6 +180,7 @@ model Region {
   updatedAt DateTime @updatedAt
 
   productRegions ProductRegion[]
+  subcategories  Subcategory[]
 }
 
 model ProductRegion {
@@ -162,9 +191,9 @@ model ProductRegion {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
-  region    Region  @relation(fields: [regionId], references: [id], onDelete: Cascade)
-  variants  Variant[]
+  product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  region   Region    @relation(fields: [regionId], references: [id], onDelete: Cascade)
+  variants Variant[]
 
   @@unique([productId, regionId])
   @@index([productId])
@@ -172,23 +201,23 @@ model ProductRegion {
 }
 
 model Variant {
-  id             String   @id @default(uuid())
+  id              String   @id @default(uuid())
   productRegionId String
-  name           String
-  slug           String
-  description    String?
-  customerPrice  Decimal
-  currency       String   @default("USD")
+  name            String
+  slug            String
+  description     String?
+  customerPrice   Decimal
+  currency        String   @default("USD")
   // Variant SKU, e.g. PSN-KSA-ESS-1M. Unique per region because the same pack
   // sells at a different price in each one.
-  sku            String?
-  active         Boolean  @default(true)
-  sortOrder      Int      @default(0)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  sku             String?
+  active          Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  productRegion   ProductRegion          @relation(fields: [productRegionId], references: [id], onDelete: Cascade)
-  combinations    FulfillmentCombination[]
+  productRegion ProductRegion            @relation(fields: [productRegionId], references: [id], onDelete: Cascade)
+  combinations  FulfillmentCombination[]
 
   @@unique([productRegionId, slug])
   @@index([productRegionId])
@@ -196,16 +225,16 @@ model Variant {
 }
 
 model FulfillmentCombination {
-  id          String   @id @default(uuid())
-  variantId   String
-  name        String
-  priority    Int      @default(1)
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  variantId String
+  name      String
+  priority  Int      @default(1)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  variant    Variant                     @relation(fields: [variantId], references: [id], onDelete: Cascade)
-  items      FulfillmentCombinationItem[]
+  variant Variant                      @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  items   FulfillmentCombinationItem[]
 
   @@index([variantId, active, priority])
 }
@@ -218,51 +247,54 @@ model FulfillmentCombinationItem {
   createdAt      DateTime @default(now())
 
   combination  FulfillmentCombination @relation(fields: [combinationId], references: [id], onDelete: Cascade)
-  denomination Denomination @relation(fields: [denominationId], references: [id], onDelete: Cascade)
+  denomination Denomination           @relation(fields: [denominationId], references: [id], onDelete: Cascade)
 
   @@index([combinationId])
   @@index([denominationId])
 }
 
 model Product {
-  id         String   @id @default(uuid())
-  name       String
-  region     String
-  sku        String?  // Optional SKU for auto-matching incoming webhook orders
-  categoryId String?
-  supplierId String?
-  merchantId String?
-  status     String   @default("ACTIVE")
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id            String   @id @default(uuid())
+  name          String
+  region        String
+  sku           String? // Optional SKU for auto-matching incoming webhook orders
+  categoryId    String?
+  subcategoryId String?
+  supplierId    String?
+  merchantId    String?
+  status        String   @default("ACTIVE")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  category       Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  supplier      Supplier?      @relation(fields: [supplierId], references: [id])
-  merchant      Merchant?      @relation(fields: [merchantId], references: [id])
-  denominations Denomination[]
-  fulfillmentReqs FulfillmentRequest[]
-  connectedProducts ConnectedProduct[] @relation("ConnectedProductDcvProduct")
-  productRegions ProductRegion[]
+  category          Category?            @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  subcategory       Subcategory?         @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
+  supplier          Supplier?            @relation(fields: [supplierId], references: [id])
+  merchant          Merchant?            @relation(fields: [merchantId], references: [id])
+  denominations     Denomination[]
+  fulfillmentReqs   FulfillmentRequest[]
+  connectedProducts ConnectedProduct[]   @relation("ConnectedProductDcvProduct")
+  productRegions    ProductRegion[]
 
   @@index([merchantId])
   @@index([categoryId])
+  @@index([subcategoryId])
   @@index([sku])
 }
 
 model Denomination {
-  id         String   @id @default(uuid())
-  productId  String
-  faceValue  Decimal
-  currency   String   @default("USD")
+  id        String   @id @default(uuid())
+  productId String
+  faceValue Decimal
+  currency  String   @default("USD")
   // Sub-product SKU, e.g. PSN-USA-10. Derived from the product SKU by default
   // but editable, and it is what a storefront line item is matched against.
-  sku        String?
-  createdAt  DateTime @default(now())
+  sku       String?
+  createdAt DateTime @default(now())
 
-  product   Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
-  codeItems CodeItem[]
+  product          Product                      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  codeItems        CodeItem[]
   combinationItems FulfillmentCombinationItem[]
-  codeBatches CodeBatch[]
+  codeBatches      CodeBatch[]
 
   @@unique([productId, faceValue, currency])
   @@index([productId])
@@ -270,21 +302,21 @@ model Denomination {
 }
 
 model CodeItem {
-  id              String      @id @default(uuid())
+  id              String    @id @default(uuid())
   denominationId  String
   encryptedCode   String
   codeHash        String
-  status          String  @default("AVAILABLE")
+  status          String    @default("AVAILABLE")
   batchId         String?
   supplierId      String?
   merchantId      String?
-  source          String  @default("DCV")
+  source          String    @default("DCV")
   reservedUntil   DateTime?
   reservedByReqId String?
   revealedAt      DateTime?
   revealedIp      String?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   denomination Denomination @relation(fields: [denominationId], references: [id], onDelete: Cascade)
   supplier     Supplier?    @relation(fields: [supplierId], references: [id])
@@ -299,37 +331,37 @@ model CodeItem {
 }
 
 model FulfillmentRequest {
-  id              String             @id @default(uuid())
+  id              String   @id @default(uuid())
   merchantId      String
   productId       String
-  amount          Decimal            @default(0)
+  amount          Decimal  @default(0)
   // Fixed manual-order discount; amount remains the original allocation value.
-  discountAmount  Decimal            @default(0)
-  currency        String             @default("USD")
+  discountAmount  Decimal  @default(0)
+  currency        String   @default("USD")
   // What the merchant wallet was actually charged. `amount` stays the USD face
   // value; these record the wallet's own currency and the rate used at order
   // time, so a later rate change cannot rewrite past orders.
-  chargedCurrency String             @default("USD")
-  chargedAmount   Decimal            @default(0)
-  fxRate          Decimal            @default(1)
+  chargedCurrency String   @default("USD")
+  chargedAmount   Decimal  @default(0)
+  fxRate          Decimal  @default(1)
   idempotencyKey  String
   referenceId     String?
-  status          String             @default("PENDING")
+  status          String   @default("PENDING")
   failureReason   String?
-  sandbox         Boolean            @default(false)
+  sandbox         Boolean  @default(false)
   customerEmail   String?
   customerName    String?
   customerAddress String?
-  inventorySource String?            @default("DCV")
-  walletCharged   Boolean            @default(false)
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  inventorySource String?  @default("DCV")
+  walletCharged   Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  merchant        Merchant           @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  product         Product            @relation(fields: [productId], references: [id])
-  allocations     Allocation[]
-  deliveryToken   DeliveryToken?
-  walletTxn       WalletTransaction?
+  merchant      Merchant           @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  product       Product            @relation(fields: [productId], references: [id])
+  allocations   Allocation[]
+  deliveryToken DeliveryToken?
+  walletTxn     WalletTransaction?
 
   @@unique([merchantId, idempotencyKey])
   @@index([merchantId])
@@ -339,11 +371,11 @@ model FulfillmentRequest {
 }
 
 model Allocation {
-  id              String   @id @default(uuid())
-  fulfillmentId   String
-  codeItemIds     String   @default("[]")
-  status          String   @default("ALLOCATED")
-  createdAt       DateTime @default(now())
+  id            String   @id @default(uuid())
+  fulfillmentId String
+  codeItemIds   String   @default("[]")
+  status        String   @default("ALLOCATED")
+  createdAt     DateTime @default(now())
 
   fulfillment FulfillmentRequest @relation(fields: [fulfillmentId], references: [id], onDelete: Cascade)
 
@@ -364,18 +396,18 @@ model DeliveryToken {
 }
 
 model WalletTransaction {
-  id            String        @id @default(uuid())
+  id            String   @id @default(uuid())
   merchantId    String
   type          String
   amount        Decimal
   // Wallet currency this row is denominated in; balances never mix currencies.
-  currency      String        @default("USD")
+  currency      String   @default("USD")
   balanceAfter  Decimal
   referenceId   String?
-  fulfillmentId String?       @unique
-  createdAt     DateTime      @default(now())
+  fulfillmentId String?  @unique
+  createdAt     DateTime @default(now())
 
-  merchant    Merchant           @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  merchant    Merchant            @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   fulfillment FulfillmentRequest? @relation(fields: [fulfillmentId], references: [id])
 
   @@index([merchantId])
@@ -397,7 +429,7 @@ model WebhookEndpoint {
 }
 
 model AuditLog {
-  id        String     @id @default(uuid())
+  id        String   @id @default(uuid())
   actorType String
   actorId   String?
   action    String
@@ -407,7 +439,7 @@ model AuditLog {
   ip        String?
   prevHash  String?
   entryHash String?
-  createdAt DateTime   @default(now())
+  createdAt DateTime @default(now())
 
   @@index([actorType, actorId])
   @@index([entity, entityId])
@@ -429,18 +461,18 @@ model IdempotencyRecord {
 }
 
 model Customer {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  name         String
-  passwordHash String
-  isActive     Boolean  @default(true)
-  merchantId   String?
+  id                String    @id @default(uuid())
+  email             String    @unique
+  name              String
+  passwordHash      String
+  isActive          Boolean   @default(true)
+  merchantId        String?
   merchantAppStatus String? // PENDING | APPROVED | REJECTED
-  lastLoginAt  DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  lastLoginAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  verificationCode VerificationCode?
+  verificationCode    VerificationCode?
   merchantApplication MerchantApplication?
 
   @@index([merchantId])
@@ -448,39 +480,39 @@ model Customer {
 }
 
 model MerchantApplication {
-  id            String   @id @default(uuid())
-  customerId    String   @unique
-  storeName     String
-  storeEmail    String
-  currency      String   @default("USD")
+  id           String    @id @default(uuid())
+  customerId   String    @unique
+  storeName    String
+  storeEmail   String
+  currency     String    @default("USD")
   // ─── KYC details submitted with the application ───
-  firstName     String?
-  lastName      String?
-  phone         String?
-  idDocType     String?  // CNIC | PASSPORT | LICENSE
-  idFrontImage  String?  // base64 data-URL
-  idBackImage   String?  // base64 data-URL
-  businessNtn   String?
-  status        String   @default("PENDING") // PENDING | APPROVED | REJECTED
-  adminNote     String?
-  reviewedBy    String?
-  reviewedAt    DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  firstName    String?
+  lastName     String?
+  phone        String?
+  idDocType    String? // CNIC | PASSPORT | LICENSE
+  idFrontImage String? // base64 data-URL
+  idBackImage  String? // base64 data-URL
+  businessNtn  String?
+  status       String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  adminNote    String?
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@index([status])
   @@index([createdAt])
 }
 
 model VerificationCode {
-  id        String   @id @default(uuid())
-  customerId String  @unique
-  code      String
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(uuid())
+  customerId String   @unique
+  code       String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
@@ -488,17 +520,17 @@ model VerificationCode {
 }
 
 model EmailLog {
-  id              String   @id @default(uuid())
-  merchantId      String?
-  recipient       String
-  subject         String
-  template        String?
-  status          String   @default("PENDING")
+  id               String    @id @default(uuid())
+  merchantId       String?
+  recipient        String
+  subject          String
+  template         String?
+  status           String    @default("PENDING")
   providerResponse String?
-  errorMessage    String?
-  retryCount      Int      @default(0)
-  sentAt          DateTime?
-  createdAt       DateTime @default(now())
+  errorMessage     String?
+  retryCount       Int       @default(0)
+  sentAt           DateTime?
+  createdAt        DateTime  @default(now())
 
   @@index([merchantId])
   @@index([recipient])
@@ -507,34 +539,34 @@ model EmailLog {
 }
 
 model IncomingWebhook {
-  id              String   @id @default(uuid())
-  eventId         String   @unique
-  merchantId      String?
-  platform        String
-  provider        String?
-  orderId         String?
-  productId       String?
-  productName     String?
-  productSku      String?
-  productCategory String?
-  customerName    String?
-  customerEmail   String?
-  quantity        Int?
-  amount          Decimal?
-  currency        String?
-  paymentStatus   String?
-  orderStatus     String?
-  processingStatus String  @default("PENDING")
-  rawPayload      String
-  rawHeaders      String?
-  signature       String?
-  sourceIp        String?
-  responseCode    Int?
-  retryCount      Int      @default(0)
-  errorMessage    String?
-  processedAt     DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String    @id @default(uuid())
+  eventId          String    @unique
+  merchantId       String?
+  platform         String
+  provider         String?
+  orderId          String?
+  productId        String?
+  productName      String?
+  productSku       String?
+  productCategory  String?
+  customerName     String?
+  customerEmail    String?
+  quantity         Int?
+  amount           Decimal?
+  currency         String?
+  paymentStatus    String?
+  orderStatus      String?
+  processingStatus String    @default("PENDING")
+  rawPayload       String
+  rawHeaders       String?
+  signature        String?
+  sourceIp         String?
+  responseCode     Int?
+  retryCount       Int       @default(0)
+  errorMessage     String?
+  processedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([eventId])
   @@index([merchantId])
@@ -547,28 +579,28 @@ model IncomingWebhook {
 }
 
 model AdminWallet {
-  id            String   @id @default(uuid())
-  balance       Decimal  @default(0)
-  currency      String   @default("USD")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id        String   @id @default(uuid())
+  balance   Decimal  @default(0)
+  currency  String   @default("USD")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  transactions  AdminWalletTransaction[]
-  fundingRequests FundingRequest[] @relation("AdminWalletFundingRequests")
+  transactions    AdminWalletTransaction[]
+  fundingRequests FundingRequest[]         @relation("AdminWalletFundingRequests")
 }
 
 model AdminWalletTransaction {
   id            String   @id @default(uuid())
   adminWalletId String
-  type          String   // CREDIT | DEBIT
+  type          String // CREDIT | DEBIT
   amount        Decimal
   balanceAfter  Decimal
-  referenceId   String?  // fulfillment ID or funding request ID
-  source        String   // FULFILLMENT | FUNDING | MANUAL | REFUND
+  referenceId   String? // fulfillment ID or funding request ID
+  source        String // FULFILLMENT | FUNDING | MANUAL | REFUND
   description   String?
   createdAt     DateTime @default(now())
 
-  adminWallet   AdminWallet @relation(fields: [adminWalletId], references: [id], onDelete: Cascade)
+  adminWallet AdminWallet @relation(fields: [adminWalletId], references: [id], onDelete: Cascade)
 
   @@index([adminWalletId])
   @@index([referenceId])
@@ -577,22 +609,22 @@ model AdminWalletTransaction {
 }
 
 model FundingRequest {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   merchantId    String
   adminWalletId String
   amount        Decimal
-  currency      String   @default("USD")
+  currency      String    @default("USD")
   note          String?
-  screenshot    String?  // base64 data-URL of the payment proof (EasyPaisa/bank receipt)
-  status        String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  screenshot    String? // base64 data-URL of the payment proof (EasyPaisa/bank receipt)
+  status        String    @default("PENDING") // PENDING | APPROVED | REJECTED
   adminNote     String?
   reviewedBy    String?
   reviewedAt    DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  merchant      Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  adminWallet   AdminWallet @relation("AdminWalletFundingRequests", fields: [adminWalletId], references: [id], onDelete: Cascade)
+  merchant    Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  adminWallet AdminWallet @relation("AdminWalletFundingRequests", fields: [adminWalletId], references: [id], onDelete: Cascade)
 
   @@index([merchantId])
   @@index([adminWalletId])
@@ -601,16 +633,16 @@ model FundingRequest {
 }
 
 model SupportMessage {
-  id              String   @id @default(uuid())
-  merchantId      String
-  senderRole      String   // MERCHANT | ADMIN
-  senderName      String?
-  body            String?
-  image           String?  // base64 data-URL attachment (payment proof, screenshots)
+  id               String   @id @default(uuid())
+  merchantId       String
+  senderRole       String // MERCHANT | ADMIN
+  senderName       String?
+  body             String?
+  image            String? // base64 data-URL attachment (payment proof, screenshots)
   fundingRequestId String? // links a chat thread to a funding request when applicable
-  readByAdmin     Boolean  @default(false)
-  readByMerchant  Boolean  @default(false)
-  createdAt       DateTime @default(now())
+  readByAdmin      Boolean  @default(false)
+  readByMerchant   Boolean  @default(false)
+  createdAt        DateTime @default(now())
 
   merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
 
@@ -672,7 +704,7 @@ model MerchantWallet {
 model CodeBatch {
   id             String   @id // same nanoid stored on each CodeItem.batchId
   denominationId String
-  batchName      String?  // human-friendly name set by admin at upload time
+  batchName      String? // human-friendly name set by admin at upload time
   // Allocation order within a denomination: the lowest number is used up first.
   priority       Int      @default(0)
   quantity       Int
@@ -691,30 +723,30 @@ model CodeBatch {
 }
 
 model ConnectedProduct {
-  id              String   @id @default(uuid())
-  merchantId      String
-  platform        String
-  provider        String?
+  id                String    @id @default(uuid())
+  merchantId        String
+  platform          String
+  provider          String?
   platformProductId String?
-  platformSku     String?
-  name            String
-  sku             String?
-  category        String?
-  imageUrl        String?
-  price           Decimal?
-  currency        String?
-  stock           Int      @default(0)
-  status          String   @default("ACTIVE")
-  inventorySource String?  @default("DCV")
-  dcvProductId    String?
+  platformSku       String?
+  name              String
+  sku               String?
+  category          String?
+  imageUrl          String?
+  price             Decimal?
+  currency          String?
+  stock             Int       @default(0)
+  status            String    @default("ACTIVE")
+  inventorySource   String?   @default("DCV")
+  dcvProductId      String?
   dcvDenominationId String?
-  dcvVariantId    String?
-  lastSyncedAt    DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  dcvVariantId      String?
+  lastSyncedAt      DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  dcvProduct    Product?     @relation("ConnectedProductDcvProduct", fields: [dcvProductId], references: [id], onDelete: SetNull)
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  dcvProduct Product? @relation("ConnectedProductDcvProduct", fields: [dcvProductId], references: [id], onDelete: SetNull)
 
   @@unique([merchantId, platform, platformProductId])
   @@unique([merchantId, platform, platformSku])
@@ -725,27 +757,27 @@ model ConnectedProduct {
 }
 
 model PaymentRecord {
-  id                    String    @id @default(uuid())
-  customerId            String?
-  merchantId            String?
-  customerOrderId       String?  @unique
-  stripeCheckoutSessionId String?  @unique
-  stripePaymentIntentId String?  @unique
-  stripeEventId         String?  @unique
-  amount                Decimal
-  currency              String   @default("USD")
-  status                String   @default("PENDING") // PENDING | SUCCEEDED | FAILED | CANCELED | REFUNDED
-  paymentType           String   // CUSTOMER_PURCHASE | MERCHANT_WALLET_FUNDING
-  description           String?
-  metadata              String?
-  refundAmount          Decimal?
-  refundReason          String?
-  refundedAt            DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  paidAt                DateTime?
+  id                      String    @id @default(uuid())
+  customerId              String?
+  merchantId              String?
+  customerOrderId         String?   @unique
+  stripeCheckoutSessionId String?   @unique
+  stripePaymentIntentId   String?   @unique
+  stripeEventId           String?   @unique
+  amount                  Decimal
+  currency                String    @default("USD")
+  status                  String    @default("PENDING") // PENDING | SUCCEEDED | FAILED | CANCELED | REFUNDED
+  paymentType             String // CUSTOMER_PURCHASE | MERCHANT_WALLET_FUNDING
+  description             String?
+  metadata                String?
+  refundAmount            Decimal?
+  refundReason            String?
+  refundedAt              DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  paidAt                  DateTime?
 
-  customerOrder         CustomerOrder? @relation(fields: [customerOrderId], references: [id])
+  customerOrder CustomerOrder? @relation(fields: [customerOrderId], references: [id])
 
   @@index([merchantId])
   @@index([customerId])
@@ -755,22 +787,22 @@ model PaymentRecord {
 }
 
 model CustomerOrder {
-  id              String   @id @default(uuid())
-  customerId      String?
-  customerEmail   String
-  customerName    String?
-  productId       String
-  denominationId  String?
-  amount          Decimal
-  currency        String   @default("USD")
-  status          String   @default("PENDING_PAYMENT") // PENDING_PAYMENT | PAID | FULFILLED | FAILED | CANCELED
-  fulfillmentId   String?
-  revealToken     String?
-  errorMessage    String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(uuid())
+  customerId     String?
+  customerEmail  String
+  customerName   String?
+  productId      String
+  denominationId String?
+  amount         Decimal
+  currency       String   @default("USD")
+  status         String   @default("PENDING_PAYMENT") // PENDING_PAYMENT | PAID | FULFILLED | FAILED | CANCELED
+  fulfillmentId  String?
+  revealToken    String?
+  errorMessage   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  payment         PaymentRecord?
+  payment PaymentRecord?
 
   @@index([customerId])
   @@index([customerEmail])
