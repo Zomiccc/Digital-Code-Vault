@@ -1,10 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Plus, Trash2, Globe, FolderTree, Tags, Layers, GitBranch } from 'lucide-react';
+import { Plus, Trash2, FolderTree, Layers, GitBranch } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Input, Select, Modal, Badge } from '@/components/ui';
 
-type Tab = 'brands' | 'categories' | 'subcategories' | 'regions' | 'productRegions';
+type Tab = 'brands' | 'categories' | 'subcategories';
 
 export function CatalogPage() {
   const queryClient = useQueryClient();
@@ -15,9 +15,9 @@ export function CatalogPage() {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Catalog Management</h1>
         <p className="text-sm text-muted-foreground">
-          Brand → Category → Subcategory → Product. A brand is the company (Microsoft), a category
-          is what it sells (Xbox Digital Codes), and a subcategory is the grouping inside it
-          (Xbox USA, Xbox Game Pass). Products are then filed under a subcategory.
+          Brand → Category → Sub-category. A brand is the company (Microsoft), a category is what
+          it sells (Xbox Digital Codes), and a sub-category is the grouping inside it (Xbox USA,
+          Xbox Game Pass). Products are then added under a sub-category.
         </p>
       </div>
 
@@ -25,15 +25,11 @@ export function CatalogPage() {
         <TabButton active={tab === 'brands'} onClick={() => setTab('brands')} icon={Layers} label="Brands" />
         <TabButton active={tab === 'categories'} onClick={() => setTab('categories')} icon={FolderTree} label="Categories" />
         <TabButton active={tab === 'subcategories'} onClick={() => setTab('subcategories')} icon={GitBranch} label="Sub-categories" />
-        <TabButton active={tab === 'regions'} onClick={() => setTab('regions')} icon={Globe} label="Regions" />
-        <TabButton active={tab === 'productRegions'} onClick={() => setTab('productRegions')} icon={Tags} label="Product-Regions" />
       </div>
 
       {tab === 'brands' && <BrandsTab />}
       {tab === 'categories' && <CategoriesTab />}
       {tab === 'subcategories' && <SubcategoriesTab />}
-      {tab === 'regions' && <RegionsTab />}
-      {tab === 'productRegions' && <ProductRegionsTab />}
     </div>
   );
 }
@@ -190,143 +186,7 @@ function CategoriesTab() {
   );
 }
 
-function RegionsTab() {
-  const queryClient = useQueryClient();
-  const { data: regions, isLoading } = useQuery({ queryKey: ['regions'], queryFn: () => api.listRegions() });
-  const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ name: '', code: '', currency: 'USD', symbol: '$' });
 
-  const createMutation = useMutation({
-    mutationFn: () => api.createRegion(form),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['regions'] });
-      setShowCreate(false);
-      setForm({ name: '', code: '', currency: 'USD', symbol: '$' });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.deleteRegion(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['regions'] }),
-  });
-
-  if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
-
-  return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button onClick={() => setShowCreate(true)}><Plus className="mr-2 h-4 w-4" /> Add Region</Button>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {regions?.map((region: any) => (
-          <Card key={region.id} hover>
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="text-lg font-semibold">{region.name}</h3>
-                <p className="text-xs text-muted-foreground">{region.code} · {region.currency} {region.symbol}</p>
-                <Badge className={`mt-3 ${region.active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                  {region.active ? 'ACTIVE' : 'INACTIVE'}
-                </Badge>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => deleteMutation.mutate(region.id)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
-          </Card>
-        ))}
-      </div>
-
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create Region">
-        <div className="space-y-4">
-          <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. United States" />
-          <Input label="Code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="e.g. USA" />
-          <Input label="Currency" value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} placeholder="USD" />
-          <Input label="Symbol" value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value })} placeholder="$" />
-          <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending || !form.name || !form.code} className="w-full">
-            {createMutation.isPending ? 'Creating...' : 'Create'}
-          </Button>
-        </div>
-      </Modal>
-    </div>
-  );
-}
-
-function ProductRegionsTab() {
-  const queryClient = useQueryClient();
-  const { data: products } = useQuery({ queryKey: ['admin-products'], queryFn: api.listProducts });
-  const { data: regions } = useQuery({ queryKey: ['regions'], queryFn: () => api.listRegions() });
-  const { data: productRegions, isLoading } = useQuery({ queryKey: ['product-regions-all'], queryFn: () => api.listProductRegions() });
-  const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ productId: '', regionId: '' });
-
-  const createMutation = useMutation({
-    mutationFn: () => api.createProductRegion(form),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['product-regions-all'] });
-      setShowCreate(false);
-      setForm({ productId: '', regionId: '' });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => api.deleteProductRegion(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['product-regions-all'] }),
-  });
-
-  if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
-
-  return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button onClick={() => setShowCreate(true)}><Plus className="mr-2 h-4 w-4" /> Map Product to Region</Button>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {productRegions?.map((pr: any) => (
-          <Card key={pr.id} hover>
-            <div className="flex items-start justify-between">
-              <div>
-                <h3 className="text-lg font-semibold">{pr.product?.name}</h3>
-                <p className="text-sm text-muted-foreground">{pr.region?.name} ({pr.region?.code})</p>
-                <Badge className={`mt-3 ${pr.active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                  {pr.active ? 'ACTIVE' : 'INACTIVE'}
-                </Badge>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => deleteMutation.mutate(pr.id)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
-          </Card>
-        ))}
-      </div>
-
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Map Product to Region">
-        <div className="space-y-4">
-          <Select
-            label="Product"
-            value={form.productId}
-            onChange={(e) => setForm({ ...form, productId: e.target.value })}
-            options={[
-              { value: '', label: '— Select Product —' },
-              ...(products?.map((p: any) => ({ value: p.id, label: `${p.name} (${p.region})` })) || []),
-            ]}
-          />
-          <Select
-            label="Region"
-            value={form.regionId}
-            onChange={(e) => setForm({ ...form, regionId: e.target.value })}
-            options={[
-              { value: '', label: '— Select Region —' },
-              ...(regions?.map((r: any) => ({ value: r.id, label: `${r.name} (${r.code})` })) || []),
-            ]}
-          />
-          <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending || !form.productId || !form.regionId} className="w-full">
-            {createMutation.isPending ? 'Creating...' : 'Create Mapping'}
-          </Button>
-        </div>
-      </Modal>
-    </div>
-  );
-}
 
 /**
  * Sub-categories: the grouping inside a category.
@@ -349,6 +209,12 @@ function SubcategoriesTab() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ name: '', categoryId: '', regionId: '' });
   const [error, setError] = useState('');
+  // A sub-category usually IS a region, so a new one is made here rather than
+  // on a separate screen. The currency lives on the region and drives every
+  // price shown for it, which is why it is asked for rather than assumed.
+  const [newRegion, setNewRegion] = useState<null | {
+    name: string; code: string; currency: string; symbol: string;
+  }>(null);
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['subcategories'] });
@@ -356,15 +222,31 @@ function SubcategoriesTab() {
   };
 
   const createMutation = useMutation({
-    mutationFn: () => api.createSubcategory({
-      name: form.name.trim(),
-      categoryId: form.categoryId,
-      regionId: form.regionId || null,
-    }),
+    mutationFn: async () => {
+      // Create the region first when one was typed, so the sub-category can
+      // point at it in the same step.
+      let regionId = form.regionId || null;
+      if (newRegion) {
+        const created = await api.createRegion({
+          name: newRegion.name.trim(),
+          code: newRegion.code.trim().toUpperCase(),
+          currency: newRegion.currency.trim().toUpperCase() || 'USD',
+          symbol: newRegion.symbol.trim() || '$',
+        });
+        regionId = created.id;
+      }
+      return api.createSubcategory({
+        name: form.name.trim(),
+        categoryId: form.categoryId,
+        regionId,
+      });
+    },
     onSuccess: () => {
       refresh();
+      queryClient.invalidateQueries({ queryKey: ['regions'] });
       setShowCreate(false);
       setForm({ name: '', categoryId: '', regionId: '' });
+      setNewRegion(null);
       setError('');
     },
     onError: (err: any) => setError(err.message),
@@ -466,16 +348,60 @@ function SubcategoriesTab() {
           />
           <Select
             label="Region (optional)"
-            value={form.regionId}
-            onChange={(e) => setForm({ ...form, regionId: e.target.value })}
+            value={newRegion ? '__new' : form.regionId}
+            onChange={(e) => {
+              const value = e.target.value;
+              if (value === '__new') {
+                setNewRegion({ name: '', code: '', currency: 'USD', symbol: '$' });
+                setForm({ ...form, regionId: '' });
+              } else {
+                setNewRegion(null);
+                setForm({ ...form, regionId: value });
+              }
+            }}
             options={[
               { value: '', label: 'No region' },
               ...(regions?.map((r: any) => ({
                 value: r.id,
                 label: `${r.name} (${r.code}) · ${r.currency}`,
               })) || []),
+              { value: '__new', label: '+ New region...' },
             ]}
           />
+
+          {newRegion && (
+            <div className="grid gap-3 rounded-lg border border-border p-3 sm:grid-cols-2">
+              <Input
+                label="Region name"
+                value={newRegion.name}
+                onChange={(e) => setNewRegion({ ...newRegion, name: e.target.value })}
+                placeholder="e.g. Turkey"
+              />
+              <Input
+                label="Code"
+                value={newRegion.code}
+                onChange={(e) => setNewRegion({ ...newRegion, code: e.target.value })}
+                placeholder="e.g. TR"
+              />
+              <Input
+                label="Currency"
+                value={newRegion.currency}
+                onChange={(e) => setNewRegion({ ...newRegion, currency: e.target.value })}
+                placeholder="e.g. TRY"
+              />
+              <Input
+                label="Symbol"
+                value={newRegion.symbol}
+                onChange={(e) => setNewRegion({ ...newRegion, symbol: e.target.value })}
+                placeholder="e.g. ₺"
+              />
+              <p className="text-xs text-muted-foreground sm:col-span-2">
+                The currency is what every price for this region is written in, so a Turkish
+                sub-category set to TRY shows Lira rather than dollars.
+              </p>
+            </div>
+          )}
+
           <p className="text-xs text-muted-foreground">
             Pick a region and every product filed under this sub-category takes it automatically,
             along with the currency it prices in. Leave it blank for a grouping that is not a
@@ -484,7 +410,12 @@ function SubcategoriesTab() {
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <Button
             onClick={() => createMutation.mutate()}
-            disabled={createMutation.isPending || !form.name.trim() || !form.categoryId}
+            disabled={
+              createMutation.isPending ||
+              !form.name.trim() ||
+              !form.categoryId ||
+              (!!newRegion && (!newRegion.name.trim() || !newRegion.code.trim()))
+            }
             className="w-full"
           >
             {createMutation.isPending ? 'Creating...' : 'Create'}
