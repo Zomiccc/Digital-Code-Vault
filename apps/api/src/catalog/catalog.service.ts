@@ -37,12 +37,27 @@ export class CatalogService {
   }
 
   async createBrand(data: { name: string; slug?: string; description?: string; image?: string; sortOrder?: number }, actorId?: string) {
-    const slug = data.slug || slugify(data.name);
+    const name = (data.name || '').trim();
+    if (!name) throw new BadRequestException('A brand needs a name');
+
+    // Name and slug are both unique in the database, and only the slug used to
+    // be checked — so a duplicate name came back as a raw constraint violation,
+    // a 500 with nothing readable in it.
+    const byName = await this.prisma.brand.findUnique({ where: { name } });
+    if (byName) {
+      throw new BadRequestException(
+        byName.active
+          ? `A brand called "${name}" already exists`
+          : `A brand called "${name}" exists but is switched off. Turn it back on rather than making a second one.`,
+      );
+    }
+
+    const slug = data.slug || slugify(name);
     const existing = await this.prisma.brand.findUnique({ where: { slug } });
-    if (existing) throw new BadRequestException('Slug already exists');
+    if (existing) throw new BadRequestException(`The address "/${slug}" is already taken`);
 
     const brand = await this.prisma.brand.create({
-      data: { name: data.name, slug, description: data.description, image: data.image, sortOrder: data.sortOrder || 0 },
+      data: { name, slug, description: data.description, image: data.image, sortOrder: data.sortOrder || 0 },
     });
 
     if (actorId) {
@@ -56,7 +71,17 @@ export class CatalogService {
     if (!brand) throw new NotFoundException('Brand not found');
 
     const updateData: any = {};
-    if (data.name !== undefined) updateData.name = data.name;
+    if (data.name !== undefined) {
+      const name = String(data.name).trim();
+      if (!name) throw new BadRequestException('A brand needs a name');
+      const clash = await this.prisma.brand.findFirst({ where: { name, id: { not: id } } });
+      if (clash) throw new BadRequestException(`Another brand is already called "${name}"`);
+      updateData.name = name;
+      // The address follows the name, or renaming leaves the old one behind.
+      if (data.slug === undefined && name !== brand.name) {
+        updateData.slug = await this.freeSlug('brand', slugify(name), id);
+      }
+    }
     if (data.slug !== undefined) updateData.slug = data.slug;
     if (data.description !== undefined) updateData.description = data.description;
     if (data.image !== undefined) updateData.image = data.image;
@@ -70,15 +95,50 @@ export class CatalogService {
     return updated;
   }
 
+  /**
+   * Delete a brand.
+   *
+   * This only switched `active` off, and the list showed inactive rows exactly
+   * like live ones — so deleting appeared to do nothing at all, while the name
+   * stayed taken and creating it again failed. An empty brand is now really
+   * deleted; one with categories is refused, naming them, because deleting it
+   * would leave them pointing at nothing.
+   */
   async deleteBrand(id: string, actorId?: string) {
-    const brand = await this.prisma.brand.findUnique({ where: { id } });
+    const brand = await this.prisma.brand.findUnique({
+      where: { id },
+      include: { _count: { select: { categories: true } } },
+    });
     if (!brand) throw new NotFoundException('Brand not found');
 
-    await this.prisma.brand.update({ where: { id }, data: { active: false } });
-    if (actorId) {
-      await this.auditService.log({ actorType: 'ADMIN', actorId, action: 'brand.deactivate', entity: 'Brand', entityId: id });
+    if (brand._count.categories > 0) {
+      throw new BadRequestException(
+        `${brand.name} still has ${brand._count.categories} categor` +
+        `${brand._count.categories === 1 ? 'y' : 'ies'} under it. Move or delete those first.`,
+      );
     }
-    return { id, deactivated: true };
+
+    await this.prisma.brand.delete({ where: { id } });
+    if (actorId) {
+      await this.auditService.log({
+        actorType: 'ADMIN', actorId, action: 'brand.delete',
+        entity: 'Brand', entityId: id, metadata: { name: brand.name },
+      });
+    }
+    return { id, deleted: true };
+  }
+
+  /** A slug nothing else is using, for a rename. */
+  private async freeSlug(kind: 'brand' | 'category', base: string, ignoreId: string) {
+    const root = base || kind;
+    for (let attempt = 1; attempt < 100; attempt++) {
+      const candidate = attempt === 1 ? root : `${root}-${attempt}`;
+      const taken = kind === 'brand'
+        ? await this.prisma.brand.findFirst({ where: { slug: candidate, id: { not: ignoreId } } })
+        : await this.prisma.category.findFirst({ where: { slug: candidate, id: { not: ignoreId } } });
+      if (!taken) return candidate;
+    }
+    return `${root}-${Date.now()}`;
   }
 
   // ─── Categories ───
@@ -101,12 +161,24 @@ export class CatalogService {
   }
 
   async createCategory(data: { name: string; slug?: string; description?: string; image?: string; sortOrder?: number; brandId?: string | null }, actorId?: string) {
-    const slug = data.slug || slugify(data.name);
+    const name = (data.name || '').trim();
+    if (!name) throw new BadRequestException('A category needs a name');
+
+    const byName = await this.prisma.category.findUnique({ where: { name } });
+    if (byName) {
+      throw new BadRequestException(
+        byName.active
+          ? `A category called "${name}" already exists`
+          : `A category called "${name}" exists but is switched off. Turn it back on rather than making a second one.`,
+      );
+    }
+
+    const slug = data.slug || slugify(name);
     const existing = await this.prisma.category.findUnique({ where: { slug } });
-    if (existing) throw new BadRequestException('Slug already exists');
+    if (existing) throw new BadRequestException(`The address "/${slug}" is already taken`);
 
     const cat = await this.prisma.category.create({
-      data: { name: data.name, slug, description: data.description, image: data.image, sortOrder: data.sortOrder || 0, brandId: data.brandId || null },
+      data: { name, slug, description: data.description, image: data.image, sortOrder: data.sortOrder || 0, brandId: data.brandId || null },
     });
 
     if (actorId) {
@@ -120,7 +192,16 @@ export class CatalogService {
     if (!cat) throw new NotFoundException('Category not found');
 
     const updateData: any = {};
-    if (data.name !== undefined) updateData.name = data.name;
+    if (data.name !== undefined) {
+      const name = String(data.name).trim();
+      if (!name) throw new BadRequestException('A category needs a name');
+      const clash = await this.prisma.category.findFirst({ where: { name, id: { not: id } } });
+      if (clash) throw new BadRequestException(`Another category is already called "${name}"`);
+      updateData.name = name;
+      if (data.slug === undefined && name !== cat.name) {
+        updateData.slug = await this.freeSlug('category', slugify(name), id);
+      }
+    }
     if (data.slug !== undefined) updateData.slug = data.slug;
     if (data.description !== undefined) updateData.description = data.description;
     if (data.image !== undefined) updateData.image = data.image;
@@ -135,15 +216,38 @@ export class CatalogService {
     return updated;
   }
 
+  /**
+   * Delete a category.
+   *
+   * Like a brand, this only switched `active` off — which hid nothing, blocked
+   * the name from being reused, and quietly dropped every product under it off
+   * Fulfillment and Delivery Rules. An empty category is really deleted; one
+   * holding products or subcategories is refused and says what is in it.
+   */
   async deleteCategory(id: string, actorId?: string) {
-    const cat = await this.prisma.category.findUnique({ where: { id } });
+    const cat = await this.prisma.category.findUnique({
+      where: { id },
+      include: { _count: { select: { products: true, subcategories: true } } },
+    });
     if (!cat) throw new NotFoundException('Category not found');
 
-    await this.prisma.category.update({ where: { id }, data: { active: false } });
-    if (actorId) {
-      await this.auditService.log({ actorType: 'ADMIN', actorId, action: 'category.deactivate', entity: 'Category', entityId: id });
+    const blockers: string[] = [];
+    if (cat._count.products) blockers.push(`${cat._count.products} product(s)`);
+    if (cat._count.subcategories) blockers.push(`${cat._count.subcategories} sub-categor${cat._count.subcategories === 1 ? 'y' : 'ies'}`);
+    if (blockers.length) {
+      throw new BadRequestException(
+        `${cat.name} still holds ${blockers.join(' and ')}. Move or delete those first.`,
+      );
     }
-    return { id, deactivated: true };
+
+    await this.prisma.category.delete({ where: { id } });
+    if (actorId) {
+      await this.auditService.log({
+        actorType: 'ADMIN', actorId, action: 'category.delete',
+        entity: 'Category', entityId: id, metadata: { name: cat.name },
+      });
+    }
+    return { id, deleted: true };
   }
 
   // ─── Subcategories ───

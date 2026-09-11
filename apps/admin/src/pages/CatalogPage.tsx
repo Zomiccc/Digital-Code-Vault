@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Plus, Trash2, FolderTree, Layers, GitBranch } from 'lucide-react';
+import { Plus, Trash2, Pencil, FolderTree, Layers, GitBranch } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Input, Select, Modal, Badge } from '@/components/ui';
 
@@ -40,18 +40,38 @@ function BrandsTab() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ name: '', description: '', sortOrder: 0 });
 
+  const [editing, setEditing] = useState<any>(null);
+  // Every one of these used to fail in silence: no onError anywhere, so a
+  // refused create or delete looked exactly like a button that did nothing.
+  const [error, setError] = useState('');
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['brands'] });
+    queryClient.invalidateQueries({ queryKey: ['categories'] });
+    queryClient.invalidateQueries({ queryKey: ['catalog-hierarchy'] });
+  };
+
   const createMutation = useMutation({
     mutationFn: () => api.createBrand(form),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['brands'] });
+      refresh();
       setShowCreate(false);
       setForm({ name: '', description: '', sortOrder: 0 });
+      setError('');
     },
+    onError: (err: any) => setError(err.message),
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: () => api.updateBrand(editing.id, { name: editing.name.trim() }),
+    onSuccess: () => { refresh(); setEditing(null); setError(''); },
+    onError: (err: any) => setError(err.message),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.deleteBrand(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['brands'] }),
+    onSuccess: () => { refresh(); setError(''); },
+    onError: (err: any) => setError(err.message),
   });
 
   if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
@@ -59,8 +79,12 @@ function BrandsTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button onClick={() => setShowCreate(true)}><Plus className="mr-2 h-4 w-4" /> Add Brand</Button>
+        <Button onClick={() => { setError(''); setShowCreate(true); }}>
+          <Plus className="mr-2 h-4 w-4" /> Add Brand
+        </Button>
       </div>
+
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {brands?.map((brand: any) => (
           <Card key={brand.id} hover>
@@ -76,19 +100,56 @@ function BrandsTab() {
                   <span className="text-xs text-muted-foreground">{brand._count?.categories || 0} categories</span>
                 </div>
               </div>
-              <Button variant="outline" size="sm" onClick={() => deleteMutation.mutate(brand.id)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              <div className="flex shrink-0 gap-2">
+                <Button
+                  variant="outline" size="sm" title="Rename this brand"
+                  onClick={() => { setError(''); setEditing({ id: brand.id, name: brand.name }); }}
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline" size="sm" title="Delete this brand"
+                  className="text-destructive hover:bg-destructive/10"
+                  onClick={() => { setError(''); deleteMutation.mutate(brand.id); }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </Card>
         ))}
       </div>
+
+      <Modal open={!!editing} onClose={() => setEditing(null)} title="Rename brand">
+        <div className="space-y-4">
+          <Input
+            label="Name"
+            value={editing?.name ?? ''}
+            onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+          />
+          <p className="text-xs text-muted-foreground">
+            The brand's address follows its name, so links to it change with the rename.
+          </p>
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button
+              className="flex-1"
+              disabled={renameMutation.isPending || !editing?.name?.trim()}
+              onClick={() => renameMutation.mutate()}
+            >
+              {renameMutation.isPending ? 'Saving...' : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create Brand">
         <div className="space-y-4">
           <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. PlayStation" />
           <Input label="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Optional" />
           <Input label="Sort Order" type="number" value={String(form.sortOrder)} onChange={(e) => setForm({ ...form, sortOrder: parseInt(e.target.value) || 0 })} />
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending || !form.name} className="w-full">
             {createMutation.isPending ? 'Creating...' : 'Create'}
           </Button>
@@ -119,18 +180,40 @@ function CategoriesTab() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ name: '', description: '', sortOrder: 0, brandId: '' });
 
+  const [editing, setEditing] = useState<any>(null);
+  const [error, setError] = useState('');
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['categories'] });
+    queryClient.invalidateQueries({ queryKey: ['subcategories'] });
+    queryClient.invalidateQueries({ queryKey: ['catalog-hierarchy'] });
+    queryClient.invalidateQueries({ queryKey: ['products'] });
+  };
+
   const createMutation = useMutation({
     mutationFn: () => api.createCategory(form),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['categories'] });
+      refresh();
       setShowCreate(false);
       setForm({ name: '', description: '', sortOrder: 0, brandId: '' });
+      setError('');
     },
+    onError: (err: any) => setError(err.message),
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: () => api.updateCategory(editing.id, {
+      name: editing.name.trim(),
+      brandId: editing.brandId || null,
+    }),
+    onSuccess: () => { refresh(); setEditing(null); setError(''); },
+    onError: (err: any) => setError(err.message),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.deleteCategory(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['categories'] }),
+    onSuccess: () => { refresh(); setError(''); },
+    onError: (err: any) => setError(err.message),
   });
 
   if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
@@ -138,8 +221,12 @@ function CategoriesTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button onClick={() => setShowCreate(true)}><Plus className="mr-2 h-4 w-4" /> Add Category</Button>
+        <Button onClick={() => { setError(''); setShowCreate(true); }}>
+          <Plus className="mr-2 h-4 w-4" /> Add Category
+        </Button>
       </div>
+
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {categories?.map((cat: any) => (
           <Card key={cat.id} hover>
@@ -155,13 +242,58 @@ function CategoriesTab() {
                   <span className="text-xs text-muted-foreground">{cat._count?.products || 0} products</span>
                 </div>
               </div>
-              <Button variant="outline" size="sm" onClick={() => deleteMutation.mutate(cat.id)}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              <div className="flex shrink-0 gap-2">
+                <Button
+                  variant="outline" size="sm" title="Rename this category"
+                  onClick={() => {
+                    setError('');
+                    setEditing({ id: cat.id, name: cat.name, brandId: cat.brandId || '' });
+                  }}
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline" size="sm" title="Delete this category"
+                  className="text-destructive hover:bg-destructive/10"
+                  onClick={() => { setError(''); deleteMutation.mutate(cat.id); }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           </Card>
         ))}
       </div>
+
+      <Modal open={!!editing} onClose={() => setEditing(null)} title="Edit category">
+        <div className="space-y-4">
+          <Input
+            label="Name"
+            value={editing?.name ?? ''}
+            onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+          />
+          <Select
+            label="Brand"
+            value={editing?.brandId ?? ''}
+            onChange={(e) => setEditing({ ...editing, brandId: e.target.value })}
+            options={[
+              { value: '', label: 'No brand' },
+              ...(brands?.map((b: any) => ({ value: b.id, label: b.name })) || []),
+            ]}
+          />
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button
+              className="flex-1"
+              disabled={renameMutation.isPending || !editing?.name?.trim()}
+              onClick={() => renameMutation.mutate()}
+            >
+              {renameMutation.isPending ? 'Saving...' : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create Category">
         <div className="space-y-4">
@@ -177,6 +309,7 @@ function CategoriesTab() {
           <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. PSN Gift Card" />
           <Input label="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Optional" />
           <Input label="Sort Order" type="number" value={String(form.sortOrder)} onChange={(e) => setForm({ ...form, sortOrder: parseInt(e.target.value) || 0 })} />
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending || !form.name} className="w-full">
             {createMutation.isPending ? 'Creating...' : 'Create'}
           </Button>
@@ -252,9 +385,20 @@ function SubcategoriesTab() {
     onError: (err: any) => setError(err.message),
   });
 
+  const [editing, setEditing] = useState<any>(null);
+
+  const renameMutation = useMutation({
+    mutationFn: () => api.updateSubcategory(editing.id, {
+      name: editing.name.trim(),
+      regionId: editing.regionId || null,
+    }),
+    onSuccess: () => { refresh(); setEditing(null); setError(''); },
+    onError: (err: any) => setError(err.message),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.deleteSubcategory(id),
-    onSuccess: refresh,
+    onSuccess: () => { refresh(); setError(''); },
     onError: (err: any) => setError(err.message),
   });
 
@@ -303,16 +447,27 @@ function SubcategoriesTab() {
                       </span>
                     </div>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    title={sub._count?.products
-                      ? 'Has products — this deactivates it instead of deleting'
-                      : 'Delete this sub-category'}
-                    onClick={() => { setError(''); deleteMutation.mutate(sub.id); }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="flex shrink-0 gap-2">
+                    <Button
+                      variant="outline" size="sm" title="Rename this sub-category"
+                      onClick={() => {
+                        setError('');
+                        setEditing({ id: sub.id, name: sub.name, regionId: sub.regionId || '' });
+                      }}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline" size="sm"
+                      className="text-destructive hover:bg-destructive/10"
+                      title={sub._count?.products
+                        ? 'Has products — this switches it off instead of deleting'
+                        : 'Delete this sub-category'}
+                      onClick={() => { setError(''); deleteMutation.mutate(sub.id); }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </Card>
             ))}
@@ -325,6 +480,39 @@ function SubcategoriesTab() {
           No sub-categories yet. Add one to group products inside a category.
         </Card>
       )}
+
+      <Modal open={!!editing} onClose={() => setEditing(null)} title="Edit sub-category">
+        <div className="space-y-4">
+          <Input
+            label="Name"
+            value={editing?.name ?? ''}
+            onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+          />
+          <Select
+            label="Region"
+            value={editing?.regionId ?? ''}
+            onChange={(e) => setEditing({ ...editing, regionId: e.target.value })}
+            options={[
+              { value: '', label: 'No region' },
+              ...(regions?.map((r: any) => ({
+                value: r.id,
+                label: `${r.name} (${r.code}) · ${r.currency}`,
+              })) || []),
+            ]}
+          />
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button
+              className="flex-1"
+              disabled={renameMutation.isPending || !editing?.name?.trim()}
+              onClick={() => renameMutation.mutate()}
+            >
+              {renameMutation.isPending ? 'Saving...' : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Add Sub-category">
         <div className="space-y-4">
