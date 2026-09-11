@@ -224,6 +224,10 @@ export class CreateSupportMessageDto {
   @IsOptional()
   @IsString()
   fundingRequestId?: string;
+
+  @IsOptional()
+  @IsString()
+  fulfillmentId?: string;
 }
 
 export class FundingRequestActionDto {

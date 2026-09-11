@@ -30,6 +30,7 @@ export const REQUIRED_SCHEMA: { table: string; column: string }[] = [
   { table: 'SellingPrice', column: 'amount' },
   { table: 'Subcategory', column: 'categoryId' },
   { table: 'Product', column: 'subcategoryId' },
+  { table: 'SupportMessage', column: 'fulfillmentId' },
 ];
 
 /**
@@ -55,6 +56,8 @@ export const REPAIR_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS "Subcategory_regionId_idx" ON "Subcategory" ("regionId")`,
   `ALTER TABLE "Product" ADD COLUMN IF NOT EXISTS "subcategoryId" TEXT`,
   `CREATE INDEX IF NOT EXISTS "Product_subcategoryId_idx" ON "Product" ("subcategoryId")`,
+  `ALTER TABLE "SupportMessage" ADD COLUMN IF NOT EXISTS "fulfillmentId" TEXT`,
+  `CREATE INDEX IF NOT EXISTS "SupportMessage_fulfillmentId_idx" ON "SupportMessage" ("fulfillmentId")`,
   // Postgres has no ADD CONSTRAINT IF NOT EXISTS, and these run on every boot,
   // so each drops its own constraint first. Without the keys the onDelete rules
   // in the Prisma schema never fire and a deleted category leaves orphans.

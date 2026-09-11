@@ -379,7 +379,9 @@ export const api = {
   // Support chat
   getSupportThread: () =>
     apiFetch('/merchant/support/messages'),
-  sendSupportMessage: (data: { body?: string; image?: string; fundingRequestId?: string }) =>
+  sendSupportMessage: (data: {
+    body?: string; image?: string; fundingRequestId?: string; fulfillmentId?: string;
+  }) =>
     apiFetch('/merchant/support/messages', { method: 'POST', body: JSON.stringify(data) }),
   listSupportThreads: () =>
     apiFetch('/admin/support/threads'),

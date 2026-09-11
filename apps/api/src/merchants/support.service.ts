@@ -10,6 +10,46 @@ import { PrismaService } from '../prisma/prisma.service';
 export class SupportService {
   constructor(private prisma: PrismaService) {}
 
+  /**
+   * Attach the order each message is about.
+   *
+   * A merchant complaining about an order used to have to type its reference
+   * into the text, and the admin then had to go and find it. The message
+   * carries the order id, so both sides see what it refers to.
+   */
+  private async withOrders(messages: any[]) {
+    const ids = [...new Set(messages.map((m) => m.fulfillmentId).filter(Boolean))] as string[];
+    if (!ids.length) return messages;
+
+    const orders = await this.prisma.fulfillmentRequest.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true, referenceId: true, amount: true, currency: true,
+        status: true, createdAt: true,
+        product: { select: { name: true } },
+      },
+    });
+    const byId = new Map(orders.map((order) => [order.id, order]));
+
+    return messages.map((message) => {
+      const order = message.fulfillmentId ? byId.get(message.fulfillmentId) : undefined;
+      return {
+        ...message,
+        order: order
+          ? {
+              id: order.id,
+              reference: order.referenceId || order.id.slice(0, 8),
+              product: order.product?.name ?? null,
+              amount: Number(order.amount),
+              currency: order.currency,
+              status: order.status,
+              created_at: order.createdAt,
+            }
+          : null,
+      };
+    });
+  }
+
   async getMerchantThread(merchantId: string) {
     const messages = await this.prisma.supportMessage.findMany({
       where: { merchantId },
@@ -23,7 +63,7 @@ export class SupportService {
       data: { readByMerchant: true },
     });
 
-    return messages;
+    return this.withOrders(messages);
   }
 
   async sendMerchantMessage(
@@ -32,11 +72,21 @@ export class SupportService {
     body?: string,
     image?: string,
     fundingRequestId?: string,
+    fulfillmentId?: string,
   ) {
     if (!body && !image) throw new BadRequestException('Message text or an image is required');
 
     const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
     if (!merchant) throw new NotFoundException('Merchant not found');
+
+    // An order can only be asked about by the merchant it belongs to.
+    if (fulfillmentId) {
+      const order = await this.prisma.fulfillmentRequest.findFirst({
+        where: { id: fulfillmentId, merchantId },
+        select: { id: true },
+      });
+      if (!order) throw new NotFoundException('Order not found');
+    }
 
     return this.prisma.supportMessage.create({
       data: {
@@ -46,6 +96,7 @@ export class SupportService {
         body,
         image,
         fundingRequestId,
+        fulfillmentId: fulfillmentId || null,
       },
     });
   }
@@ -111,7 +162,7 @@ export class SupportService {
       data: { readByAdmin: true },
     });
 
-    return { merchant, messages };
+    return { merchant, messages: await this.withOrders(messages) };
   }
 
   async adminSendMessage(merchantId: string, senderName: string, body?: string) {

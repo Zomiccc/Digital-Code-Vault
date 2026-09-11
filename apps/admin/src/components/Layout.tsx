@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth-context';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { MerchantChatWidget } from '@/components/MerchantChatWidget';
 
 const adminNav = [
   { to: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -161,6 +162,11 @@ export function Layout({ children }: { children: ReactNode }) {
           {children}
         </main>
       </div>
+
+      {/* The chat widget was written but never put on screen, so a merchant had
+          no way to reach anyone while the admin inbox waited for messages that
+          could not be sent. */}
+      {user?.role === 'merchant' && <MerchantChatWidget />}
     </div>
   );
 }

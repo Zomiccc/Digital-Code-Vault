@@ -138,6 +138,18 @@ export function SupportInboxPage() {
                           : 'rounded-bl-sm bg-muted'
                       }`}
                     >
+                      {m.order && (
+                        <p
+                          className={`mb-1.5 rounded px-2 py-1 text-xs ${
+                            m.senderRole === 'ADMIN'
+                              ? 'bg-primary-foreground/15 text-primary-foreground'
+                              : 'bg-background text-muted-foreground'
+                          }`}
+                        >
+                          About order <span className="font-mono">{m.order.reference}</span>
+                          {m.order.product ? ` · ${m.order.product}` : ''} · {m.order.status}
+                        </p>
+                      )}
                       {m.body && <p className="whitespace-pre-wrap">{m.body}</p>}
                       {m.image && (
                         <a href={m.image} target="_blank" rel="noreferrer" className="block">

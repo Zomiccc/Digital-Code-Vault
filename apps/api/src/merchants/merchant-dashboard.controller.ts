@@ -122,6 +122,7 @@ export class MerchantDashboardController {
       body.body,
       body.image,
       body.fundingRequestId,
+      body.fulfillmentId,
     );
     // Sending a merchant message marks the thread as needing admin attention
     return { success: true };

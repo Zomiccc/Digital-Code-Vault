@@ -87,3 +87,6 @@ ALTER TABLE "Subcategory" ADD CONSTRAINT "Subcategory_regionId_fkey"
 ALTER TABLE "Product" DROP CONSTRAINT IF EXISTS "Product_subcategoryId_fkey";
 ALTER TABLE "Product" ADD CONSTRAINT "Product_subcategoryId_fkey"
   FOREIGN KEY ("subcategoryId") REFERENCES "Subcategory"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+ALTER TABLE "SupportMessage" ADD COLUMN IF NOT EXISTS "fulfillmentId" TEXT;
+CREATE INDEX IF NOT EXISTS "SupportMessage_fulfillmentId_idx" ON "SupportMessage" ("fulfillmentId");

@@ -640,6 +640,9 @@ model SupportMessage {
   body             String?
   image            String? // base64 data-URL attachment (payment proof, screenshots)
   fundingRequestId String? // links a chat thread to a funding request when applicable
+  // The order a merchant is asking about, so a complaint arrives attached to
+  // the thing it is about rather than as a reference typed into the text.
+  fulfillmentId    String?
   readByAdmin      Boolean  @default(false)
   readByMerchant   Boolean  @default(false)
   createdAt        DateTime @default(now())

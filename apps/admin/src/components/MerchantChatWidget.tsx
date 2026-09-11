@@ -6,14 +6,19 @@ import { Button } from '@/components/ui';
 import { formatDate } from '@/lib/utils';
 
 /**
- * Floating Help / Chat button for merchant pages.
- * Merchants can send text + payment screenshots to the admin team.
+ * The merchant's way of reaching a person.
+ *
+ * Text, a screenshot, and optionally the order being asked about — a complaint
+ * arrives attached to the order it concerns rather than as a reference typed
+ * into the message, so the admin is not left searching for it. Polling, not
+ * sockets: the thread refetches while it is open.
  */
 export function MerchantChatWidget() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [image, setImage] = useState<string | null>(null);
+  const [orderId, setOrderId] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -23,14 +28,29 @@ export function MerchantChatWidget() {
     refetchInterval: open ? 4000 : 15000,
   });
 
+  // Only fetched once the panel is open: most merchants never open it.
+  const { data: orders } = useQuery({
+    queryKey: ['support-orders'],
+    queryFn: () => api.listOrders(20, 0),
+    enabled: open,
+  });
+
   const sendMutation = useMutation({
-    mutationFn: () => api.sendSupportMessage({ body: text || undefined, image: image || undefined }),
+    mutationFn: () => api.sendSupportMessage({
+      body: text || undefined,
+      image: image || undefined,
+      fulfillmentId: orderId || undefined,
+    }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['support-thread'] });
       setText('');
       setImage(null);
+      setOrderId('');
     },
+    onError: (err: any) => setError(err.message),
   });
+
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -49,6 +69,7 @@ export function MerchantChatWidget() {
 
   const send = () => {
     if (!text.trim() && !image) return;
+    setError('');
     sendMutation.mutate();
   };
 
@@ -97,6 +118,18 @@ export function MerchantChatWidget() {
                       : 'rounded-bl-sm bg-muted'
                   }`}
                 >
+                  {m.order && (
+                    <p
+                      className={`mb-1 rounded px-1.5 py-0.5 text-[11px] ${
+                        m.senderRole === 'MERCHANT'
+                          ? 'bg-primary-foreground/15 text-primary-foreground'
+                          : 'bg-background text-muted-foreground'
+                      }`}
+                    >
+                      About order {m.order.reference}
+                      {m.order.product ? ` · ${m.order.product}` : ''}
+                    </p>
+                  )}
                   {m.body && <p className="whitespace-pre-wrap">{m.body}</p>}
                   {m.image && (
                     <a href={m.image} target="_blank" rel="noreferrer" className="block">
@@ -117,6 +150,34 @@ export function MerchantChatWidget() {
               <span className="flex-1 truncate text-xs text-muted-foreground">Attachment ready</span>
               <button className="text-xs text-red-500 hover:underline" onClick={() => setImage(null)}>Remove</button>
             </div>
+          )}
+
+          {(orders?.items?.length || 0) > 0 && (
+            <div className="border-t border-border px-3 py-2">
+              <select
+                value={orderId}
+                onChange={(e) => setOrderId(e.target.value)}
+                aria-label="Order this message is about"
+                className="w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs outline-none focus:border-primary"
+              >
+                <option value="">Not about a specific order</option>
+                {(orders?.items || []).map((order: any) => (
+                  <option key={order.id} value={order.id}>
+                    {/* The merchant order list returns the product as a name,
+                        not an object. */}
+                    {(order.reference_id || order.id.slice(0, 8))}
+                    {order.product ? ` · ${order.product}` : ''}
+                    {` · ${order.status}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {error && (
+            <p role="alert" className="border-t border-border px-3 py-2 text-xs text-destructive">
+              {error}
+            </p>
           )}
 
           <div className="flex items-center gap-2 border-t border-border p-2">
