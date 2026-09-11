@@ -388,6 +388,7 @@ function ItemRow({
   const main = active[0];
   const deliverable = !!main;
   const [confirming, setConfirming] = useState(false);
+  const [confirmingPack, setConfirmingPack] = useState(false);
   const [error, setError] = useState('');
 
   // Removing a rule leaves the pack undeliverable rather than deleting the
@@ -395,6 +396,14 @@ function ItemRow({
   const removeRule = useMutation({
     mutationFn: () => api.deleteCombination(main.id),
     onSuccess: () => { setConfirming(false); onRuleDeleted(); },
+    onError: (err: any) => setError(err.message),
+  });
+
+  // Deleting the pack takes its rule with it. Orders are untouched: an order
+  // records the product and the codes it delivered, never the pack.
+  const removePack = useMutation({
+    mutationFn: () => api.deleteVariant(item.variant.id),
+    onSuccess: () => { setConfirmingPack(false); onRuleDeleted(); },
     onError: (err: any) => setError(err.message),
   });
 
@@ -448,7 +457,7 @@ function ItemRow({
           {deliverable && (
             <Button
               variant="outline"
-              title="Delete this rule"
+              title="Delete this rule, keeping the pack"
               aria-label={`Delete the delivery rule for ${item.variant.name}`}
               className="text-destructive hover:bg-destructive/10"
               onClick={() => { setError(''); setConfirming(true); }}
@@ -456,8 +465,49 @@ function ItemRow({
               <Trash2 className="mr-2 h-4 w-4" /> Delete rule
             </Button>
           )}
+          <Button
+            variant="outline"
+            title="Delete the pack itself, and its rule with it"
+            aria-label={`Delete the pack ${item.variant.name}`}
+            className="text-destructive hover:bg-destructive/10"
+            onClick={() => { setError(''); setConfirmingPack(true); }}
+          >
+            <Trash2 className="mr-2 h-4 w-4" /> Delete pack
+          </Button>
         </div>
       </div>
+
+      <Modal
+        open={confirmingPack}
+        onClose={() => setConfirmingPack(false)}
+        title="Delete this pack?"
+      >
+        <div className="space-y-4">
+          <p className="text-sm">
+            <span className="font-semibold">{item.variant.name}</span> will be deleted, along with
+            its delivery rule and its SKU
+            {item.variant.sku ? <> (<span className="font-mono">{item.variant.sku}</span>)</> : null}.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Orders already placed are untouched — an order records the product and the codes it
+            delivered, never the pack. But a storefront order arriving for this SKU will stop
+            matching, so remove it from your store too.
+          </p>
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setConfirmingPack(false)}>
+              Cancel
+            </Button>
+            <Button
+              className="flex-1 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={removePack.isPending}
+              onClick={() => removePack.mutate()}
+            >
+              {removePack.isPending ? 'Deleting...' : 'Delete pack'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal open={confirming} onClose={() => setConfirming(false)} title="Delete this rule?">
         <div className="space-y-4">

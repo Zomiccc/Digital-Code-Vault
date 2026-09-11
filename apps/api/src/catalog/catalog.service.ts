@@ -585,12 +585,43 @@ export class CatalogService {
     return updated;
   }
 
+  /**
+   * Delete a pack.
+   *
+   * Nothing keeps a pack after it is sold: an order records the product, the
+   * amount and the codes handed over, never which pack was bought. The only
+   * thing pointing at one is its delivery rule, which cascades. So this is a
+   * real delete rather than the quiet deactivate it used to be — a pack that
+   * was only hidden still held its SKU, and the next pack that wanted that SKU
+   * collided with something the admin could no longer see.
+   */
   async deleteVariant(id: string, actorId?: string) {
-    await this.prisma.variant.update({ where: { id }, data: { active: false } });
+    const variant = await this.prisma.variant.findUnique({
+      where: { id },
+      include: { productRegion: { include: { product: { select: { name: true } } } } },
+    });
+    if (!variant) throw new NotFoundException('Pack not found');
+
+    await this.prisma.$transaction(async (tx) => {
+      // Prices are addressed by id with no foreign key, so nothing removes
+      // them on their own.
+      await tx.sellingPrice.deleteMany({ where: { itemType: 'VARIANT', itemId: id } });
+      // The delivery rule and its lines cascade from the pack.
+      await tx.variant.delete({ where: { id } });
+    });
+
     if (actorId) {
-      await this.auditService.log({ actorType: 'ADMIN', actorId, action: 'variant.deactivate', entity: 'Variant', entityId: id });
+      await this.auditService.log({
+        actorType: 'ADMIN', actorId, action: 'variant.delete',
+        entity: 'Variant', entityId: id,
+        metadata: {
+          name: variant.name,
+          sku: variant.sku,
+          product: variant.productRegion.product.name,
+        },
+      });
     }
-    return { id, deactivated: true };
+    return { id, deleted: true };
   }
 
   // ─── Fulfillment Combinations ───
