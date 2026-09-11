@@ -442,14 +442,18 @@ function ItemRow({
           <Button variant={deliverable ? 'outline' : 'primary'} onClick={onEdit}>
             {deliverable ? 'Change' : 'Set rule'}
           </Button>
+          {/* Labelled rather than a bare icon: as a faint ghost icon beside
+              "Change" nobody could find it, and an unlabelled bin is a guess
+              even when you do see it. */}
           {deliverable && (
             <Button
-              variant="ghost"
+              variant="outline"
               title="Delete this rule"
               aria-label={`Delete the delivery rule for ${item.variant.name}`}
+              className="text-destructive hover:bg-destructive/10"
               onClick={() => { setError(''); setConfirming(true); }}
             >
-              <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
+              <Trash2 className="mr-2 h-4 w-4" /> Delete rule
             </Button>
           )}
         </div>
