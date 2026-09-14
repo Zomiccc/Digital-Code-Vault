@@ -479,11 +479,21 @@ export class CatalogService {
   }
 
   async createRegion(data: { name: string; code: string; currency?: string; symbol?: string }, actorId?: string) {
-    const existing = await this.prisma.region.findUnique({ where: { code: data.code } });
-    if (existing) throw new BadRequestException('Region code already exists');
+    const name = (data.name || '').trim();
+    const code = (data.code || '').trim().toUpperCase();
+    if (!name || !code) throw new BadRequestException('A region needs a name and a code');
+
+    const existing = await this.prisma.region.findUnique({ where: { code } });
+    if (existing) throw new BadRequestException(`The code "${code}" is already used by ${existing.name}`);
+    const byName = await this.prisma.region.findUnique({ where: { name } });
+    if (byName) throw new BadRequestException(`A region called "${name}" already exists`);
 
     const region = await this.prisma.region.create({
-      data: { name: data.name, code: data.code, currency: data.currency || 'USD', symbol: data.symbol || '$' },
+      data: {
+        name, code,
+        currency: (data.currency || 'USD').trim().toUpperCase(),
+        symbol: (data.symbol || '$').trim(),
+      },
     });
     if (actorId) {
       await this.auditService.log({ actorType: 'ADMIN', actorId, action: 'region.create', entity: 'Region', entityId: region.id, metadata: { name: region.name, code: region.code } });
@@ -509,12 +519,37 @@ export class CatalogService {
     return updated;
   }
 
+  /**
+   * Delete a region.
+   *
+   * A region carries the currency every price in it is written in, so one that
+   * anything still points at is refused rather than switched off — a hidden
+   * region left its products priced in a currency nobody could see or edit.
+   */
   async deleteRegion(id: string, actorId?: string) {
-    await this.prisma.region.update({ where: { id }, data: { active: false } });
-    if (actorId) {
-      await this.auditService.log({ actorType: 'ADMIN', actorId, action: 'region.deactivate', entity: 'Region', entityId: id });
+    const region = await this.prisma.region.findUnique({
+      where: { id },
+      include: { _count: { select: { productRegions: true, subcategories: true } } },
+    });
+    if (!region) throw new NotFoundException('Region not found');
+
+    const blockers: string[] = [];
+    if (region._count.productRegions) blockers.push(`${region._count.productRegions} product(s)`);
+    if (region._count.subcategories) blockers.push(`${region._count.subcategories} sub-categor${region._count.subcategories === 1 ? 'y' : 'ies'}`);
+    if (blockers.length) {
+      throw new BadRequestException(
+        `${region.name} is still used by ${blockers.join(' and ')}. Move those to another region first.`,
+      );
     }
-    return { id, deactivated: true };
+
+    await this.prisma.region.delete({ where: { id } });
+    if (actorId) {
+      await this.auditService.log({
+        actorType: 'ADMIN', actorId, action: 'region.delete',
+        entity: 'Region', entityId: id, metadata: { name: region.name, code: region.code },
+      });
+    }
+    return { id, deleted: true };
   }
 
   // ─── Product Regions ───

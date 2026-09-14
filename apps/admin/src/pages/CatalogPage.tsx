@@ -1,10 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Plus, Trash2, Pencil, FolderTree, Layers, GitBranch } from 'lucide-react';
+import { Plus, Trash2, Pencil, FolderTree, Layers, GitBranch, Globe } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Card, Button, Input, Select, Modal, Badge } from '@/components/ui';
 
-type Tab = 'brands' | 'categories' | 'subcategories';
+type Tab = 'brands' | 'categories' | 'subcategories' | 'regions';
 
 export function CatalogPage() {
   const queryClient = useQueryClient();
@@ -25,11 +25,13 @@ export function CatalogPage() {
         <TabButton active={tab === 'brands'} onClick={() => setTab('brands')} icon={Layers} label="Brands" />
         <TabButton active={tab === 'categories'} onClick={() => setTab('categories')} icon={FolderTree} label="Categories" />
         <TabButton active={tab === 'subcategories'} onClick={() => setTab('subcategories')} icon={GitBranch} label="Sub-categories" />
+        <TabButton active={tab === 'regions'} onClick={() => setTab('regions')} icon={Globe} label="Regions" />
       </div>
 
       {tab === 'brands' && <BrandsTab />}
       {tab === 'categories' && <CategoriesTab />}
       {tab === 'subcategories' && <SubcategoriesTab />}
+      {tab === 'regions' && <RegionsTab />}
     </div>
   );
 }
@@ -63,7 +65,10 @@ function BrandsTab() {
   });
 
   const renameMutation = useMutation({
-    mutationFn: () => api.updateBrand(editing.id, { name: editing.name.trim() }),
+    mutationFn: () => api.updateBrand(editing.id, {
+      name: editing.name.trim(),
+      description: editing.description ?? '',
+    }),
     onSuccess: () => { refresh(); setEditing(null); setError(''); },
     onError: (err: any) => setError(err.message),
   });
@@ -92,7 +97,7 @@ function BrandsTab() {
               <div>
                 <h3 className="text-lg font-semibold">{brand.name}</h3>
                 <p className="text-xs text-muted-foreground">/{brand.slug}</p>
-                {brand.description && <p className="mt-2 text-sm text-muted-foreground">{brand.description}</p>}
+                <DescriptionNote text={brand.description} />
                 <div className="mt-3 flex items-center gap-2">
                   <Badge className={brand.active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}>
                     {brand.active ? 'ACTIVE' : 'INACTIVE'}
@@ -103,7 +108,12 @@ function BrandsTab() {
               <div className="flex shrink-0 gap-2">
                 <Button
                   variant="outline" size="sm" title="Rename this brand"
-                  onClick={() => { setError(''); setEditing({ id: brand.id, name: brand.name }); }}
+                  onClick={() => {
+                    setError('');
+                    setEditing({
+                      id: brand.id, name: brand.name, description: brand.description || '',
+                    });
+                  }}
                 >
                   <Pencil className="h-4 w-4" />
                 </Button>
@@ -127,6 +137,12 @@ function BrandsTab() {
             value={editing?.name ?? ''}
             onChange={(e) => setEditing({ ...editing, name: e.target.value })}
           />
+          <Input
+            label="Description"
+            value={editing?.description ?? ''}
+            onChange={(e) => setEditing({ ...editing, description: e.target.value })}
+            placeholder="Optional"
+          />
           <p className="text-xs text-muted-foreground">
             The brand's address follows its name, so links to it change with the rename.
           </p>
@@ -148,7 +164,13 @@ function BrandsTab() {
         <div className="space-y-4">
           <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. PlayStation" />
           <Input label="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Optional" />
-          <Input label="Sort Order" type="number" value={String(form.sortOrder)} onChange={(e) => setForm({ ...form, sortOrder: parseInt(e.target.value) || 0 })} />
+          <div className="space-y-1">
+            <Input label="Display order" type="number" value={String(form.sortOrder)} onChange={(e) => setForm({ ...form, sortOrder: parseInt(e.target.value) || 0 })} />
+            <p className="text-xs text-muted-foreground">
+              Where this sits in lists — lower numbers come first. Leave it at 0 and everything
+              sorts by name.
+            </p>
+          </div>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending || !form.name} className="w-full">
             {createMutation.isPending ? 'Creating...' : 'Create'}
@@ -204,7 +226,10 @@ function CategoriesTab() {
   const renameMutation = useMutation({
     mutationFn: () => api.updateCategory(editing.id, {
       name: editing.name.trim(),
-      brandId: editing.brandId || null,
+      // An empty string rather than undefined, so "No brand" actually clears it
+      // instead of leaving the field untouched.
+      brandId: editing.brandId || '',
+      description: editing.description ?? '',
     }),
     onSuccess: () => { refresh(); setEditing(null); setError(''); },
     onError: (err: any) => setError(err.message),
@@ -234,7 +259,7 @@ function CategoriesTab() {
               <div>
                 <h3 className="text-lg font-semibold">{cat.name}</h3>
                 <p className="text-xs text-muted-foreground">/{cat.slug}{cat.brand ? ` · ${cat.brand.name}` : ''}</p>
-                {cat.description && <p className="mt-2 text-sm text-muted-foreground">{cat.description}</p>}
+                <DescriptionNote text={cat.description} />
                 <div className="mt-3 flex items-center gap-2">
                   <Badge className={cat.active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}>
                     {cat.active ? 'ACTIVE' : 'INACTIVE'}
@@ -247,7 +272,10 @@ function CategoriesTab() {
                   variant="outline" size="sm" title="Rename this category"
                   onClick={() => {
                     setError('');
-                    setEditing({ id: cat.id, name: cat.name, brandId: cat.brandId || '' });
+                    setEditing({
+                      id: cat.id, name: cat.name, brandId: cat.brandId || '',
+                      description: cat.description || '',
+                    });
                   }}
                 >
                   <Pencil className="h-4 w-4" />
@@ -281,6 +309,12 @@ function CategoriesTab() {
               ...(brands?.map((b: any) => ({ value: b.id, label: b.name })) || []),
             ]}
           />
+          <Input
+            label="Description"
+            value={editing?.description ?? ''}
+            onChange={(e) => setEditing({ ...editing, description: e.target.value })}
+            placeholder="Optional"
+          />
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <div className="flex gap-2">
             <Button variant="secondary" className="flex-1" onClick={() => setEditing(null)}>Cancel</Button>
@@ -308,7 +342,13 @@ function CategoriesTab() {
           />
           <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. PSN Gift Card" />
           <Input label="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Optional" />
-          <Input label="Sort Order" type="number" value={String(form.sortOrder)} onChange={(e) => setForm({ ...form, sortOrder: parseInt(e.target.value) || 0 })} />
+          <div className="space-y-1">
+            <Input label="Display order" type="number" value={String(form.sortOrder)} onChange={(e) => setForm({ ...form, sortOrder: parseInt(e.target.value) || 0 })} />
+            <p className="text-xs text-muted-foreground">
+              Where this sits in lists — lower numbers come first. Leave it at 0 and everything
+              sorts by name.
+            </p>
+          </div>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <Button onClick={() => createMutation.mutate()} disabled={createMutation.isPending || !form.name} className="w-full">
             {createMutation.isPending ? 'Creating...' : 'Create'}
@@ -608,6 +648,186 @@ function SubcategoriesTab() {
           >
             {createMutation.isPending ? 'Creating...' : 'Create'}
           </Button>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+/**
+ * A description is usually one line and occasionally a paragraph, so it is
+ * shown as written up to a point and then opens on request. Hiding it entirely
+ * behind a button would mean clicking every card to find out what is in it.
+ */
+function DescriptionNote({ text }: { text?: string | null }) {
+  const [open, setOpen] = useState(false);
+  if (!text) return null;
+
+  const long = text.length > 90;
+  return (
+    <div className="mt-2">
+      <p className="text-sm text-muted-foreground">
+        {long && !open ? `${text.slice(0, 90).trimEnd()}...` : text}
+      </p>
+      {long && (
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          className="mt-0.5 text-xs text-primary hover:underline"
+        >
+          {open ? 'Show less' : 'View description'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Regions, on their own tab again.
+ *
+ * A region is more than a label: it carries the currency every price under it
+ * is written in, so a Turkish region set to TRY is what makes a Turkish
+ * listing read in Lira. That is worth its own screen to see and correct.
+ * Creating one from inside a sub-category still works, since most
+ * sub-categories are a region by another name.
+ */
+function RegionsTab() {
+  const queryClient = useQueryClient();
+  const { data: regions, isLoading } = useQuery({ queryKey: ['regions'], queryFn: () => api.listRegions() });
+  const [showCreate, setShowCreate] = useState(false);
+  const [editing, setEditing] = useState<any>(null);
+  const [error, setError] = useState('');
+  const blank = { name: '', code: '', currency: 'USD', symbol: '$' };
+  const [form, setForm] = useState(blank);
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['regions'] });
+    queryClient.invalidateQueries({ queryKey: ['subcategories'] });
+    queryClient.invalidateQueries({ queryKey: ['catalog-hierarchy'] });
+  };
+
+  const createMutation = useMutation({
+    mutationFn: () => api.createRegion(form),
+    onSuccess: () => { refresh(); setShowCreate(false); setForm(blank); setError(''); },
+    onError: (err: any) => setError(err.message),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: () => api.updateRegion(editing.id, {
+      name: editing.name.trim(),
+      code: editing.code.trim().toUpperCase(),
+      currency: editing.currency.trim().toUpperCase(),
+      symbol: editing.symbol.trim(),
+    }),
+    onSuccess: () => { refresh(); setEditing(null); setError(''); },
+    onError: (err: any) => setError(err.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deleteRegion(id),
+    onSuccess: () => { refresh(); setError(''); },
+    onError: (err: any) => setError(err.message),
+  });
+
+  if (isLoading) return <div className="text-muted-foreground">Loading...</div>;
+
+  const fields = (value: any, onChange: (next: any) => void) => (
+    <>
+      <Input label="Name" value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} placeholder="e.g. Turkey" />
+      <Input label="Code" value={value.code} onChange={(e) => onChange({ ...value, code: e.target.value })} placeholder="e.g. TR" />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Input label="Currency" value={value.currency} onChange={(e) => onChange({ ...value, currency: e.target.value })} placeholder="e.g. TRY" />
+        <Input label="Symbol" value={value.symbol} onChange={(e) => onChange({ ...value, symbol: e.target.value })} placeholder="e.g. ₺" />
+      </div>
+      <p className="text-xs text-muted-foreground">
+        The currency is what every price in this region is written in. Changing it changes how
+        existing prices read, so it is worth getting right.
+      </p>
+    </>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button onClick={() => { setError(''); setShowCreate(true); }}>
+          <Plus className="mr-2 h-4 w-4" /> Add Region
+        </Button>
+      </div>
+
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {regions?.map((region: any) => (
+          <Card key={region.id} hover>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold">{region.name}</h3>
+                <p className="text-xs text-muted-foreground">
+                  {region.code} · {region.currency} {region.symbol}
+                </p>
+                <Badge className={`mt-3 ${region.active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-destructive/10 text-destructive'}`}>
+                  {region.active ? 'ACTIVE' : 'INACTIVE'}
+                </Badge>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <Button
+                  variant="outline" size="sm" title="Edit this region"
+                  onClick={() => {
+                    setError('');
+                    setEditing({
+                      id: region.id, name: region.name, code: region.code,
+                      currency: region.currency, symbol: region.symbol,
+                    });
+                  }}
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline" size="sm" title="Delete this region"
+                  className="text-destructive hover:bg-destructive/10"
+                  onClick={() => { setError(''); deleteMutation.mutate(region.id); }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </Card>
+        ))}
+        {(!regions || regions.length === 0) && (
+          <Card className="col-span-full py-12 text-center text-muted-foreground">
+            No regions yet. Add one, then point a sub-category at it.
+          </Card>
+        )}
+      </div>
+
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Add Region">
+        <div className="space-y-4">
+          {fields(form, setForm)}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          <Button
+            className="w-full"
+            disabled={createMutation.isPending || !form.name.trim() || !form.code.trim()}
+            onClick={() => createMutation.mutate()}
+          >
+            {createMutation.isPending ? 'Creating...' : 'Create'}
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal open={!!editing} onClose={() => setEditing(null)} title="Edit region">
+        <div className="space-y-4">
+          {editing && fields(editing, setEditing)}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setEditing(null)}>Cancel</Button>
+            <Button
+              className="flex-1"
+              disabled={updateMutation.isPending || !editing?.name?.trim() || !editing?.code?.trim()}
+              onClick={() => updateMutation.mutate()}
+            >
+              {updateMutation.isPending ? 'Saving...' : 'Save'}
+            </Button>
+          </div>
         </div>
       </Modal>
     </div>

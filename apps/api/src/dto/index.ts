@@ -247,6 +247,13 @@ export class CreateCategoryDto {
   @IsNotEmpty()
   name!: string;
 
+  // The API rejects any field a DTO does not declare, and this one was never
+  // declared — so choosing a brand on the create form came back as "property
+  // brandId should not exist" and no category could be made at all.
+  @IsOptional()
+  @IsString()
+  brandId?: string;
+
   @IsOptional()
   @IsString()
   slug?: string;
@@ -268,6 +275,10 @@ export class UpdateCategoryDto {
   @IsOptional()
   @IsString()
   name?: string;
+
+  @IsOptional()
+  @IsString()
+  brandId?: string;
 
   @IsOptional()
   @IsString()
