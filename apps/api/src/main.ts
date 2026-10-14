@@ -31,8 +31,11 @@ import { AppModule } from './app.module';
 import { PrismaService } from './prisma/prisma.service';
 import { SecurityHeadersMiddleware } from './common/middleware/security-headers.middleware';
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware';
+import { startLogSizeGuard } from './common/log-size-guard';
 
 async function bootstrap() {
+  startLogSizeGuard();
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
     rawBody: true,

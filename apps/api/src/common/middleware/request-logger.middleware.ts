@@ -71,6 +71,10 @@ export class RequestLoggerMiddleware implements NestMiddleware {
       // A failure is always worth knowing about, even on a polled path.
       if (!failed && !slow && (noisy || !this.verbose)) return;
 
+      // Bots probe for /wp-admin, /xmlrpc.php, /.env and the like around the
+      // clock. A 4xx outside the API is one of those, not a user hitting a bug.
+      if (!this.verbose && statusCode < 500 && !slow && !req.path.startsWith('/api/')) return;
+
       // Never log request body (may contain codes or secrets)
       const line = `${method} ${originalUrl} ${statusCode} ${duration}ms - ${ip}`;
       if (statusCode >= 500) this.logger.error(line);
