@@ -416,7 +416,6 @@ function ItemRow({
             <Badge className="bg-muted text-muted-foreground">
               {item.product.name} · {item.region?.code || item.product.region}
             </Badge>
-            <PriceEditor item={item} onSaved={onPriceSaved} />
           </div>
 
           {deliverable ? (
@@ -424,7 +423,14 @@ function ItemRow({
               <p className="text-sm">
                 <span className="text-muted-foreground">Delivers </span>
                 <span className="font-medium">{describe(main)}</span>
-                {main.fulfillable ? (
+                {main.fulfillable && main.combined ? (
+                  <span
+                    className="ml-2 inline-flex items-center gap-1 text-xs text-emerald-500"
+                    title="These exact codes are out, so the same value is made up from other codes in stock"
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5" /> in stock — made up from other codes
+                  </span>
+                ) : main.fulfillable ? (
                   <span className="ml-2 inline-flex items-center gap-1 text-xs text-emerald-500">
                     <CheckCircle2 className="h-3.5 w-3.5" /> in stock
                   </span>
@@ -445,6 +451,18 @@ function ItemRow({
               No rule set — an order for this would fail.
             </p>
           )}
+
+          {/* The selling price lives apart from the delivery rule on purpose:
+              it is what the customer is charged and has no say in which codes
+              go out. Shown next to the pack name it read as part of the rule,
+              and was treated as the value to deliver. */}
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3 text-sm">
+            <span className="text-muted-foreground">Selling price</span>
+            <PriceEditor item={item} onSaved={onPriceSaved} />
+            <span className="text-xs text-muted-foreground">
+              charged to the customer · does not change the codes delivered
+            </span>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -538,21 +556,24 @@ function ItemRow({
   );
 }
 
-/** "$10 × 1 + $20 × 1" */
+/** "$20 + $25 ($45)" — the codes, and the value they add up to. */
 function describe(rule: any): string {
   if (!rule.items?.length) return 'nothing';
-  return rule.items
-    .map((item: any) => {
-      const value = formatPrice(item.denomination?.faceValue ?? 0, item.denomination?.currency);
-      return item.quantity > 1 ? `${value} × ${item.quantity}` : value;
-    })
-    .join(' + ');
+  const lines = rule.items.map((item: any) => {
+    const value = formatPrice(item.denomination?.faceValue ?? 0, item.denomination?.currency);
+    return item.quantity > 1 ? `${value} × ${item.quantity}` : value;
+  });
+  const several = rule.items.length > 1 || rule.items[0].quantity > 1;
+  return several && rule.totalValue != null
+    ? `${lines.join(' + ')} (${formatPrice(rule.totalValue, rule.items[0].denomination?.currency)})`
+    : lines.join(' + ');
 }
 
 /**
- * Build a rule by picking how many of each code value to hand over. The running
- * total is checked against the item's price, because the backend requires them
- * to match and a mismatch is the usual reason saving fails.
+ * Build a rule by picking how many of each code value to hand over. The value
+ * of those codes is what every order for the pack delivers — made up from other
+ * codes when these exact ones are out. The selling price is separate and only
+ * decides what the customer is charged.
  */
 function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void; onSaved: () => void }) {
   const existing = item.rules.find((rule: any) => rule.active) || item.rules[0];
@@ -574,14 +595,12 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
   }, [existing?.id, item.variant.id, item.variant.name]);
 
   const price = Number(item.variant.customerPrice);
+  const codeCurrency = item.denominations[0]?.currency || 'USD';
   const chosen = item.denominations
     .map((denomination: any) => ({ denomination, quantity: quantities[denomination.id] || 0 }))
     .filter((line: any) => line.quantity > 0);
   const totalValue = chosen.reduce(
     (sum: number, line: any) => sum + Number(line.denomination.faceValue) * line.quantity, 0);
-  // Kept only to describe the rule, never to block saving it.
-  const matches = Math.abs(totalValue - price) < 0.005;
-
   const renamed = name.trim() && name.trim() !== item.variant.name;
 
   const save = useMutation({
@@ -654,12 +673,9 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
         </div>
 
         <p className="text-sm text-muted-foreground">
-          Choose which codes to hand over when someone buys this. They do not have to add up to the
-          price — a subscription is priced independently of the cards behind it. The merchant is
-          charged the price of{' '}
-          <span className="font-medium text-foreground">
-            {formatPrice(price, item.variant.currency)}
-          </span>, whatever codes go out.
+          Choose which codes to hand over when someone buys this. Their total is the value every
+          order for this pack delivers. If these exact codes run out, the same value is made up from
+          other codes in stock — $20 + $25 can go out as $25 + $10 + $10.
         </p>
 
         {item.denominations.length === 0 ? (
@@ -717,13 +733,19 @@ function RuleEditor({ item, onClose, onSaved }: { item: any; onClose: () => void
             <span className="font-medium">{chosen.length ? describeLines(chosen) : 'nothing yet'}</span>
           </div>
           <div className="mt-1 flex items-center justify-between">
-            <span className="text-muted-foreground">Merchant charged</span>
+            <span className="text-muted-foreground">Value of codes delivered</span>
+            <span className="font-semibold">{formatPrice(totalValue, codeCurrency)}</span>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border p-3 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Selling price (charged to the customer)</span>
             <span className="font-semibold">{formatPrice(price, item.variant.currency)}</span>
           </div>
-          <div className="mt-1 flex items-center justify-between">
-            <span className="text-muted-foreground">Value of codes sent</span>
-            <span>{formatPrice(totalValue, item.variant.currency)}</span>
-          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Set separately on the pack row. It never changes which codes are delivered.
+          </p>
         </div>
 
         {newSku && (
@@ -784,16 +806,15 @@ function describeLines(chosen: { denomination: any; quantity: number }[]): strin
 }
 
 /**
- * The price of one item, editable in place.
+ * The selling price of one item, editable in place.
  *
  * The seed gave every region the same US dollar price, so a Saudi item read
  * "$9.99" when it should be priced in riyals. The currency defaults to the
  * region's own, and both the amount and the currency are editable, because only
  * the operator knows what an item actually sells for locally.
  *
- * A rule's codes must add up to this price, so changing it can leave an existing
- * rule mismatched — that shows up as a warning in the rule editor rather than
- * being silently corrected, since which side is wrong is the operator's call.
+ * This is what the customer is charged and nothing more: the codes delivered
+ * come from the pack's rule, whatever this price is.
  */
 function PriceEditor({ item, onSaved }: { item: any; onSaved: () => void }) {
   const regionCurrency = item.region?.currency || item.variant.currency || 'USD';

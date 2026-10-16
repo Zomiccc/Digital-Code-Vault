@@ -123,3 +123,39 @@ test('an order matching one code exactly is never broken into smaller ones', () 
   const result = engine.findBestCombination(stock([250, 4], [50, 20]), 250);
   assert.equal(describe(result), '250x1');
 });
+
+// A pack's delivery rule names the value handed over. These are the two packs
+// from the report: the rule's own codes were out, so nothing should have been
+// "not enough stock", and the value sent must be the rule's — never the price.
+function rule(...lines: [denominationId: string, faceValue: number, quantity: number][]) {
+  return lines.map(([denominationId, faceValue, quantity]) => ({ denominationId, faceValue, quantity }));
+}
+
+test('a rule whose own codes are in stock sends exactly those codes', () => {
+  const shelf = stock([25, 3], [20, 2], [10, 5]);
+  const plan = engine.planPresetDelivery(shelf, rule(['d0', 25, 1], ['d1', 20, 1]));
+  assert.equal(plan?.combined, false);
+  assert.equal(describe(plan!.combination), '20x1 + 25x1');
+});
+
+test('3m PS Extra ($20 + $25) with no $20 left still delivers $45, not the $42 price', () => {
+  // Shelf from the report: one $25, a few $10s, some $1s, no $20.
+  const shelf = stock([25, 1], [20, 0], [10, 6], [1, 10]);
+  const plan = engine.planPresetDelivery(shelf, rule(['d0', 25, 1], ['d1', 20, 1]));
+  assert.equal(plan?.combined, true);
+  assert.equal(plan?.value, 45);
+  assert.equal(totalCents(plan!.combination), 4500);
+  assert.equal(describe(plan!.combination), '10x2 + 25x1');
+});
+
+test('12m PS Essential ($80) with no $80 code is made up from $25, $10s and $1s', () => {
+  const shelf = stock([80, 0], [25, 1], [10, 5], [1, 10]);
+  const plan = engine.planPresetDelivery(shelf, rule(['d0', 80, 1]));
+  assert.equal(totalCents(plan!.combination), 8000);
+  assert.equal(describe(plan!.combination), '10x5 + 1x5 + 25x1');
+});
+
+test('a rule the shelf cannot reach is refused rather than shrunk to what is there', () => {
+  const shelf = stock([25, 1], [10, 1]);
+  assert.equal(engine.planPresetDelivery(shelf, rule(['x', 80, 1])), null);
+});

@@ -63,6 +63,57 @@ export class AllocationEngineService {
     return this.fewestCodesForTarget(stock, values, target);
   }
 
+  /**
+   * Which codes a pack's delivery rule actually sends, given what is in stock.
+   *
+   * A rule names the value to hand over — "3m PS Extra sends $20 + $25", so $45.
+   * The exact codes it lists are used when they are on the shelf. When they are
+   * not, the same $45 is made up from whatever is there ($25 + $10 + $10, or
+   * $10 × 4 + $5 …), fewest codes first. The value delivered is always the
+   * rule's value, never the pack's selling price: delivering codes worth the
+   * $42 the customer paid instead of the $45 the rule promises is exactly the
+   * bug this replaced.
+   *
+   * Returns null only when no combination of the codes in stock reaches the
+   * rule's value exactly.
+   */
+  planPresetDelivery(
+    stock: DenominationStock[],
+    items: { denominationId: string; faceValue: number; quantity: number }[],
+  ): {
+    combination: { denominationId: string; faceValue: number; count: number }[];
+    value: number;
+    combined: boolean;
+  } | null {
+    const lines = items.filter((item) => item.quantity > 0);
+    if (lines.length === 0) return null;
+
+    const valueCents = lines.reduce(
+      (sum, item) => sum + AllocationEngineService.toCents(item.faceValue) * item.quantity,
+      0,
+    );
+    const value = valueCents / 100;
+
+    const exact = lines.every((item) => {
+      const entry = stock.find((s) => s.denominationId === item.denominationId);
+      return (entry?.availableCount ?? 0) >= item.quantity;
+    });
+    if (exact) {
+      return {
+        combination: lines.map((item) => ({
+          denominationId: item.denominationId,
+          faceValue: item.faceValue,
+          count: item.quantity,
+        })),
+        value,
+        combined: false,
+      };
+    }
+
+    const combination = this.findBestCombination(stock, value);
+    return combination ? { combination, value, combined: true } : null;
+  }
+
   private static toCents(amount: number): number {
     return Math.round(amount * 100);
   }

@@ -16,7 +16,18 @@ export function FulfillmentPage() {
     productId: '', variantId: '', amount: '', chargeAmount: '',
     chargeCurrency: 'USD', customerEmail: '', customerName: '',
   });
-  const amount = Number(orderForm.amount);
+  // A pack delivers what its delivery rule says, whatever it sells for. Its
+  // selling price used to be copied into the order value, so a $42 pack whose
+  // rule sends $20 + $25 went out as $42 of codes. The price now only fills in
+  // the charge below; the value delivered comes from the rule.
+  const { data: packRules, isLoading: loadingPackRules } = useQuery({
+    queryKey: ['variant-rules', orderForm.variantId],
+    queryFn: () => api.listCombinations(orderForm.variantId),
+    enabled: showCreate && !!orderForm.variantId,
+  });
+  const packRule = ((packRules as any[]) || []).find((rule: any) => rule.active);
+  const packValue = packRule ? Number(packRule.totalValue) : NaN;
+  const amount = orderForm.variantId ? packValue : Number(orderForm.amount);
   // What to charge is entered; the discount is worked out from it, so the two
   // can never disagree and the admin types the number they actually care about.
   // Whatever the admin types is what gets charged and recorded. Blank means
@@ -56,7 +67,7 @@ export function FulfillmentPage() {
   const createOrderMutation = useMutation({
     mutationFn: () => api.createManualOrder({
       productId: orderForm.productId,
-      amount: parseFloat(orderForm.amount),
+      amount,
       chargeAmount: orderForm.chargeAmount === '' ? undefined : charge,
       chargeCurrency: orderForm.chargeCurrency,
       variantId: orderForm.variantId || undefined,
@@ -157,7 +168,16 @@ export function FulfillmentPage() {
               value={orderForm.variantId}
               onChange={(e) => {
                 const v = selectedProductVariants.find((x: any) => x.id === e.target.value);
-                setOrderForm({ ...orderForm, variantId: e.target.value, amount: v ? String(Number(v.customerPrice)) : orderForm.amount });
+                // The selling price fills in the charge, in the pack's own
+                // currency — never the value of codes to deliver.
+                const priceCurrency = v?.currency === 'PKR' ? 'PKR' : 'USD';
+                setOrderForm({
+                  ...orderForm,
+                  variantId: e.target.value,
+                  amount: '',
+                  chargeAmount: v ? String(Number(v.customerPrice)) : '',
+                  chargeCurrency: v ? priceCurrency : orderForm.chargeCurrency,
+                });
               }}
               options={[
                 { value: '', label: '— None (amount-based) —' },
@@ -213,13 +233,47 @@ export function FulfillmentPage() {
           {/* Any amount is allowed, not only the values above: allocation adds up
               available codes to reach it. Only the chips were obvious before, so
               a one-off order for an unlisted amount looked impossible. */}
-          <Input
-            label={`Order value — any amount (${orderValueCurrency})`}
-            type="number" min="0.01" step="0.01"
-            value={orderForm.amount}
-            onChange={(e) => setOrderForm({ ...orderForm, amount: e.target.value })}
-            placeholder="e.g. 37.50"
-          />
+          {orderForm.variantId ? (
+            <div className="rounded-lg border border-border p-3 text-sm">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Delivers (from the pack's delivery rule)
+              </p>
+              {loadingPackRules ? (
+                <p className="mt-1 text-muted-foreground">Loading...</p>
+              ) : packRule ? (
+                <>
+                  <p className="mt-1 font-medium">
+                    {packRule.items
+                      .map((line: any) => {
+                        const value = formatPrice(line.denomination?.faceValue ?? 0, line.denomination?.currency);
+                        return line.quantity > 1 ? `${value} × ${line.quantity}` : value;
+                      })
+                      .join(' + ')}
+                    {' '}= {formatPrice(packValue, orderValueCurrency)} of codes
+                  </p>
+                  <p className={`mt-1 text-xs ${packRule.fulfillable ? 'text-muted-foreground' : 'text-amber-500'}`}>
+                    {!packRule.fulfillable
+                      ? `Not enough stock to make up ${formatPrice(packValue, orderValueCurrency)} — the order will be refused.`
+                      : packRule.combined
+                        ? `Those exact codes are out, so ${formatPrice(packValue, orderValueCurrency)} will be made up from other codes in stock.`
+                        : 'These codes are in stock.'}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-1 text-amber-500">
+                  This pack has no delivery rule. Set one under Delivery Rules first.
+                </p>
+              )}
+            </div>
+          ) : (
+            <Input
+              label={`Order value — any amount (${orderValueCurrency})`}
+              type="number" min="0.01" step="0.01"
+              value={orderForm.amount}
+              onChange={(e) => setOrderForm({ ...orderForm, amount: e.target.value })}
+              placeholder="e.g. 37.50"
+            />
+          )}
           {validAmount && !orderForm.variantId && selectedProductDenominations.length > 0 && (
             beyondStock ? (
               <p className="text-xs text-amber-500">
@@ -234,7 +288,13 @@ export function FulfillmentPage() {
               </p>
             )
           )}
-          <div className="space-y-2">
+          <div className="space-y-2 border-t border-border pt-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Selling price — what the customer is charged
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Separate from the codes above: changing it never changes what is delivered.
+            </p>
             <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
               Charge in
             </label>

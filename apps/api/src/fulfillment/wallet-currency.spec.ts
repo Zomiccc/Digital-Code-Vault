@@ -5,6 +5,7 @@ import 'reflect-metadata';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { FulfillmentService } from './fulfillment.service';
+import { AllocationEngineService } from './allocation-engine.service';
 
 function fixture(options: {
   walletCurrency: string;
@@ -83,6 +84,8 @@ function fixture(options: {
   };
   const engine: any = {
     getAvailableStock: async () => stock,
+    // The real rule planner, over this stub's stock and search.
+    planPresetDelivery: AllocationEngineService.prototype.planPresetDelivery,
     findBestCombination: (_stock: any, amount: number) => amount === 100
       ? [{ denominationId: 'denom100', faceValue: 100, count: 1 }] : null,
     reserveCodes: async (_tx: any, _id: any, combination: any) => combination.map(() => ({

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CurrencyService, localPrice } from '../currency/currency.service';
+import { AllocationEngineService, DenominationStock } from '../fulfillment/allocation-engine.service';
 
 function slugify(text: string): string {
   return text.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -15,6 +16,7 @@ export class CatalogService {
     private prisma: PrismaService,
     private auditService: AuditService,
     private currencyService: CurrencyService,
+    private allocationEngine: AllocationEngineService,
   ) {}
 
   // ─── Brands (top of hierarchy: BRAND → CATEGORY → PRODUCT → VARIANT) ───
@@ -779,11 +781,20 @@ export class CatalogService {
       orderBy: { priority: 'asc' },
     });
 
-    // Enrich with inventory availability
+    // Enrich with inventory availability. Stock is read once per product, since
+    // every pack of a product draws on the same codes.
+    const stockCache = new Map<string, Promise<DenominationStock[]>>();
     const enriched = await Promise.all(combos.map(async (c) => {
-      const fulfillable = await this.isCombinationFulfillable(c);
+      const plan = await this.planCombination(c, stockCache);
       const totalValue = c.items.reduce((sum, item) => sum + Number(item.denomination.faceValue) * item.quantity, 0);
-      return { ...c, fulfillable, totalValue };
+      return {
+        ...c,
+        fulfillable: !!plan,
+        // True when the rule's own codes are out but its value can still be
+        // made up from other codes in stock.
+        combined: !!plan?.combined,
+        totalValue,
+      };
     }));
 
     return enriched;
@@ -881,37 +892,76 @@ export class CatalogService {
   async getCombinationAvailability(id: string) {
     const combo = await this.prisma.fulfillmentCombination.findUnique({
       where: { id },
-      include: { items: { include: { denomination: true } } },
+      include: {
+        items: { include: { denomination: true } },
+        variant: { include: { productRegion: true } },
+      },
     });
     if (!combo) throw new NotFoundException('Combination not found');
 
-    const availability = await Promise.all(combo.items.map(async (item) => {
-      const availableCount = await this.prisma.codeItem.count({
-        where: { denominationId: item.denominationId, status: 'AVAILABLE' },
-      });
+    const productId = combo.variant.productRegion.productId;
+    const stock = await this.vaultStock(productId);
+    const availability = combo.items.map((item) => {
+      const available = stock.find((s) => s.denominationId === item.denominationId)?.availableCount ?? 0;
       return {
         denominationId: item.denominationId,
         faceValue: Number(item.denomination.faceValue),
         required: item.quantity,
-        available: availableCount,
-        sufficient: availableCount >= item.quantity,
+        available,
+        sufficient: available >= item.quantity,
       };
-    }));
+    });
 
-    const fulfillable = availability.every((a) => a.sufficient);
+    const plan = await this.planCombination(combo);
     const totalValue = combo.items.reduce((sum, item) => sum + Number(item.denomination.faceValue) * item.quantity, 0);
 
-    return { combinationId: id, name: combo.name, active: combo.active, priority: combo.priority, items: availability, fulfillable, totalValue };
+    return {
+      combinationId: id, name: combo.name, active: combo.active, priority: combo.priority,
+      items: availability,
+      fulfillable: !!plan,
+      combined: !!plan?.combined,
+      // What would actually go out right now: the rule's own codes, or the
+      // codes its value is made up from when those are out.
+      wouldDeliver: plan?.combination ?? null,
+      totalValue,
+    };
   }
 
-  async isCombinationFulfillable(combo: any): Promise<boolean> {
-    for (const item of combo.items) {
-      const availableCount = await this.prisma.codeItem.count({
-        where: { denominationId: item.denominationId, status: 'AVAILABLE' },
-      });
-      if (availableCount < item.quantity) return false;
+  /**
+   * The codes an order for this rule could be filled from: the platform's own
+   * vault, or every owner's codes when the vault holds none — the same pool an
+   * AUTO storefront order falls back to.
+   */
+  private async vaultStock(productId: string): Promise<DenominationStock[]> {
+    const own = await this.allocationEngine.getAvailableStock(this.prisma, productId, null);
+    if (own.some((s) => s.availableCount > 0)) return own;
+    return this.allocationEngine.getAvailableStock(this.prisma, productId, '__ALL__');
+  }
+
+  /**
+   * Whether, and how, a rule can be delivered from stock right now. A rule is
+   * deliverable when its own codes are in stock or when its value can be made
+   * up from other codes — the same decision fulfillment makes.
+   */
+  private async planCombination(
+    combo: { items: { denominationId: string; quantity: number; denomination: { faceValue: any; productId: string } }[] },
+    stockCache?: Map<string, Promise<DenominationStock[]>>,
+  ) {
+    const productId = combo.items[0]?.denomination.productId;
+    if (!productId) return null;
+    let stock = stockCache?.get(productId);
+    if (!stock) {
+      stock = this.vaultStock(productId);
+      stockCache?.set(productId, stock);
     }
-    return true;
+    return this.allocationEngine.planPresetDelivery(
+      await stock,
+      combo.items.map((item) => ({
+        denominationId: item.denominationId,
+        faceValue: Number(item.denomination.faceValue),
+        quantity: item.quantity,
+      })),
+    );
   }
 
   // ─── Catalog Hierarchy Query ───
@@ -1023,16 +1073,12 @@ export class CatalogService {
     // Count fulfillable combinations
     const allCombos = await this.prisma.fulfillmentCombination.findMany({
       where: { active: true },
-      include: { items: true },
+      include: { items: { include: { denomination: true } } },
     });
+    const stockCache = new Map<string, Promise<DenominationStock[]>>();
     let fulfillableCount = 0;
     for (const c of allCombos) {
-      let ok = true;
-      for (const item of c.items) {
-        const cnt = await this.prisma.codeItem.count({ where: { denominationId: item.denominationId, status: 'AVAILABLE' } });
-        if (cnt < item.quantity) { ok = false; break; }
-      }
-      if (ok) fulfillableCount++;
+      if (await this.planCombination(c, stockCache)) fulfillableCount++;
     }
 
     return {

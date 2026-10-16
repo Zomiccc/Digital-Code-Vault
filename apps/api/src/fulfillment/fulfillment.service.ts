@@ -322,9 +322,15 @@ export class FulfillmentService {
     this.logger.log(`[Fulfillment] Product "${product.name}", amount: ${amount}`);
 
     // ─── Variant preset bundles (highest priority) ───
-    // If the order targets a specific variant (e.g. "PS Essential 1 Month"), use the
-    // admin-configured FulfillmentCombination presets for that variant — tried in
-    // priority order, each verified against AVAILABLE stock before committing.
+    // If the order targets a specific variant (e.g. "PS Essential 1 Month"), its
+    // delivery rule decides the value handed over — tried in priority order. The
+    // rule's own codes are used when they are in stock; otherwise the rule's
+    // value is made up from whatever codes are. The pack's selling price never
+    // decides what is delivered: falling through to the amount-based search
+    // below with that price is what sent $42 of codes for a pack whose rule
+    // says $20 + $25.
+    let presetValueRefused: number | null = null;
+    let presetCurrency = orderCurrency;
     if (variantId) {
       const presetCombos = await this.prisma.fulfillmentCombination.findMany({
         where: { variantId, active: true },
@@ -333,39 +339,73 @@ export class FulfillmentService {
       });
 
       for (const combo of presetCombos) {
-        let allSufficient = combo.items.length > 0;
-        const items: { denominationId: string; faceValue: number; count: number }[] = [];
-
-        for (const item of combo.items) {
-          const stockEntry = activeStock.find((s) => s.denominationId === item.denominationId);
-          const availableCount = stockEntry ? stockEntry.availableCount : 0;
-          if (availableCount < item.quantity) {
-            allSufficient = false;
-            this.logger.warn(
-              `[Fulfillment] Variant preset "${combo.name}" — denomination $${item.denomination.faceValue} needs ${item.quantity}, has ${availableCount} available.`,
-            );
-            break;
-          }
-          items.push({
+        const plan = this.allocationEngine.planPresetDelivery(
+          activeStock,
+          combo.items.map((item) => ({
             denominationId: item.denominationId,
             faceValue: Number(item.denomination.faceValue),
-            count: item.quantity,
-          });
-        }
-
-        if (allSufficient) {
-          combination = items;
+            quantity: item.quantity,
+          })),
+        );
+        if (plan) {
+          combination = plan.combination;
           usedVariantPreset = true;
           this.logger.log(
-            `[Fulfillment] Variant preset "${combo.name}" ready: ${items.map((i) => `$${i.faceValue} x${i.count}`).join(' + ')}`,
+            `[Fulfillment] Variant preset "${combo.name}" ${plan.combined ? `made up from other codes to ${plan.value}` : 'ready'}: ` +
+            plan.combination.map((i) => `${i.faceValue} x${i.count}`).join(' + '),
           );
           break;
         }
+        if (presetValueRefused === null) {
+          presetValueRefused = combo.items.reduce(
+            (sum, item) => sum + Number(item.denomination.faceValue) * item.quantity, 0,
+          );
+          presetCurrency = normaliseCurrency(combo.items[0]?.denomination.currency || orderCurrency);
+        }
+        this.logger.warn(`[Fulfillment] Variant preset "${combo.name}" cannot be made up from the codes in stock.`);
       }
+    }
 
-      if (!combination && presetCombos.length > 0) {
-        this.logger.warn(`[Fulfillment] ${presetCombos.length} preset(s) exist for variant ${variantId} but none are fulfillable right now.`);
-      }
+    // A pack with a rule that the stock cannot meet is refused outright rather
+    // than delivered by its selling price.
+    if (!combination && presetValueRefused !== null) {
+      const failedReq = await this.prisma.fulfillmentRequest.create({
+        data: {
+          merchantId,
+          productId,
+          amount,
+          currency,
+          idempotencyKey,
+          referenceId,
+          status: 'FAILED',
+          failureReason: `Delivery rule value ${presetValueRefused} cannot be made up from the codes in stock`,
+          sandbox: sandbox || false,
+        },
+      });
+
+      await this.auditService.log({
+        actorType: actorType || 'SYSTEM',
+        actorId: actorId || merchantId,
+        action: 'fulfillment.failed',
+        entity: 'FulfillmentRequest',
+        entityId: failedReq.id,
+        metadata: { reason: 'INSUFFICIENT_STOCK', productId, variantId, ruleValue: presetValueRefused },
+        ip,
+      });
+
+      this.webhookService.queueWebhookEvent(merchantId, 'fulfillment.failed', {
+        fulfillment_id: failedReq.id,
+        reference_id: referenceId,
+        reason: 'INSUFFICIENT_STOCK',
+      }).catch(() => {});
+
+      throw new BadRequestException({
+        error: 'INSUFFICIENT_STOCK',
+        code: 'INSUFFICIENT_STOCK',
+        message:
+          `This pack delivers ${formatMoney(presetValueRefused, presetCurrency)} of codes, which cannot be made up ` +
+          `from the codes in stock. Available: ${describeStock()}. Upload more codes for this product.`,
+      });
     }
 
     // Amount-based allocation: find codes that add up to exactly what was asked.

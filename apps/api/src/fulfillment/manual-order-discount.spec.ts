@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { manualOrderPricing } from './manual-order-pricing';
 import { FulfillmentService } from './fulfillment.service';
+import { AllocationEngineService } from './allocation-engine.service';
 import { AdminController } from '../admin/admin.controller';
 import { AdminService } from '../admin/admin.service';
 
@@ -75,6 +76,8 @@ function fixture() {
   // No merchant wallet mutation mocks: an accidental merchant debit/refund fails.
   const engine: any = {
     getAvailableStock: async () => [{ denominationId: 'denom50', faceValue: 50, availableCount: 4 }],
+    // The real rule planner, over this stub's stock and search.
+    planPresetDelivery: AllocationEngineService.prototype.planPresetDelivery,
     findBestCombination: (_stock: any, amount: number) => amount === 100
       ? [{ denominationId: 'denom50', faceValue: 50, count: 2 }] : null,
     reserveCodes: async (_tx: any, _id: any, combination: any) => {
