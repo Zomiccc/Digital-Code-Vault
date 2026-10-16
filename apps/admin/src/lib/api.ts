@@ -58,43 +58,81 @@ export async function apiFetch<T = any>(
 
   if (res.status === 401) {
     const isAuthEndpoint = path.includes('/auth/');
-    const refresh = localStorage.getItem('vault_refresh_token');
-    if (refresh && !isAuthEndpoint) {
-      try {
-        const refreshEndpoint = role === 'admin' ? '/auth/admin/refresh' : role === 'merchant' ? '/auth/merchant/refresh' : '/auth/customer/refresh';
-        const refreshRes = await fetch(`${API_BASE}${refreshEndpoint}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refresh_token: refresh }),
-        });
-        if (refreshRes.ok) {
-          const tokens = await refreshRes.json();
-          setTokens(tokens.access_token, tokens.refresh_token, role);
-          headers['Authorization'] = `Bearer ${tokens.access_token}`;
-          const retryRes = await fetch(`${API_BASE}${path}`, { ...options, headers });
-          if (!retryRes.ok) throw new Error(`API error: ${retryRes.status}`);
-          return retryRes.json();
-        }
-      } catch {
-        // fall through
-      }
-    }
     if (isAuthEndpoint) {
       const err = await res.json().catch(() => ({ message: 'Invalid credentials' }));
       throw new Error(err.message || 'Invalid credentials');
     }
+
+    const accessToken = await refreshAccessToken(role);
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+      const retryRes = await fetch(`${API_BASE}${path}`, { ...options, headers });
+      // Only a refused session signs the user out. Anything else — a 500
+      // from a busy database, a 404 — is an error on this one request: it
+      // used to clear the session too, which is how an admin got thrown back
+      // to the login page by a single slow dashboard query.
+      if (retryRes.status !== 401) return readResponse<T>(retryRes);
+    }
+
     clearTokens();
     window.location.href = '/login';
     throw new Error('Unauthorized');
   }
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
-    const message = err.message || err.error || `API error: ${res.status}`;
-    throw new Error(message);
+  return readResponse<T>(res);
+}
+
+/**
+ * One refresh for every request that found its token expired.
+ *
+ * A page fires several requests at once, and when the access token lapses all
+ * of them get a 401 together. Each one refreshing on its own sent a burst of
+ * identical refresh calls; they now share the first.
+ */
+let refreshInFlight: Promise<string | null> | null = null;
+
+function refreshAccessToken(role: 'admin' | 'merchant' | 'customer'): Promise<string | null> {
+  const refresh = localStorage.getItem('vault_refresh_token');
+  if (!refresh) return Promise.resolve(null);
+  if (!refreshInFlight) {
+    const endpoint = role === 'admin' ? '/auth/admin/refresh' : role === 'merchant' ? '/auth/merchant/refresh' : '/auth/customer/refresh';
+    refreshInFlight = (async () => {
+      try {
+        const res = await fetch(`${API_BASE}${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refresh }),
+        });
+        if (!res.ok) return null;
+        const tokens = await res.json();
+        setTokens(tokens.access_token, tokens.refresh_token, role);
+        return tokens.access_token as string;
+      } catch {
+        return null;
+      } finally {
+        // Cleared after the current wave of requests has picked it up.
+        setTimeout(() => { refreshInFlight = null; }, 0);
+      }
+    })();
+  }
+  return refreshInFlight;
+}
+
+async function readResponse<T>(res: Response): Promise<T> {
+  if (res.ok) return res.json();
+
+  // The host's bot protection answers with its own HTML page rather than the
+  // API's JSON, which surfaced as a bare "HTTP 403" with nothing to act on.
+  const isHtml = (res.headers.get('content-type') || '').includes('text/html');
+  if (isHtml && (res.status === 403 || res.status === 503)) {
+    throw new Error(
+      "The hosting provider's security check blocked this request. Reload the page, wait a few seconds, and try again.",
+    );
   }
 
-  return res.json();
+  const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+  const message = err.message || err.error || `API error: ${res.status}`;
+  throw new Error(message);
 }
 
 export const api = {
@@ -367,6 +405,8 @@ export const api = {
   // Admin merchant applications
   listMerchantApplications: (status?: string) =>
     apiFetch(`/admin/merchant-applications${status ? `?status=${status}` : ''}`),
+  getMerchantApplicationDocuments: (id: string) =>
+    apiFetch(`/admin/merchant-applications/${id}/documents`),
   approveMerchantApplication: (id: string) =>
     apiFetch(`/admin/merchant-applications/${id}/approve`, { method: 'POST' }),
   rejectMerchantApplication: (id: string, note?: string) =>
