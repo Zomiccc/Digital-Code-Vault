@@ -81,7 +81,9 @@ export class DeliveryController {
           nonce,
           status === 404
             ? "This delivery link or its codes could not be found."
-            : "We couldn’t retrieve your delivery right now. Please try your original link again.",
+            : status === 410
+              ? "This order was cancelled, so its codes are no longer available. Please contact the seller."
+              : "We couldn’t retrieve your delivery right now. Please try your original link again.",
         ),
       );
   }

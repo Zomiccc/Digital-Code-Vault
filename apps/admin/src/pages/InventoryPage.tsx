@@ -513,7 +513,14 @@ function CodesInBatch({
                     <div className="flex justify-end gap-1">
                       <Button
                         variant="ghost" size="sm" title="Reveal code"
-                        onClick={() => { setRevealItem(item); setRevealedCode(''); revealMutation.mutate(item.id); }}
+                        onClick={() => {
+                          setRevealItem(item);
+                          setRevealedCode('');
+                          // A code still on sale is spent by revealing it, so
+                          // that one waits for a confirmation in the modal. An
+                          // already-spent code is just shown again.
+                          if (item.status !== 'AVAILABLE') revealMutation.mutate(item.id);
+                        }}
                       >
                         <Eye className="h-4 w-4" />
                       </Button>
@@ -549,6 +556,7 @@ function CodesInBatch({
         revealItem={revealItem}
         revealedCode={revealedCode}
         isPending={revealMutation.isPending}
+        onConfirm={() => revealMutation.mutate(revealItem.id)}
         copied={copied}
         onCopy={() => { navigator.clipboard.writeText(revealedCode); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
         onClose={() => { setRevealItem(null); setRevealedCode(''); }}
@@ -582,14 +590,29 @@ function Pagination({ page, total, onChange }: { page: number; total: number; on
 }
 
 function RevealModal({
-  revealItem, revealedCode, isPending, copied, onCopy, onClose,
+  revealItem, revealedCode, isPending, onConfirm, copied, onCopy, onClose,
 }: {
-  revealItem: any; revealedCode: string; isPending: boolean; copied: boolean;
-  onCopy: () => void; onClose: () => void;
+  revealItem: any; revealedCode: string; isPending: boolean; onConfirm: () => void;
+  copied: boolean; onCopy: () => void; onClose: () => void;
 }) {
+  // Revealing a code that is still for sale takes it out of stock for good: a
+  // code someone has seen can no longer be sold safely. That happened on a
+  // single click of the eye icon, so looking at a code quietly lost it.
+  const needsConfirm = revealItem?.status === 'AVAILABLE' && !revealedCode && !isPending;
   return (
     <Modal open={!!revealItem} onClose={onClose} title="Reveal code">
-      {isPending ? (
+      {needsConfirm ? (
+        <div className="space-y-4">
+          <p className="text-sm">
+            This code is still in stock. Revealing it marks it as used and takes it out of stock —
+            it will not be sold to anyone afterwards.
+          </p>
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={onClose}>Cancel</Button>
+            <Button className="flex-1" onClick={onConfirm}>Reveal and remove from stock</Button>
+          </div>
+        </div>
+      ) : isPending ? (
         <div className="flex flex-col items-center gap-3 py-8 text-muted-foreground">
           <RefreshCw className="h-8 w-8 animate-spin text-primary" />
           <p className="text-sm">Revealing your code...</p>

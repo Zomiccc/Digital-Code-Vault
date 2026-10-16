@@ -90,22 +90,7 @@ export function MerchantApplicationsPage() {
                         <p><span className="text-muted-foreground">ID Type:</span> {app.idDocType || '—'}</p>
                         <p><span className="text-muted-foreground">Business NTN:</span> {app.businessNtn || '—'}</p>
                       </div>
-                      {(app.idFrontImage || app.idBackImage) && (
-                        <div className="mt-3 flex flex-wrap gap-3">
-                          {app.idFrontImage && (
-                            <a href={app.idFrontImage} target="_blank" rel="noreferrer" className="group relative">
-                              <img src={app.idFrontImage} alt="ID front" className="h-24 w-36 rounded-lg border border-border object-cover transition-opacity group-hover:opacity-80" />
-                              <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">Front</span>
-                            </a>
-                          )}
-                          {app.idBackImage && (
-                            <a href={app.idBackImage} target="_blank" rel="noreferrer" className="group relative">
-                              <img src={app.idBackImage} alt="ID back" className="h-24 w-36 rounded-lg border border-border object-cover transition-opacity group-hover:opacity-80" />
-                              <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">Back</span>
-                            </a>
-                          )}
-                        </div>
-                      )}
+                      {(app.hasIdFront || app.hasIdBack) && <IdDocuments applicationId={app.id} />}
                     </div>
                   )}
                 </div>
@@ -162,6 +147,41 @@ export function MerchantApplicationsPage() {
           <p className="text-center text-muted-foreground py-8">No applications found</p>
         </Card>
       )}
+    </div>
+  );
+}
+
+/**
+ * The ID photos of one application, fetched when asked for. They are several
+ * megabytes each, so loading every applicant's with the list made "All" hang.
+ */
+function IdDocuments({ applicationId }: { applicationId: string }) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['merchant-application-documents', applicationId],
+    queryFn: () => api.getMerchantApplicationDocuments(applicationId),
+    enabled: open,
+    staleTime: Infinity,
+  });
+
+  if (!open) {
+    return (
+      <Button size="sm" variant="outline" className="mt-3" onClick={() => setOpen(true)}>
+        Show ID documents
+      </Button>
+    );
+  }
+  if (isLoading) return <p className="mt-3 text-xs text-muted-foreground">Loading documents...</p>;
+  if (error) return <p className="mt-3 text-xs text-destructive">{(error as Error).message}</p>;
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-3">
+      {[['Front', data?.idFrontImage], ['Back', data?.idBackImage]].map(([label, src]) => src && (
+        <a key={label} href={src} target="_blank" rel="noreferrer" className="group relative">
+          <img src={src} alt={`ID ${label.toLowerCase()}`} className="h-24 w-36 rounded-lg border border-border object-cover transition-opacity group-hover:opacity-80" />
+          <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white">{label}</span>
+        </a>
+      ))}
     </div>
   );
 }

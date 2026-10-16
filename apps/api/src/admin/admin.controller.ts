@@ -733,6 +733,11 @@ export class AdminController {
     return this.authService.listMerchantApplications(status);
   }
 
+  @Get('merchant-applications/:id/documents')
+  async getMerchantApplicationDocuments(@Param('id') id: string) {
+    return this.authService.getMerchantApplicationDocuments(id);
+  }
+
   @Post('merchant-applications/:id/approve')
   async approveMerchantApplication(@Param('id') id: string, @CurrentUser() user: any, @Req() req: any) {
     return this.authService.approveMerchantApplication(id, user.id, req.ip);

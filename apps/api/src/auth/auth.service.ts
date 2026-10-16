@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ConflictException, Logger } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, NotFoundException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
@@ -491,19 +491,55 @@ export class AuthService {
     };
   }
 
+  /**
+   * Applications without their ID photos.
+   *
+   * Each photo is a base64 data-URL of up to a few megabytes, and the list used
+   * to carry every applicant's photos. "All" then took over a minute, timed
+   * out, and the requests it left hanging tied up the server until the host's
+   * protection started blocking the whole site. The photos load one
+   * application at a time from `getMerchantApplicationDocuments`.
+   */
   async listMerchantApplications(status?: string) {
     const where: any = {};
     if (status) where.status = status;
 
-    return this.prisma.merchantApplication.findMany({
+    const applications = await this.prisma.merchantApplication.findMany({
       where,
-      include: {
-        customer: {
-          select: { id: true, name: true, email: true },
-        },
+      select: {
+        id: true, customerId: true, storeName: true, storeEmail: true, currency: true,
+        firstName: true, lastName: true, phone: true, idDocType: true, businessNtn: true,
+        status: true, adminNote: true, reviewedBy: true, reviewedAt: true, createdAt: true, updatedAt: true,
+        customer: { select: { id: true, name: true, email: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    // Whether photos exist is answered by the database without reading them.
+    const ids = applications.map((application) => application.id);
+    const [withFront, withBack] = ids.length
+      ? await Promise.all([
+          this.prisma.merchantApplication.findMany({ where: { id: { in: ids }, idFrontImage: { not: null } }, select: { id: true } }),
+          this.prisma.merchantApplication.findMany({ where: { id: { in: ids }, idBackImage: { not: null } }, select: { id: true } }),
+        ])
+      : [[], []];
+    const front = new Set(withFront.map((row) => row.id));
+    const back = new Set(withBack.map((row) => row.id));
+
+    return applications.map((application) => ({
+      ...application,
+      hasIdFront: front.has(application.id),
+      hasIdBack: back.has(application.id),
+    }));
+  }
+
+  async getMerchantApplicationDocuments(id: string) {
+    const application = await this.prisma.merchantApplication.findUnique({
+      where: { id },
+      select: { id: true, idFrontImage: true, idBackImage: true },
+    });
+    if (!application) throw new NotFoundException('Application not found');
+    return application;
   }
 
   // ─── API Key Management ───

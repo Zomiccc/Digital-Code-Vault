@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, GoneException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EncryptionService } from '../encryption/encryption.service';
 import { AuditService } from '../audit/audit.service';
@@ -109,8 +109,19 @@ export class DeliveryService {
 
     // No expiry check — the link is permanent
 
-    // Get the allocation
+    // A reversed order has given its codes back to stock, where they can be sold
+    // again. Its link kept working, so opening it afterwards handed over codes
+    // that were on sale — or already sold to someone else — and marked them
+    // delivered a second time.
     const allocation = deliveryToken.fulfillment.allocations[0];
+    if (deliveryToken.fulfillment.status === 'REVERSED' || allocation?.status === 'REVERSED') {
+      throw new GoneException({
+        error: 'ORDER_REVERSED',
+        code: 'ORDER_REVERSED',
+        message: 'This order was cancelled, so its codes are no longer available. Please contact the seller.',
+      });
+    }
+
     if (!allocation) {
       throw new NotFoundException({
         error: 'NO_ALLOCATION',
